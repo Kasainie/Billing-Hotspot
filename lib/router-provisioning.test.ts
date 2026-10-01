@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
-import { addRouterInventoryRecord, buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload } from './router-provisioning.ts'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload } from './router-provisioning.ts'
 
 test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -91,7 +91,7 @@ test('subscriber service networks must be distinct private /24 networks', () => 
   }), /must use different/)
 })
 
-test('provisioning script supports RouterOS 6+ without RouterOS 7 serialization', () => {
+test('provisioning script requires RouterOS 7.1+ and serializes the complete inventory as JSON', () => {
   const script = buildProvisioningScript({
     routerName: 'MikroTik Main',
     radiusServerAddress: '192.0.2.10',
@@ -99,53 +99,17 @@ test('provisioning script supports RouterOS 6+ without RouterOS 7 serialization'
     completeUrl: 'https://billing.example.com/provision/token123/complete',
   })
 
-  assert.match(script, /RouterOS 6\.0 or newer is required/)
-  assert.doesNotMatch(script, /:serialize|\\\\"/)
-  assert.match(script, /\/interface ethernet find/)
+  assert.match(script, /RouterOS 7\.1 or newer is required/)
+  assert.match(script, /:serialize to=json value=\$routerInventory/)
+  assert.match(script, /http-method=post http-data=\$inventoryJson http-header-field="content-type:application\/json"/)
+  assert.doesNotMatch(script, /RouterOS 6|complete\/interface|complete\/wan|complete\/bridge/)
+  assert.match(script, /:local routerInterfaces \[\/interface ethernet print as-value\]/)
   for (const fileName of ['certificates.rsc', 'config.rsc', 'hotspot-files.rsc', 'hotspot.rsc']) {
     assert.match(script, new RegExp(`/hotspot/${fileName}.*dst-path=${fileName}`))
     assert.match(script, new RegExp(`/import ${fileName}`))
   }
-  assert.match(script, /\/complete\/interface" http-method=post http-data=\$interfaceName/)
-  assert.match(script, /\/complete\/wan" http-method=post http-data=\$wanInterface/)
-  assert.match(script, /\/complete\/bridge" http-method=post http-data=\$bridgeName/)
-  assert.doesNotMatch(script, /\/file remove|billing-inventory\.tmp|keep-result=no/)
-  assert.doesNotMatch(script, /keep-result=no/)
-  assert.doesNotMatch(script, /\?record=/)
-  assert.doesNotMatch(script, /http-header-field/)
-  assert.doesNotMatch(script, /\$inventoryData|:serialize/)
+  assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete" keep-result=no/)
   assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete"/)
-})
-
-test('RouterOS 6 inventory records are parsed into the wizard inventory shape', async () => {
-  const request = new Request('https://billing.example.com/provision/token123/complete', {
-    method: 'POST',
-    headers: { 'content-type': 'text/plain' },
-    body: 'I|ether1;P|ether2|bridge1;W|ether1;B|bridge1',
-  })
-
-  const inventory = await readRouterInventoryPayload(request)
-  assert.deepEqual(inventory, {
-    interfaces: [{ name: 'ether1', running: 'false', disabled: 'false' }],
-    bridgePorts: [{ interface: 'ether2', bridge: 'bridge1' }],
-    wanInterfaces: ['ether1'],
-    bridges: ['bridge1'],
-  })
-})
-
-test('single RouterOS inventory records merge without duplicates', () => {
-  const first = addRouterInventoryRecord(null, 'interface', 'ether1')
-  const withWan = addRouterInventoryRecord(first, 'wan', 'ether1')
-  const withBridge = addRouterInventoryRecord(withWan, 'bridge', 'bridge1')
-  const duplicate = addRouterInventoryRecord(withBridge, 'interface', 'ether1')
-
-  assert.deepEqual(duplicate, {
-    interfaces: [{ name: 'ether1', running: false, disabled: false }],
-    bridgePorts: [],
-    wanInterfaces: ['ether1'],
-    bridgeName: 'bridge1',
-  })
-  assert.equal(addRouterInventoryRecord(duplicate, 'interface', 'bad/name'), null)
 })
 
 test('raw RouterOS JSON payloads are accepted by the completion endpoint parser', async () => {
