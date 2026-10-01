@@ -17,32 +17,6 @@ function safeJsonParse(raw: string): unknown {
   }
 }
 
-function parseRouterInventoryRecords(raw: string): Record<string, unknown> {
-  const inventory = {
-    interfaces: [] as Array<{ name: string; running: string; disabled: string }>,
-    bridgePorts: [] as Array<{ interface: string; bridge: string }>,
-    wanInterfaces: [] as string[],
-    bridges: [] as string[],
-  }
-
-  for (const record of raw.split(';')) {
-    const [kind, ...fields] = record.split('|')
-    if (kind === 'I' && fields.length === 1) {
-      inventory.interfaces.push({ name: fields[0], running: 'false', disabled: 'false' })
-    } else if (kind === 'I' && fields.length === 3) {
-      inventory.interfaces.push({ name: fields[0], running: fields[1], disabled: fields[2] })
-    } else if (kind === 'P' && fields.length === 2) {
-      inventory.bridgePorts.push({ interface: fields[0], bridge: fields[1] })
-    } else if (kind === 'W' && fields.length === 1) {
-      inventory.wanInterfaces.push(fields[0])
-    } else if (kind === 'B' && fields.length === 1) {
-      inventory.bridges.push(fields[0])
-    }
-  }
-
-  return inventory
-}
-
 export async function readRouterInventoryPayload(request: Request): Promise<Record<string, unknown>> {
   const clone = request.clone()
 
@@ -56,34 +30,7 @@ export async function readRouterInventoryPayload(request: Request): Promise<Reco
   const rawText = await request.text()
   const parsed = safeJsonParse(rawText)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
-  return parseRouterInventoryRecords(rawText)
-}
-
-export function addRouterInventoryRecord(
-  current: {
-    interfaces: Array<{ name: string; running: boolean; disabled: boolean }>
-    bridgePorts: Array<{ interface: string; bridge: string }>
-    wanInterfaces: string[]
-    bridgeName: string | null
-  } | null | undefined,
-  kind: string,
-  rawValue: string,
-) {
-  const value = rawValue.trim()
-  if (!/^[a-zA-Z0-9_.-]{1,48}$/.test(value)) return null
-
-  const inventory = current || { interfaces: [], bridgePorts: [], wanInterfaces: [], bridgeName: null }
-  if (kind === 'interface' && !inventory.interfaces.some((item) => item.name === value)) {
-    inventory.interfaces.push({ name: value, running: false, disabled: false })
-  } else if (kind === 'wan' && !inventory.wanInterfaces.includes(value)) {
-    inventory.wanInterfaces.push(value)
-  } else if (kind === 'bridge') {
-    if (value === 'centripid-bridge' || !inventory.bridgeName) inventory.bridgeName = value
-  } else if (!['interface', 'wan', 'bridge'].includes(kind)) {
-    return null
-  }
-
-  return inventory
+  return {}
 }
 
 export function isValidProvisioningBaseUrl(baseUrl: URL, env: { NODE_ENV?: string } = process.env) {
@@ -123,33 +70,23 @@ export function buildProvisioningScript({
   const configScript = [
     ':local routerOsVersion [/system resource get version]',
     ':local versionDot [:find $routerOsVersion "."]',
-    ':if ([:tonum [:pick $routerOsVersion 0 $versionDot]] < 6) do={:error "RouterOS 6.0 or newer is required"}',
+    ':if ([:tonum [:pick $routerOsVersion 0 $versionDot]] < 7) do={:error "RouterOS 7.1 or newer is required"}',
+    ':if ([:pick $routerOsVersion 0 3] = "7.0") do={:error "RouterOS 7.1 or newer is required"}',
     `/system identity set name="${safeName}"`,
     ...radiusClientCommands,
-    ':foreach interfaceId in=[/interface ethernet find] do={',
-    '  :local interfaceName [/interface ethernet get $interfaceId name]',
-    '  :if ($interfaceName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    `    /tool fetch url="${completeUrl}/interface" http-method=post http-data=$interfaceName`,
-    '  }',
-    '}',
-    ':foreach dhcpClientId in=[/ip dhcp-client find where status="bound"] do={',
-    '  :local wanInterface [/ip dhcp-client get $dhcpClientId interface]',
-    '  :if ($wanInterface ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    `    /tool fetch url="${completeUrl}/wan" http-method=post http-data=$wanInterface`,
-    '  }',
-    '}',
-    ':foreach bridgeId in=[/interface bridge find] do={',
-    '  :local bridgeName [/interface bridge get $bridgeId name]',
-    '  :if ($bridgeName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    `    /tool fetch url="${completeUrl}/bridge" http-method=post http-data=$bridgeName`,
-    '  }',
-    '}',
+    ':local routerInterfaces [/interface ethernet print as-value]',
+    ':local currentBridgePorts [/interface bridge port print as-value]',
+    ':local boundDhcpClients [/ip dhcp-client print as-value where status="bound"]',
+    ':local currentBridges [/interface bridge print as-value]',
+    ':local routerInventory {interfaces=$routerInterfaces;bridgePorts=$currentBridgePorts;wanInterfaces=$boundDhcpClients;bridges=$currentBridges}',
+    ':local inventoryJson [:serialize to=json value=$routerInventory]',
+    `/tool fetch url="${completeUrl}" http-method=post http-data=$inventoryJson http-header-field="content-type:application/json" keep-result=no`,
     ...hotspotBundleFiles.flatMap((fileName) => [
       `/tool fetch url="${baseUrl}/hotspot/${fileName}" dst-path=${fileName} keep-result=yes`,
       ':delay 2s',
       `/import ${fileName}`,
     ]),
-    `/tool fetch url="${completeUrl}"`,
+    `/tool fetch url="${completeUrl}" keep-result=no`,
   ]
 
   return configScript.join('\n')
