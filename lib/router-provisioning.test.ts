@@ -106,11 +106,15 @@ test('provisioning script supports RouterOS 6+ without RouterOS 7 serialization'
     assert.match(script, new RegExp(`/hotspot/${fileName}.*dst-path=${fileName}`))
     assert.match(script, new RegExp(`/import ${fileName}`))
   }
-  assert.match(script, /record=interface" http-method=post http-data=\$interfaceName/)
-  assert.match(script, /record=wan" http-method=post http-data=\$wanInterface/)
-  assert.match(script, /record=bridge" http-method=post http-data=\$bridgeName/)
+  assert.match(script, /\/complete\/interface" http-method=post http-data=\$interfaceName/)
+  assert.match(script, /\/complete\/wan" http-method=post http-data=\$wanInterface/)
+  assert.match(script, /\/complete\/bridge" http-method=post http-data=\$bridgeName/)
+  assert.doesNotMatch(script, /\/file remove|billing-inventory\.tmp|keep-result=no/)
+  assert.doesNotMatch(script, /keep-result=no/)
+  assert.doesNotMatch(script, /\?record=/)
+  assert.doesNotMatch(script, /http-header-field/)
   assert.doesNotMatch(script, /\$inventoryData|:serialize/)
-  assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete" keep-result=no/)
+  assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete"/)
 })
 
 test('RouterOS 6 inventory records are parsed into the wizard inventory shape', async () => {

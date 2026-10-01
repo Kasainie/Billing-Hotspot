@@ -129,19 +129,19 @@ export function buildProvisioningScript({
     ':foreach interfaceId in=[/interface ethernet find] do={',
     '  :local interfaceName [/interface ethernet get $interfaceId name]',
     '  :if ($interfaceName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    `    /tool fetch url="${completeUrl}?record=interface" http-method=post http-data=$interfaceName http-header-field="content-type: text/plain" keep-result=no`,
+    `    /tool fetch url="${completeUrl}/interface" http-method=post http-data=$interfaceName`,
     '  }',
     '}',
     ':foreach dhcpClientId in=[/ip dhcp-client find where status="bound"] do={',
     '  :local wanInterface [/ip dhcp-client get $dhcpClientId interface]',
     '  :if ($wanInterface ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    `    /tool fetch url="${completeUrl}?record=wan" http-method=post http-data=$wanInterface http-header-field="content-type: text/plain" keep-result=no`,
+    `    /tool fetch url="${completeUrl}/wan" http-method=post http-data=$wanInterface`,
     '  }',
     '}',
     ':foreach bridgeId in=[/interface bridge find] do={',
     '  :local bridgeName [/interface bridge get $bridgeId name]',
     '  :if ($bridgeName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    `    /tool fetch url="${completeUrl}?record=bridge" http-method=post http-data=$bridgeName http-header-field="content-type: text/plain" keep-result=no`,
+    `    /tool fetch url="${completeUrl}/bridge" http-method=post http-data=$bridgeName`,
     '  }',
     '}',
     ...hotspotBundleFiles.flatMap((fileName) => [
@@ -149,7 +149,7 @@ export function buildProvisioningScript({
       ':delay 2s',
       `/import ${fileName}`,
     ]),
-    `/tool fetch url="${completeUrl}" keep-result=no`,
+    `/tool fetch url="${completeUrl}"`,
   ]
 
   return configScript.join('\n')

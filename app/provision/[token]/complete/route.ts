@@ -101,7 +101,7 @@ export async function POST(request: NextRequest, context: RouteContext<'/provisi
   const { token } = await context.params
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return new Response('Invalid provisioning token.', { status: 404 })
 
-  const recordKind = request.nextUrl.searchParams.get('record')
+  const recordKind = request.headers.get('x-record') || request.nextUrl.searchParams.get('record')
   if (recordKind) {
     const rawValue = await request.text()
     try {
@@ -121,8 +121,8 @@ export async function POST(request: NextRequest, context: RouteContext<'/provisi
       await db.update(routerProvisioningTokens)
         .set({ routerData })
         .where(eq(routerProvisioningTokens.id, existing.id))
-      return new Response('Router inventory record received.', {
-        status: 200,
+      return new Response(null, {
+        status: 204,
         headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
       })
     } catch {
@@ -187,8 +187,8 @@ export async function GET(_request: NextRequest, context: RouteContext<'/provisi
       .returning({ id: routerProvisioningTokens.id })
 
     if (!record) return new Response('Provisioning token not found or expired.', { status: 404 })
-    return new Response('Provisioning applied.', {
-      status: 200,
+    return new Response(null, {
+      status: 204,
       headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
     })
   } catch {
