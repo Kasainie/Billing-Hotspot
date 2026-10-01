@@ -394,6 +394,11 @@ function RouterProvisioning({ onExit, onProvision }: { onExit: () => void; onPro
             </ol>
           </div>
 
+          <div className="script-frame">
+            <pre>{fetchCommand || 'Provisioning command is unavailable. Create a new script to continue.'}</pre>
+            <button className="script-copy" disabled={!fetchCommand} onClick={() => copyConfig(fetchCommand)}><Copy size={14} />{copied === 'router' ? 'Copied' : 'Copy script'}</button>
+          </div>
+
           <div className={`provision-notice ${provisioningState === 'applied' ? '' : 'pending-notice'}`} role="status">{provisioningState === 'applied' ? <CircleCheck size={17} /> : provisioningState === 'error' || provisioningState === 'expired' ? <AlertTriangle size={17} /> : <Clock3 size={17} />}<span>{provisioningMessage || 'Checking connection...'}{provisioningState === 'applied' && provisioningSourceIp ? ` at ${provisioningSourceIp}` : ''}</span></div>
         </>}
 
