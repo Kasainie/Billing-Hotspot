@@ -59,6 +59,33 @@ export async function readRouterInventoryPayload(request: Request): Promise<Reco
   return parseRouterInventoryRecords(rawText)
 }
 
+export function addRouterInventoryRecord(
+  current: {
+    interfaces: Array<{ name: string; running: boolean; disabled: boolean }>
+    bridgePorts: Array<{ interface: string; bridge: string }>
+    wanInterfaces: string[]
+    bridgeName: string | null
+  } | null | undefined,
+  kind: string,
+  rawValue: string,
+) {
+  const value = rawValue.trim()
+  if (!/^[a-zA-Z0-9_.-]{1,48}$/.test(value)) return null
+
+  const inventory = current || { interfaces: [], bridgePorts: [], wanInterfaces: [], bridgeName: null }
+  if (kind === 'interface' && !inventory.interfaces.some((item) => item.name === value)) {
+    inventory.interfaces.push({ name: value, running: false, disabled: false })
+  } else if (kind === 'wan' && !inventory.wanInterfaces.includes(value)) {
+    inventory.wanInterfaces.push(value)
+  } else if (kind === 'bridge') {
+    if (value === 'centripid-bridge' || !inventory.bridgeName) inventory.bridgeName = value
+  } else if (!['interface', 'wan', 'bridge'].includes(kind)) {
+    return null
+  }
+
+  return inventory
+}
+
 export function isValidProvisioningBaseUrl(baseUrl: URL, env: { NODE_ENV?: string } = process.env) {
   const isLocalDevelopmentHost = ['localhost', '127.0.0.1', '::1'].includes(baseUrl.hostname)
   const isLocalHttpOrigin = isLocalDevelopmentHost && baseUrl.protocol === 'http:'
@@ -99,35 +126,22 @@ export function buildProvisioningScript({
     ':if ([:tonum [:pick $routerOsVersion 0 $versionDot]] < 6) do={:error "RouterOS 6.0 or newer is required"}',
     `/system identity set name="${safeName}"`,
     ...radiusClientCommands,
-    ':local inventoryData ""',
-    ':local inventorySeparator ""',
     ':foreach interfaceId in=[/interface ethernet find] do={',
     '  :local interfaceName [/interface ethernet get $interfaceId name]',
     '  :if ($interfaceName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    '    :set inventoryData ($inventoryData . $inventorySeparator . "I|" . $interfaceName)',
-    '    :set inventorySeparator ";"',
-    '  }',
-    '}',
-    ':foreach bridgePortId in=[/interface bridge port find] do={',
-    '  :local portInterface [/interface bridge port get $bridgePortId interface]',
-    '  :local portBridge [/interface bridge port get $bridgePortId bridge]',
-    '  :if (($portInterface ~ "^[a-zA-Z0-9_.-]{1,48}$") && ($portBridge ~ "^[a-zA-Z0-9_.-]{1,48}$")) do={',
-    '    :set inventoryData ($inventoryData . $inventorySeparator . "P|" . $portInterface . "|" . $portBridge)',
-    '    :set inventorySeparator ";"',
+    `    /tool fetch url="${completeUrl}?record=interface" http-method=post http-data=$interfaceName http-header-field="content-type: text/plain" keep-result=no`,
     '  }',
     '}',
     ':foreach dhcpClientId in=[/ip dhcp-client find where status="bound"] do={',
     '  :local wanInterface [/ip dhcp-client get $dhcpClientId interface]',
     '  :if ($wanInterface ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    '    :set inventoryData ($inventoryData . $inventorySeparator . "W|" . $wanInterface)',
-    '    :set inventorySeparator ";"',
+    `    /tool fetch url="${completeUrl}?record=wan" http-method=post http-data=$wanInterface http-header-field="content-type: text/plain" keep-result=no`,
     '  }',
     '}',
     ':foreach bridgeId in=[/interface bridge find] do={',
     '  :local bridgeName [/interface bridge get $bridgeId name]',
     '  :if ($bridgeName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    '    :set inventoryData ($inventoryData . $inventorySeparator . "B|" . $bridgeName)',
-    '    :set inventorySeparator ";"',
+    `    /tool fetch url="${completeUrl}?record=bridge" http-method=post http-data=$bridgeName http-header-field="content-type: text/plain" keep-result=no`,
     '  }',
     '}',
     ...hotspotBundleFiles.flatMap((fileName) => [
@@ -135,7 +149,6 @@ export function buildProvisioningScript({
       ':delay 2s',
       `/import ${fileName}`,
     ]),
-    `/tool fetch url="${completeUrl}" http-method=post http-data=$inventoryData http-header-field="content-type: text/plain" keep-result=no`,
     `/tool fetch url="${completeUrl}" keep-result=no`,
   ]
 
@@ -251,6 +264,7 @@ export function buildSubscriberServiceScript({
   commands.push(`:if ([:len [/interface bridge find where name="${bridgeName}"]] = 0) do={/interface bridge add name="${bridgeName}"}`)
   for (const port of ports) {
     commands.push(
+      `:if ([:len [/interface bridge port find where interface="${port}" and bridge!="${bridgeName}"]] > 0) do={:error "Refusing to move ${port}; it already belongs to another bridge"}`,
       `:if ([:len [/ip dhcp-client find where interface="${port}" and status="bound"]] > 0) do={:error "Refusing to bridge active DHCP uplink ${port}"}`,
       `:if ([:len [/interface bridge port find where interface="${port}"]] = 0) do={/interface bridge port add bridge="${bridgeName}" interface="${port}"}`,
     )

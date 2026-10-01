@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload } from './router-provisioning.ts'
+import { addRouterInventoryRecord, buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload } from './router-provisioning.ts'
 
 test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -73,6 +73,7 @@ test('subscriber service script creates Hotspot DHCP and RADIUS PPPoE on the sel
   assert.match(script, /billing-pppoe-profile/)
   assert.match(script, /pppoe-server server add service-name="billing-pppoe" interface="centripid-bridge"/)
   assert.match(script, /A DHCP server already exists/)
+  assert.match(script, /Refusing to move ether2; it already belongs to another bridge/)
   assert.match(script, /Refusing to bridge active DHCP uplink ether2/)
 })
 
@@ -105,9 +106,10 @@ test('provisioning script supports RouterOS 6+ without RouterOS 7 serialization'
     assert.match(script, new RegExp(`/hotspot/${fileName}.*dst-path=${fileName}`))
     assert.match(script, new RegExp(`/import ${fileName}`))
   }
-  assert.match(script, /:set inventoryData \(\$inventoryData \. \$inventorySeparator \. "I\|" \. \$interfaceName\)/)
-  assert.doesNotMatch(script, /"\$[A-Za-z]/)
-  assert.match(script, /http-method=post http-data=\$inventoryData http-header-field="content-type: text\/plain"/)
+  assert.match(script, /record=interface" http-method=post http-data=\$interfaceName/)
+  assert.match(script, /record=wan" http-method=post http-data=\$wanInterface/)
+  assert.match(script, /record=bridge" http-method=post http-data=\$bridgeName/)
+  assert.doesNotMatch(script, /\$inventoryData|:serialize/)
   assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete" keep-result=no/)
 })
 
@@ -125,6 +127,21 @@ test('RouterOS 6 inventory records are parsed into the wizard inventory shape', 
     wanInterfaces: ['ether1'],
     bridges: ['bridge1'],
   })
+})
+
+test('single RouterOS inventory records merge without duplicates', () => {
+  const first = addRouterInventoryRecord(null, 'interface', 'ether1')
+  const withWan = addRouterInventoryRecord(first, 'wan', 'ether1')
+  const withBridge = addRouterInventoryRecord(withWan, 'bridge', 'bridge1')
+  const duplicate = addRouterInventoryRecord(withBridge, 'interface', 'ether1')
+
+  assert.deepEqual(duplicate, {
+    interfaces: [{ name: 'ether1', running: false, disabled: false }],
+    bridgePorts: [],
+    wanInterfaces: ['ether1'],
+    bridgeName: 'bridge1',
+  })
+  assert.equal(addRouterInventoryRecord(duplicate, 'interface', 'bad/name'), null)
 })
 
 test('raw RouterOS JSON payloads are accepted by the completion endpoint parser', async () => {
