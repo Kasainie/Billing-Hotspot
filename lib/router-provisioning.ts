@@ -1,6 +1,6 @@
 function safeJsonParse(raw: string): unknown {
   const trimmed = raw.trim()
-  if (!trimmed) return {}
+  if (!trimmed) return null
 
   try {
     return JSON.parse(trimmed)
@@ -10,11 +10,35 @@ function safeJsonParse(raw: string): unknown {
       try {
         return JSON.parse(maybeWrapped)
       } catch {
-        return {}
+        return null
       }
     }
-    return {}
+    return null
   }
+}
+
+function parseRouterInventoryRecords(raw: string): Record<string, unknown> {
+  const inventory = {
+    interfaces: [] as Array<{ name: string; running: string; disabled: string }>,
+    bridgePorts: [] as Array<{ interface: string; bridge: string }>,
+    wanInterfaces: [] as string[],
+    bridges: [] as string[],
+  }
+
+  for (const record of raw.split(';')) {
+    const [kind, ...fields] = record.split('|')
+    if (kind === 'I' && fields.length === 3) {
+      inventory.interfaces.push({ name: fields[0], running: fields[1], disabled: fields[2] })
+    } else if (kind === 'P' && fields.length === 2) {
+      inventory.bridgePorts.push({ interface: fields[0], bridge: fields[1] })
+    } else if (kind === 'W' && fields.length === 1) {
+      inventory.wanInterfaces.push(fields[0])
+    } else if (kind === 'B' && fields.length === 1) {
+      inventory.bridges.push(fields[0])
+    }
+  }
+
+  return inventory
 }
 
 export async function readRouterInventoryPayload(request: Request): Promise<Record<string, unknown>> {
@@ -30,7 +54,7 @@ export async function readRouterInventoryPayload(request: Request): Promise<Reco
   const rawText = await request.text()
   const parsed = safeJsonParse(rawText)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
-  return {}
+  return parseRouterInventoryRecords(rawText)
 }
 
 export function isValidProvisioningBaseUrl(baseUrl: URL, env: { NODE_ENV?: string } = process.env) {
@@ -71,47 +95,40 @@ export function buildProvisioningScript({
     ':if ([:tonum [:pick $routerOsVersion 0 $versionDot]] < 6) do={:error "RouterOS 6.0 or newer is required"}',
     `/system identity set name="${safeName}"`,
     ...radiusClientCommands,
-    ':local interfacesJson ""',
-    ':local interfacesSeparator ""',
+    ':local routerInventoryData ""',
+    ':local inventorySeparator ""',
     ':foreach interfaceId in=[/interface ethernet find] do={',
     '  :local interfaceName [/interface ethernet get $interfaceId name]',
     '  :if ($interfaceName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
     '    :local interfaceRunning [/interface ethernet get $interfaceId running]',
     '    :local interfaceDisabled [/interface ethernet get $interfaceId disabled]',
-    '    :set interfacesJson ($interfacesJson . $interfacesSeparator . "{\\\"name\\\":\\\"" . $interfaceName . "\\\",\\\"running\\\":" . [:tostr $interfaceRunning] . ",\\\"disabled\\\":" . [:tostr $interfaceDisabled] . "}")',
-    '    :set interfacesSeparator ","',
+    '    :set routerInventoryData ($routerInventoryData . $inventorySeparator . "I|" . $interfaceName . "|" . [:tostr $interfaceRunning] . "|" . [:tostr $interfaceDisabled])',
+    '    :set inventorySeparator ";"',
     '  }',
     '}',
-    ':local bridgePortsJson ""',
-    ':local bridgePortsSeparator ""',
     ':foreach bridgePortId in=[/interface bridge port find] do={',
     '  :local portInterface [/interface bridge port get $bridgePortId interface]',
     '  :local portBridge [/interface bridge port get $bridgePortId bridge]',
     '  :if (($portInterface ~ "^[a-zA-Z0-9_.-]{1,48}$") && ($portBridge ~ "^[a-zA-Z0-9_.-]{1,48}$")) do={',
-    '    :set bridgePortsJson ($bridgePortsJson . $bridgePortsSeparator . "{\\\"interface\\\":\\\"" . $portInterface . "\\\",\\\"bridge\\\":\\\"" . $portBridge . "\\\"}")',
-    '    :set bridgePortsSeparator ","',
+    '    :set routerInventoryData ($routerInventoryData . $inventorySeparator . "P|" . $portInterface . "|" . $portBridge)',
+    '    :set inventorySeparator ";"',
     '  }',
     '}',
-    ':local wanInterfacesJson ""',
-    ':local wanInterfacesSeparator ""',
     ':foreach dhcpClientId in=[/ip dhcp-client find where status="bound"] do={',
     '  :local wanInterface [/ip dhcp-client get $dhcpClientId interface]',
     '  :if ($wanInterface ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    '    :set wanInterfacesJson ($wanInterfacesJson . $wanInterfacesSeparator . "\\\"" . $wanInterface . "\\\"")',
-    '    :set wanInterfacesSeparator ","',
+    '    :set routerInventoryData ($routerInventoryData . $inventorySeparator . "W|" . $wanInterface)',
+    '    :set inventorySeparator ";"',
     '  }',
     '}',
-    ':local bridgesJson ""',
-    ':local bridgesSeparator ""',
     ':foreach bridgeId in=[/interface bridge find] do={',
     '  :local bridgeName [/interface bridge get $bridgeId name]',
     '  :if ($bridgeName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    '    :set bridgesJson ($bridgesJson . $bridgesSeparator . "\\\"" . $bridgeName . "\\\"")',
-    '    :set bridgesSeparator ","',
+    '    :set routerInventoryData ($routerInventoryData . $inventorySeparator . "B|" . $bridgeName)',
+    '    :set inventorySeparator ";"',
     '  }',
     '}',
-    ':local routerInventoryJson ("{\\\"interfaces\\\":[" . $interfacesJson . "],\\\"bridgePorts\\\":[" . $bridgePortsJson . "],\\\"wanInterfaces\\\":[" . $wanInterfacesJson . "],\\\"bridges\\\":[" . $bridgesJson . "]}")',
-    `/tool fetch url="${completeUrl}" http-method=post http-data=$routerInventoryJson http-header-field="content-type: application/json" keep-result=no`,
+    `/tool fetch url="${completeUrl}" http-method=post http-data=$routerInventoryData http-header-field="content-type: text/plain" keep-result=no`,
     `/tool fetch url="${completeUrl}" keep-result=no`,
   ]
 

@@ -43,10 +43,26 @@ test('provisioning script supports RouterOS 6+ without RouterOS 7 serialization'
   })
 
   assert.match(script, /RouterOS 6\.0 or newer is required/)
-  assert.doesNotMatch(script, /:serialize/)
+  assert.doesNotMatch(script, /:serialize|\\\\"/)
   assert.match(script, /\/interface ethernet find/)
-  assert.match(script, /http-method=post http-data=\$routerInventoryJson/)
+  assert.match(script, /http-method=post http-data=\$routerInventoryData http-header-field="content-type: text\/plain"/)
   assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete" keep-result=no/)
+})
+
+test('RouterOS 6 inventory records are parsed into the wizard inventory shape', async () => {
+  const request = new Request('https://billing.example.com/provision/token123/complete', {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain' },
+    body: 'I|ether1|true|false;P|ether2|bridge1;W|ether1;B|bridge1',
+  })
+
+  const inventory = await readRouterInventoryPayload(request)
+  assert.deepEqual(inventory, {
+    interfaces: [{ name: 'ether1', running: 'true', disabled: 'false' }],
+    bridgePorts: [{ interface: 'ether2', bridge: 'bridge1' }],
+    wanInterfaces: ['ether1'],
+    bridges: ['bridge1'],
+  })
 })
 
 test('raw RouterOS JSON payloads are accepted by the completion endpoint parser', async () => {
