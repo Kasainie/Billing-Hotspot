@@ -6,27 +6,20 @@ import { runInNewContext } from 'node:vm'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
 import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload } from './router-provisioning.ts'
 
-test('production fetch script uses the HTTPS router script format and downloads the full hotspot bundle', () => {
+test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
   const fetchCommand = buildFetchCommand({ scriptUrl, completeUrl: 'https://billing.example.com/provision/token123/complete' })
 
-  assert.match(fetchCommand, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123" dst-path=lktech\.rsc/i)
-  assert.match(fetchCommand, /\/import lktech\.rsc/i)
-  assert.match(fetchCommand, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/hotspot\/certificates\.rsc" dst-path=certificates\.rsc/i)
-  assert.match(fetchCommand, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/hotspot\/config\.rsc" dst-path=config\.rsc/i)
-  assert.match(fetchCommand, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/hotspot\/hotspot-files\.rsc" dst-path=hotspot-files\.rsc/i)
-  assert.match(fetchCommand, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/hotspot\/hotspot\.rsc" dst-path=hotspot\.rsc/i)
+  assert.equal(fetchCommand, '/tool fetch mode=https url="https://billing.example.com/provision/token123" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc')
   assert.doesNotMatch(fetchCommand, /\/tool fetch .*?url="https:\/\/billing\.example\.com\/provision\/token123\/complete"/i)
-  assert.doesNotMatch(fetchCommand, /http-method=post/i)
+  assert.doesNotMatch(fetchCommand, /\/hotspot\//i)
   assert.doesNotMatch(fetchCommand, /router-setup\.rsc/i)
 })
 
 test('local HTTP fetch uses the localhost router bundle format for dev testing', () => {
   const scriptUrl = 'http://127.0.0.1:3000/provision/token123'
   const fetchCommand = buildFetchCommand({ scriptUrl })
-  assert.match(fetchCommand, /\/tool fetch mode=http url="http:\/\/127\.0\.0\.1:3000\/provision\/token123" dst-path=lktech\.rsc/i)
-  assert.match(fetchCommand, /\/tool fetch mode=http url="http:\/\/127\.0\.0\.1:3000\/hotspot\/certificates\.rsc" dst-path=certificates\.rsc/i)
-  assert.match(fetchCommand, /\/import hotspot\.rsc/i)
+  assert.equal(fetchCommand, '/tool fetch mode=http url="http://127.0.0.1:3000/provision/token123" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc')
 })
 
 test('service configuration is downloaded and imported as a RouterOS file', () => {
@@ -44,9 +37,13 @@ test('all RouterOS bundle files resolve to valid content', () => {
 
 test('hotspot file bundle downloads portal pages and assets to RouterOS hotspot directory', () => {
   const script = getHotspotBundleScript('hotspot-files.rsc', 'https://billing.example.com')
-  assert.match(script!, /hotspot-assets\/login\.html/)
-  assert.match(script!, /dst-path="\$hotspotDirectory\/md5\.js"/)
+  assert.match(script!, /dst-path="flash\/hotspot\/md5\.js"/)
+  assert.match(script!, /dst-path="hotspot\/md5\.js"/)
   assert.match(script!, /flash\/hotspot/)
+  assert.doesNotMatch(script!, /"\$[A-Za-z]/)
+  for (const assetName of ['login.html', 'status.html', 'logout.html', 'error.html', 'alogin.html', 'api.json', 'style.css', 'md5.js']) {
+    assert.ok(script!.includes(`/hotspot-assets/${assetName}`), `${assetName} is included in the portal installer`)
+  }
 })
 
 test('portal CHAP helper matches standard MD5 vectors', () => {
@@ -104,9 +101,13 @@ test('provisioning script supports RouterOS 6+ without RouterOS 7 serialization'
   assert.match(script, /RouterOS 6\.0 or newer is required/)
   assert.doesNotMatch(script, /:serialize|\\\\"/)
   assert.match(script, /\/interface ethernet find/)
-  assert.match(script, /:set routerInventoryData "\$routerInventoryData;I\|\$interfaceName\|\$interfaceRunning\|\$interfaceDisabled"/)
-  assert.doesNotMatch(script, /\$inventorySeparator|routerInventoryData \(/)
-  assert.match(script, /http-method=post http-data=\$routerInventoryData http-header-field="content-type: text\/plain"/)
+  for (const fileName of ['certificates.rsc', 'config.rsc', 'hotspot-files.rsc', 'hotspot.rsc']) {
+    assert.match(script, new RegExp(`/hotspot/${fileName}.*dst-path=${fileName}`))
+    assert.match(script, new RegExp(`/import ${fileName}`))
+  }
+  assert.match(script, /:set inventoryData \(\$inventoryData \. \$inventorySeparator \. "I\|" \. \$interfaceName\)/)
+  assert.doesNotMatch(script, /"\$[A-Za-z]/)
+  assert.match(script, /http-method=post http-data=\$inventoryData http-header-field="content-type: text\/plain"/)
   assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete" keep-result=no/)
 })
 
@@ -114,12 +115,12 @@ test('RouterOS 6 inventory records are parsed into the wizard inventory shape', 
   const request = new Request('https://billing.example.com/provision/token123/complete', {
     method: 'POST',
     headers: { 'content-type': 'text/plain' },
-    body: 'I|ether1|true|false;P|ether2|bridge1;W|ether1;B|bridge1',
+    body: 'I|ether1;P|ether2|bridge1;W|ether1;B|bridge1',
   })
 
   const inventory = await readRouterInventoryPayload(request)
   assert.deepEqual(inventory, {
-    interfaces: [{ name: 'ether1', running: 'true', disabled: 'false' }],
+    interfaces: [{ name: 'ether1', running: 'false', disabled: 'false' }],
     bridgePorts: [{ interface: 'ether2', bridge: 'bridge1' }],
     wanInterfaces: ['ether1'],
     bridges: ['bridge1'],

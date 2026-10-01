@@ -27,7 +27,9 @@ function parseRouterInventoryRecords(raw: string): Record<string, unknown> {
 
   for (const record of raw.split(';')) {
     const [kind, ...fields] = record.split('|')
-    if (kind === 'I' && fields.length === 3) {
+    if (kind === 'I' && fields.length === 1) {
+      inventory.interfaces.push({ name: fields[0], running: 'false', disabled: 'false' })
+    } else if (kind === 'I' && fields.length === 3) {
       inventory.interfaces.push({ name: fields[0], running: fields[1], disabled: fields[2] })
     } else if (kind === 'P' && fields.length === 2) {
       inventory.bridgePorts.push({ interface: fields[0], bridge: fields[1] })
@@ -89,41 +91,51 @@ export function buildProvisioningScript({
     `  /radius set \$radiusEntry address=${radiusServerAddress} secret="${radiusSecret}" service=${radiusServices} authentication-port=1812 accounting-port=1813 timeout=1s`,
     '}',
   ]
+  const baseUrl = new URL(completeUrl).origin
+  const hotspotBundleFiles = ['certificates.rsc', 'config.rsc', 'hotspot-files.rsc', 'hotspot.rsc']
   const configScript = [
     ':local routerOsVersion [/system resource get version]',
     ':local versionDot [:find $routerOsVersion "."]',
     ':if ([:tonum [:pick $routerOsVersion 0 $versionDot]] < 6) do={:error "RouterOS 6.0 or newer is required"}',
     `/system identity set name="${safeName}"`,
     ...radiusClientCommands,
-    ':local routerInventoryData ""',
+    ':local inventoryData ""',
+    ':local inventorySeparator ""',
     ':foreach interfaceId in=[/interface ethernet find] do={',
     '  :local interfaceName [/interface ethernet get $interfaceId name]',
     '  :if ($interfaceName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    '    :local interfaceRunning [/interface ethernet get $interfaceId running]',
-    '    :local interfaceDisabled [/interface ethernet get $interfaceId disabled]',
-    '    :set routerInventoryData "$routerInventoryData;I|$interfaceName|$interfaceRunning|$interfaceDisabled"',
+    '    :set inventoryData ($inventoryData . $inventorySeparator . "I|" . $interfaceName)',
+    '    :set inventorySeparator ";"',
     '  }',
     '}',
     ':foreach bridgePortId in=[/interface bridge port find] do={',
     '  :local portInterface [/interface bridge port get $bridgePortId interface]',
     '  :local portBridge [/interface bridge port get $bridgePortId bridge]',
     '  :if (($portInterface ~ "^[a-zA-Z0-9_.-]{1,48}$") && ($portBridge ~ "^[a-zA-Z0-9_.-]{1,48}$")) do={',
-    '    :set routerInventoryData "$routerInventoryData;P|$portInterface|$portBridge"',
+    '    :set inventoryData ($inventoryData . $inventorySeparator . "P|" . $portInterface . "|" . $portBridge)',
+    '    :set inventorySeparator ";"',
     '  }',
     '}',
     ':foreach dhcpClientId in=[/ip dhcp-client find where status="bound"] do={',
     '  :local wanInterface [/ip dhcp-client get $dhcpClientId interface]',
     '  :if ($wanInterface ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    '    :set routerInventoryData "$routerInventoryData;W|$wanInterface"',
+    '    :set inventoryData ($inventoryData . $inventorySeparator . "W|" . $wanInterface)',
+    '    :set inventorySeparator ";"',
     '  }',
     '}',
     ':foreach bridgeId in=[/interface bridge find] do={',
     '  :local bridgeName [/interface bridge get $bridgeId name]',
     '  :if ($bridgeName ~ "^[a-zA-Z0-9_.-]{1,48}$") do={',
-    '    :set routerInventoryData "$routerInventoryData;B|$bridgeName"',
+    '    :set inventoryData ($inventoryData . $inventorySeparator . "B|" . $bridgeName)',
+    '    :set inventorySeparator ";"',
     '  }',
     '}',
-    `/tool fetch url="${completeUrl}" http-method=post http-data=$routerInventoryData http-header-field="content-type: text/plain" keep-result=no`,
+    ...hotspotBundleFiles.flatMap((fileName) => [
+      `/tool fetch url="${baseUrl}/hotspot/${fileName}" dst-path=${fileName} keep-result=yes`,
+      ':delay 2s',
+      `/import ${fileName}`,
+    ]),
+    `/tool fetch url="${completeUrl}" http-method=post http-data=$inventoryData http-header-field="content-type: text/plain" keep-result=no`,
     `/tool fetch url="${completeUrl}" keep-result=no`,
   ]
 
@@ -163,12 +175,18 @@ export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https:/
   const normalizedName = String(fileName || '').trim().toLowerCase()
   if (normalizedName === 'hotspot-files.rsc') {
     const assetBase = new URL('/hotspot-assets/', assetBaseUrl).toString()
+    const fetchAssets = (directory: string) => hotspotAssetNames.map((assetName) => (
+      `/tool fetch url="${assetBase}${assetName}" dst-path="${directory}/${assetName}" keep-result=yes`
+    ))
     return [
       '# hotspot-files.rsc',
-      ':local hotspotDirectory "hotspot"',
-      ':if ([:len [/file find where name="flash"]] > 0) do={:set hotspotDirectory "flash/hotspot"}',
-      ':if ([:len [/file find where name=$hotspotDirectory]] = 0) do={/file add name=$hotspotDirectory type=directory}',
-      ...hotspotAssetNames.map((assetName) => `/tool fetch url="${assetBase}${assetName}" dst-path="$hotspotDirectory/${assetName}" keep-result=yes`),
+      ':if ([:len [/file find where name="flash"]] > 0) do={',
+      ':if ([:len [/file find where name="flash/hotspot"]] = 0) do={/file add name="flash/hotspot" type=directory}',
+      ...fetchAssets('flash/hotspot'),
+      '} else={',
+      ':if ([:len [/file find where name="hotspot"]] = 0) do={/file add name="hotspot" type=directory}',
+      ...fetchAssets('hotspot'),
+      '}',
       '',
     ].join('\n')
   }
@@ -267,27 +285,7 @@ export function buildSubscriberServiceScript({
 export function buildFetchCommand({ scriptUrl, completeUrl }: { scriptUrl: string; completeUrl?: string }) {
   void completeUrl
   const protocol = /^https:/i.test(scriptUrl) ? 'https' : 'http'
-  const base = scriptUrl.replace(/\/provision\/.+$/, '')
-
-  const bundle = [
-    `/tool fetch mode=${protocol} url="${scriptUrl}" dst-path=lktech.rsc`,
-    ':delay 2s',
-    '/import lktech.rsc',
-    `/tool fetch mode=${protocol} url="${base}/hotspot/certificates.rsc" dst-path=certificates.rsc`,
-    ':delay 2s',
-    '/import certificates.rsc',
-    `/tool fetch mode=${protocol} url="${base}/hotspot/config.rsc" dst-path=config.rsc`,
-    ':delay 2s',
-    '/import config.rsc',
-    `/tool fetch mode=${protocol} url="${base}/hotspot/hotspot-files.rsc" dst-path=hotspot-files.rsc`,
-    ':delay 2s',
-    '/import hotspot-files.rsc',
-    `/tool fetch mode=${protocol} url="${base}/hotspot/hotspot.rsc" dst-path=hotspot.rsc`,
-    ':delay 2s',
-    '/import hotspot.rsc',
-  ]
-
-  return bundle.join('; ')
+  return `/tool fetch mode=${protocol} url="${scriptUrl}" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc`
 }
 
 export function buildServiceConfigFetchCommand({ scriptUrl }: { scriptUrl: string }) {
