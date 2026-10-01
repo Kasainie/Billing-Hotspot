@@ -42,6 +42,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
+import { buildSubscriberServiceScript, parseServiceSubnet } from '@/lib/router-provisioning'
 
 const sites = [
   { name: 'Central Hub', code: 'CH-001', customers: 184, sessions: 126, health: 99.8, status: 'Online', color: 'cyan' },
@@ -192,59 +193,59 @@ function RouterProvisioning({ onExit, onProvision }: { onExit: () => void; onPro
   const [routerInventory, setRouterInventory] = useState<RouterInventory | null>(null)
   const [inventoryInitialized, setInventoryInitialized] = useState(false)
   const [selectedPorts, setSelectedPorts] = useState<string[]>([])
-  const [useCustomSubnet, setUseCustomSubnet] = useState(false)
-  const [customSubnet, setCustomSubnet] = useState('172.31.0.0/16')
+  const [hotspotSubnet, setHotspotSubnet] = useState('172.31.0.0/24')
+  const [pppoeSubnet, setPppoeSubnet] = useState('172.31.1.0/24')
   const [applyCommand, setApplyCommand] = useState('')
+  const [preparingConfiguration, setPreparingConfiguration] = useState(false)
+  const [configurationError, setConfigurationError] = useState('')
   const [services, setServices] = useState(['PPPoE', 'Hotspot'])
   const [copied, setCopied] = useState<'router' | null>(null)
 
   const safeIdentity = routerName.trim().replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, ' ').slice(0, 48) || 'MikroTik Main'
   const steps = ['Identity', 'Provision', 'Services', 'Done']
   const requiresProvisioningKey = process.env.NODE_ENV !== 'development'
+  const hotspotNetwork = parseServiceSubnet(hotspotSubnet)
+  const pppoeNetwork = parseServiceSubnet(pppoeSubnet)
+  const duplicateServiceNetworks = Boolean(hotspotNetwork && pppoeNetwork && hotspotNetwork.cidr === pppoeNetwork.cidr)
   const toggleService = (service: string) => setServices((current) => current.includes(service) ? current.filter((item) => item !== service) : [...current, service])
   const togglePort = (port: string) => setSelectedPorts((current) => current.includes(port) ? current.filter((item) => item !== port) : [...current, port])
 
-  const getSubnetGateway = (cidr: string) => {
-    const [ip, prefixText, extra] = cidr.trim().split('/')
-    const octets = ip?.split('.').map(Number)
-    const prefix = Number(prefixText)
-    if (extra || !octets || octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255) || !/^\d{1,2}$/.test(prefixText || '') || prefix < 8 || prefix > 30) return null
-    const addressNumber = (((octets[0] << 24) >>> 0) + (octets[1] << 16) + (octets[2] << 8) + octets[3]) >>> 0
-    const mask = (0xffffffff << (32 - prefix)) >>> 0
-    const network = (addressNumber & mask) >>> 0
-    const gateway = network + 1
-    const gatewayAddress = [gateway >>> 24, (gateway >>> 16) & 255, (gateway >>> 8) & 255, gateway & 255].join('.')
-    return `${gatewayAddress}/${prefix}`
-  }
-
-  const createRouterConfiguration = () => {
+  const createRouterConfiguration = async () => {
     const bridgeName = routerInventory?.bridgeName || 'centripid-bridge'
     const wanInterfaces = new Set(routerInventory?.wanInterfaces || [])
     const validInterfaces = new Set(routerInventory?.interfaces.map((item) => item.name) || [])
     const ports = selectedPorts.filter((port) => validInterfaces.has(port) && !wanInterfaces.has(port))
     if (ports.length === 0) {
-      setProvisioningMessage('Select at least one subscriber port; the detected WAN port cannot be bridged.')
+      setConfigurationError('Select at least one subscriber port; the detected WAN port cannot be bridged.')
       return
     }
-    const commands = [
-      `:if ([:len [/interface bridge find where name="${bridgeName}"]] = 0) do={/interface bridge add name="${bridgeName}"}`,
-      ...ports.flatMap((port) => [
-        `:if ([:len [/ip dhcp-client find where interface="${port}" and status="bound"]] > 0) do={:error "Refusing to bridge active DHCP uplink ${port}"}`,
-        `:if ([:len [/interface bridge port find where interface="${port}"]] = 0) do={/interface bridge port add bridge="${bridgeName}" interface="${port}"}`,
-      ]),
-      ...(services.includes('PPPoE') ? ['/ppp aaa set use-radius=yes accounting=yes interim-update=5m'] : []),
-      ...(services.includes('Hotspot') ? ['/ip hotspot profile set [find name="default"] use-radius=yes radius-accounting=yes radius-interim-update=received'] : []),
-    ]
-    if (useCustomSubnet) {
-      const gateway = getSubnetGateway(customSubnet)
-      if (!gateway) {
-        setProvisioningMessage('Enter a valid IPv4 subnet in CIDR form, such as 172.31.0.0/16.')
-        return
-      }
-      commands.push(`:if ([:len [/ip address find where address="${gateway}" and interface="${bridgeName}"]] = 0) do={/ip address add address="${gateway}" interface="${bridgeName}" comment="billing-system-managed-subnet"}`)
+    setPreparingConfiguration(true)
+    setConfigurationError('')
+    try {
+      const configScript = buildSubscriberServiceScript({
+        bridgeName,
+        ports,
+        services,
+        hotspotSubnet: services.includes('Hotspot') ? hotspotSubnet : undefined,
+        pppoeSubnet: services.includes('PPPoE') ? pppoeSubnet : undefined,
+      })
+      const provisioningToken = fetchCommand.match(/\/provision\/([A-Za-z0-9_-]{43})["/]/)?.[1]
+      if (!provisioningToken) throw new Error('Create a new provisioning script before preparing router configuration.')
+
+      const response = await fetch('/api/routers/provisioning', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', ...(requiresProvisioningKey ? { 'x-provisioning-admin-key': provisioningAdminKey } : {}) },
+        body: JSON.stringify({ token: provisioningToken, configScript }),
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Could not prepare router configuration.')
+      setApplyCommand(result.fetchCommand)
+      setStep(3)
+    } catch (error) {
+      setConfigurationError(error instanceof Error ? error.message : 'Could not prepare router configuration.')
+    } finally {
+      setPreparingConfiguration(false)
     }
-    setApplyCommand(commands.join('; '))
-    setStep(3)
   }
 
   const copyConfig = async (content: string) => {
@@ -388,13 +389,11 @@ function RouterProvisioning({ onExit, onProvision }: { onExit: () => void; onPro
             <p>If the router returns this error after pasting the script, switch to advanced mode before retrying:</p>
             <ol>
               <li>Open the MikroTik terminal (WinBox → New Terminal)</li>
-              <li>Run <code>/system/device-mode update mode=advanced</code></li>
               <li>Unplug the power cord for 10 seconds, then restore power</li>
               <li>Re-run the provisioning command above</li>
             </ol>
           </div>
 
-          <div className="script-frame"><pre>{fetchCommand || 'Create the WinBox script from Identity first.'}</pre><button className="script-copy" disabled={!fetchCommand} onClick={() => copyConfig(fetchCommand)}><Copy size={14} />{copied === 'router' ? 'Copied' : 'Copy script'}</button></div>
           <div className={`provision-notice ${provisioningState === 'applied' ? '' : 'pending-notice'}`} role="status">{provisioningState === 'applied' ? <CircleCheck size={17} /> : provisioningState === 'error' || provisioningState === 'expired' ? <AlertTriangle size={17} /> : <Clock3 size={17} />}<span>{provisioningMessage || 'Checking connection...'}{provisioningState === 'applied' && provisioningSourceIp ? ` at ${provisioningSourceIp}` : ''}</span></div>
         </>}
 
@@ -421,19 +420,22 @@ function RouterProvisioning({ onExit, onProvision }: { onExit: () => void; onPro
           </section>
 
           <section className="router-setup-section subnet-section">
-            <div className="router-setup-title"><div><h2>Subnet</h2><p>Optional bridge gateway network. Default network: 172.31.0.0/16.</p></div></div>
-            <label className="subnet-toggle"><input type="checkbox" checked={useCustomSubnet} onChange={(event) => setUseCustomSubnet(event.target.checked)} /><span>Use custom subnet</span></label>
-            {useCustomSubnet && <label className="subnet-input">Bridge subnet (CIDR)<input value={customSubnet} onChange={(event) => setCustomSubnet(event.target.value)} placeholder="172.31.0.0/16" /></label>}
-            {useCustomSubnet && <p className="router-setup-hint">This adds the bridge gateway address; existing DHCP pool settings are not changed.</p>}
+            <div className="router-setup-title"><div><h2>Subscriber networks</h2><p>Private /24 networks for subscriber access. Existing WAN settings are left unchanged.</p></div></div>
+            {services.includes('Hotspot') && <label className="subnet-input">Hotspot and DHCP network<input value={hotspotSubnet} onChange={(event) => setHotspotSubnet(event.target.value)} aria-invalid={!hotspotNetwork} placeholder="172.31.0.0/24" /></label>}
+            {services.includes('PPPoE') && <label className="subnet-input">PPPoE address pool<input value={pppoeSubnet} onChange={(event) => setPppoeSubnet(event.target.value)} aria-invalid={!pppoeNetwork} placeholder="172.31.1.0/24" /></label>}
+            <p className="router-setup-hint">Hotspot creates a DHCP pool, RADIUS login profile, portal, and NAT rule. PPPoE creates a RADIUS-backed server and address pool. The script stops if an unmanaged server already uses the selected bridge.</p>
+            {duplicateServiceNetworks && <p className="router-discovery-status error" role="alert">Hotspot and PPPoE must use different networks.</p>}
+            {((services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork)) && <p className="router-discovery-status error" role="alert">Enter a private network ending in `.0/24`, such as 172.31.0.0/24.</p>}
           </section>
 
-          <button className="wizard-next apply-router-config" disabled={!routerInventory || !selectedPorts.some((port) => !routerInventory.wanInterfaces.includes(port)) || services.length === 0 || (useCustomSubnet && !getSubnetGateway(customSubnet))} onClick={createRouterConfiguration}>Apply configuration<ArrowRight size={15} /></button>
+          {configurationError && <p className="router-discovery-status error" role="alert">{configurationError}</p>}
+          <button className="wizard-next apply-router-config" disabled={preparingConfiguration || !routerInventory || !selectedPorts.some((port) => !routerInventory.wanInterfaces.includes(port)) || services.length === 0 || (services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork) || duplicateServiceNetworks} onClick={createRouterConfiguration}>{preparingConfiguration ? 'Preparing configuration...' : 'Prepare configuration'}<ArrowRight size={15} /></button>
         </>}
 
         {step === 3 && <>
-          <div className="provision-card-heading"><h2>Apply router configuration</h2><p>Paste this command in WinBox → New Terminal to apply the selected settings.</p></div>
+          <div className="provision-card-heading"><h2>Apply router configuration</h2><p>Paste this command in WinBox → New Terminal to download and apply the selected settings.</p></div>
           <div className="script-frame"><pre>{applyCommand}</pre><button className="script-copy" onClick={() => copyConfig(applyCommand)}><Copy size={14} />{copied === 'router' ? 'Copied' : 'Copy script'}</button></div>
-          <div className="provision-notice pending-notice"><AlertTriangle size={17} /><span>The detected WAN port is excluded. Custom subnet setup adds a gateway address only; it does not change DHCP pools.</span></div>
+          <div className="provision-notice pending-notice"><AlertTriangle size={17} /><span>The detected WAN port is excluded. Review the script before applying; unmanaged services on the bridge will cause it to stop rather than overwrite them.</span></div>
           <div className="provision-summary"><div><span>ROUTER</span><strong>{safeIdentity}</strong></div><div><span>BRIDGE PORTS</span><strong>{selectedPorts.filter((port) => !routerInventory?.wanInterfaces.includes(port)).join(', ')}</strong></div><div><span>SERVICES</span><strong>{services.join(', ')}</strong></div></div>
         </>}
       </section>

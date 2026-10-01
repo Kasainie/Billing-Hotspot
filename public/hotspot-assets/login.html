@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Network sign in</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  $(if chap-id)
+  <form id="sendin" action="$(link-login-only)" method="post" style="display:none">
+    <input id="sendin-username" type="hidden" name="username">
+    <input id="sendin-password" type="hidden" name="password">
+    <input type="hidden" name="dst" value="$(link-orig)">
+    <input type="hidden" name="popup" value="true">
+  </form>
+  <script src="md5.js"></script>
+  <script>
+    function doLogin() {
+      document.getElementById('sendin-username').value = document.getElementById('username').value;
+      document.getElementById('sendin-password').value = hexMD5('$(chap-id)' + document.getElementById('password').value + '$(chap-challenge)');
+      document.getElementById('sendin').submit();
+      return false;
+    }
+  </script>
+  $(endif)
+  <main class="portal-shell">
+    <section class="portal-panel">
+      <div class="portal-mark" aria-hidden="true">N</div>
+      <p class="portal-kicker">SUBSCRIBER NETWORK</p>
+      <h1>Welcome online</h1>
+      <p class="portal-copy">Sign in with the username and password provided by your network operator.</p>
+      $(if error)<p class="portal-error" role="alert">$(error)</p>$(endif)
+      <form name="login" action="$(link-login-only)" method="post" $(if chap-id) onsubmit="return doLogin()" $(endif)>
+        <input type="hidden" name="dst" value="$(link-orig)">
+        <input type="hidden" name="popup" value="true">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Connect</button>
+      </form>
+      <p class="portal-footnote">Access is managed by your service provider.</p>
+    </section>
+  </main>
+</body>
+</html>

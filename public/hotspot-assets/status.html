@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>Connection status</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="portal-shell">
+    <section class="portal-panel">
+      <div class="portal-mark" aria-hidden="true">N</div>
+      <p class="portal-kicker">CONNECTION STATUS</p>
+      <h1>You are connected</h1>
+      <dl class="session-details">
+        <div><dt>Account</dt><dd>$(username)</dd></div>
+        <div><dt>Address</dt><dd>$(ip)</dd></div>
+        <div><dt>Connected</dt><dd>$(uptime)</dd></div>
+        <div><dt>Data received</dt><dd>$(bytes-in-nice)</dd></div>
+        <div><dt>Data sent</dt><dd>$(bytes-out-nice)</dd></div>
+      </dl>
+      <a class="portal-button secondary" href="$(link-logout)">Disconnect</a>
+      <p class="portal-footnote">This page refreshes every 30 seconds.</p>
+    </section>
+  </main>
+</body>
+</html>

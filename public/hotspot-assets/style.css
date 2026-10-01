@@ -1,0 +1,100 @@
+:root {
+  color-scheme: light;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #162b31;
+  background: #e8f0ed;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background: linear-gradient(135deg, #edf4ef 0%, #dce9e8 52%, #d5e1de 100%);
+}
+
+.portal-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.portal-panel {
+  width: min(100%, 420px);
+  padding: 36px;
+  border: 1px solid #d0ddda;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgba(22, 43, 49, .12);
+}
+
+.portal-mark {
+  display: grid;
+  width: 42px;
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: 8px;
+  background: #087f76;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.portal-kicker {
+  margin: 26px 0 8px;
+  color: #087f76;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+}
+
+h1 { margin: 0; font-size: 30px; line-height: 1.15; }
+.portal-copy { margin: 12px 0 24px; color: #5a6d70; line-height: 1.55; }
+
+form { display: grid; gap: 10px; }
+label { margin-top: 6px; color: #32494d; font-size: 13px; font-weight: 700; }
+input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #bdccca;
+  border-radius: 5px;
+  background: #fbfdfc;
+  color: #162b31;
+  font: inherit;
+}
+input:focus { outline: 2px solid #087f76; outline-offset: 1px; }
+
+button, .portal-button {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 10px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 5px;
+  background: #087f76;
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.portal-button.secondary { background: #e8f0ed; color: #16564f; }
+.portal-error { padding: 12px; border-left: 3px solid #b84335; background: #fff0ed; color: #8d2e24; }
+.portal-footnote { margin: 24px 0 0; color: #6d7c7e; font-size: 12px; line-height: 1.5; }
+.session-details { margin: 22px 0; }
+.session-details div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #e4ece9; }
+.session-details dt { color: #657679; }
+.session-details dd { margin: 0; color: #162b31; font-weight: 700; text-align: right; }
+
+@media (max-width: 480px) {
+  .portal-shell { padding: 14px; }
+  .portal-panel { padding: 26px 22px; }
+  h1 { font-size: 27px; }
+}

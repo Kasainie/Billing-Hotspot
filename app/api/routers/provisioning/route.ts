@@ -4,7 +4,7 @@ import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
-import { buildFetchCommand, buildProvisioningScript, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
 import { routerProvisioningTokens } from '@/lib/db/schema'
 
 type ProvisionInput = {
@@ -126,6 +126,53 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ status, sourceIp: record.sourceIp, routerData: record.routerData }, { headers: { 'cache-control': 'no-store' } })
   } catch {
     return NextResponse.json({ error: 'Unable to read provisioning status' }, { status: 503 })
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  if (!isAuthorized(request)) return authorizationError()
+
+  let input: { token?: unknown; configScript?: unknown }
+  try {
+    input = await request.json() as { token?: unknown; configScript?: unknown }
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+  }
+
+  const token = typeof input.token === 'string' ? input.token : ''
+  const configScript = typeof input.configScript === 'string' ? input.configScript : ''
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token) || !configScript.trim() || configScript.length > 32768) {
+    return NextResponse.json({ error: 'Router configuration is invalid' }, { status: 400 })
+  }
+
+  let baseUrl: URL
+  try {
+    baseUrl = new URL(process.env.PROVISIONING_BASE_URL || 'https://billing.lktech.life')
+  } catch {
+    return NextResponse.json({ error: 'PROVISIONING_BASE_URL is invalid' }, { status: 500 })
+  }
+  if (!isValidProvisioningBaseUrl(baseUrl)) {
+    return NextResponse.json({ error: 'PROVISIONING_BASE_URL must be an HTTPS origin, or http://localhost in development' }, { status: 500 })
+  }
+
+  try {
+    const [record] = await db.select({ id: routerProvisioningTokens.id, status: routerProvisioningTokens.status, expiresAt: routerProvisioningTokens.expiresAt })
+      .from(routerProvisioningTokens)
+      .where(eq(routerProvisioningTokens.tokenHash, tokenHash(token)))
+      .limit(1)
+    if (!record || record.status !== 'applied' || record.expiresAt.getTime() <= Date.now()) {
+      return NextResponse.json({ error: 'Provisioning link is not ready for configuration or has expired.' }, { status: 409 })
+    }
+
+    await db.update(routerProvisioningTokens)
+      .set({ configScript })
+      .where(eq(routerProvisioningTokens.id, record.id))
+
+    const scriptUrl = new URL(`/provision/${token}/configure`, baseUrl).toString()
+    return NextResponse.json({ fetchCommand: buildServiceConfigFetchCommand({ scriptUrl }) }, { headers: { 'cache-control': 'no-store' } })
+  } catch (error) {
+    console.error('Failed to store router service configuration', error)
+    return NextResponse.json({ error: getProvisioningDbErrorMessage(error) }, { status: 503 })
   }
 }
 

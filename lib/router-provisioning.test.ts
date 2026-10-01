@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
-import { buildFetchCommand, buildProvisioningScript, getHotspotBundleScript, isValidProvisioningBaseUrl, readRouterInventoryPayload } from './router-provisioning.ts'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload } from './router-provisioning.ts'
 
 test('production fetch script uses the HTTPS router script format and downloads the full hotspot bundle', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -26,12 +29,68 @@ test('local HTTP fetch uses the localhost router bundle format for dev testing',
   assert.match(fetchCommand, /\/import hotspot\.rsc/i)
 })
 
+test('service configuration is downloaded and imported as a RouterOS file', () => {
+  const command = buildServiceConfigFetchCommand({ scriptUrl: 'https://billing.example.com/provision/token123/configure' })
+  assert.match(command, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/configure" dst-path=billing-services\.rsc/)
+  assert.match(command, /\/import billing-services\.rsc/)
+})
+
 test('all RouterOS bundle files resolve to valid content', () => {
   for (const fileName of ['certificates.rsc', 'config.rsc', 'hotspot-files.rsc', 'hotspot.rsc']) {
     const script = getHotspotBundleScript(fileName)
-    assert.ok(script)
-    assert.match(script!, /bundle/i)
+    assert.ok(script?.trim())
   }
+})
+
+test('hotspot file bundle downloads portal pages and assets to RouterOS hotspot directory', () => {
+  const script = getHotspotBundleScript('hotspot-files.rsc', 'https://billing.example.com')
+  assert.match(script!, /hotspot-assets\/login\.html/)
+  assert.match(script!, /dst-path="\$hotspotDirectory\/md5\.js"/)
+  assert.match(script!, /flash\/hotspot/)
+})
+
+test('portal CHAP helper matches standard MD5 vectors', () => {
+  const source = readFileSync(new URL('../public/hotspot-assets/md5.js', import.meta.url), 'utf8')
+  const sandbox: { window: { hexMD5?: (input: string) => string } } = { window: {} }
+  runInNewContext(source, sandbox)
+  const hexMD5 = sandbox.window.hexMD5
+  assert.ok(hexMD5)
+  for (const input of ['', 'a', 'abc', 'message digest', 'pässwörd']) {
+    assert.equal(hexMD5(input), createHash('md5').update(input).digest('hex'))
+  }
+})
+
+test('subscriber service script creates Hotspot DHCP and RADIUS PPPoE on the selected bridge', () => {
+  const script = buildSubscriberServiceScript({
+    bridgeName: 'centripid-bridge',
+    ports: ['ether2', 'ether3'],
+    services: ['Hotspot', 'PPPoE'],
+    hotspotSubnet: '172.31.0.0/24',
+    pppoeSubnet: '172.31.1.0/24',
+  })
+
+  assert.match(script, /billing-hotspot-dhcp/)
+  assert.match(script, /billing-hotspot-profile/)
+  assert.match(script, /billing-hotspot-pool/)
+  assert.match(script, /billing-pppoe-pool/)
+  assert.match(script, /billing-pppoe-profile/)
+  assert.match(script, /pppoe-server server add service-name="billing-pppoe" interface="centripid-bridge"/)
+  assert.match(script, /A DHCP server already exists/)
+  assert.match(script, /Refusing to bridge active DHCP uplink ether2/)
+})
+
+test('subscriber service networks must be distinct private /24 networks', () => {
+  assert.equal(parseServiceSubnet('172.31.0.0/24')?.gateway, '172.31.0.1')
+  assert.equal(parseServiceSubnet('192.168.20.0/24')?.range, '192.168.20.2-192.168.20.254')
+  assert.equal(parseServiceSubnet('8.8.8.0/24'), null)
+  assert.equal(parseServiceSubnet('172.31.0.0/16'), null)
+  assert.throws(() => buildSubscriberServiceScript({
+    bridgeName: 'bridge1',
+    ports: ['ether2'],
+    services: ['Hotspot', 'PPPoE'],
+    hotspotSubnet: '172.31.0.0/24',
+    pppoeSubnet: '172.31.0.0/24',
+  }), /must use different/)
 })
 
 test('provisioning script supports RouterOS 6+ without RouterOS 7 serialization', () => {

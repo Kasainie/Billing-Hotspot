@@ -1,11 +1,12 @@
 import { getHotspotBundleScript } from '@/lib/router-provisioning'
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ file: string }> },
 ) {
   const { file } = await params
-  const script = getHotspotBundleScript(file)
+  const assetBaseUrl = process.env.PROVISIONING_BASE_URL || new URL(request.url).origin
+  const script = getHotspotBundleScript(file, assetBaseUrl)
 
   if (!script) {
     return new Response('Hotspot bundle file not found.', {

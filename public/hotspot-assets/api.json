@@ -1,0 +1,5 @@
+{
+  "captive": $(if logged-in == 'yes')false$(else)true$(endif),
+  "user-portal-url": "$(link-login-only)",
+  "can-extend-session": false
+}
