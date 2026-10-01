@@ -45,6 +45,8 @@ test('provisioning script supports RouterOS 6+ without RouterOS 7 serialization'
   assert.match(script, /RouterOS 6\.0 or newer is required/)
   assert.doesNotMatch(script, /:serialize|\\\\"/)
   assert.match(script, /\/interface ethernet find/)
+  assert.match(script, /:set routerInventoryData "\$routerInventoryData;I\|\$interfaceName\|\$interfaceRunning\|\$interfaceDisabled"/)
+  assert.doesNotMatch(script, /\$inventorySeparator|routerInventoryData \(/)
   assert.match(script, /http-method=post http-data=\$routerInventoryData http-header-field="content-type: text\/plain"/)
   assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete" keep-result=no/)
 })
