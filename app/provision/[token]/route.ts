@@ -59,7 +59,10 @@ export async function GET(_request: NextRequest, context: RouteContext<'/provisi
         'referrer-policy': 'no-referrer',
       },
     })
-  } catch {
+  } catch (error) {
+    const cause = error instanceof Error && 'cause' in error ? error.cause : error
+    const code = cause && typeof cause === 'object' && 'code' in cause ? String(cause.code) : 'unknown'
+    console.error('Failed to retrieve router provisioning script (database error code)', code)
     return new Response('Unable to retrieve the provisioning script.', {
       status: 503,
       headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
