@@ -305,5 +305,7 @@ export function buildFetchCommand({ scriptUrl, completeUrl }: { scriptUrl: strin
 }
 
 export function buildServiceConfigFetchCommand({ scriptUrl, configuredUrl }: { scriptUrl: string; configuredUrl: string }) {
-  return `/tool fetch url="${scriptUrl}" dst-path=billing-services.rsc; :delay 2s; /import billing-services.rsc; /tool fetch url="${configuredUrl}" keep-result=no`
+  const scriptMode = /^https:/i.test(scriptUrl) ? 'https' : 'http'
+  const configuredMode = /^https:/i.test(configuredUrl) ? 'https' : 'http'
+  return `/tool fetch mode=${scriptMode} url="${scriptUrl}" dst-path=billing-services.rsc; :delay 2s; /import billing-services.rsc; /tool fetch mode=${configuredMode} url="${configuredUrl}" keep-result=no`
 }
