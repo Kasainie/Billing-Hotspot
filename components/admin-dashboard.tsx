@@ -641,6 +641,8 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
   const [hotspotSubnet, setHotspotSubnet] = useState(defaultHotspotSubnet)
   const [pppoeSubnet, setPppoeSubnet] = useState(defaultPppoeSubnet)
   const [applyCommand, setApplyCommand] = useState('')
+  const [checkingProvisioningStatus, setCheckingProvisioningStatus] = useState(false)
+  const [provisioningCheckError, setProvisioningCheckError] = useState('')
   const [preparingConfiguration, setPreparingConfiguration] = useState(false)
   const [configurationError, setConfigurationError] = useState('')
   const [services, setServices] = useState(['PPPoE', 'Hotspot'])
@@ -758,6 +760,30 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
     } catch (error) {
       setProvisioningState('error')
       setProvisioningMessage(error instanceof Error ? error.message : 'Could not create provisioning link')
+    }
+  }
+
+  const checkProvisioningStatus = async () => {
+    if (!provisioningId) return
+    setCheckingProvisioningStatus(true)
+    setProvisioningCheckError('')
+    try {
+      const response = await fetch(`/api/routers/provisioning?id=${encodeURIComponent(provisioningId)}`, {
+        cache: 'no-store',
+        headers: requiresProvisioningKey ? { 'x-provisioning-admin-key': provisioningAdminKey } : undefined,
+      })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || 'Could not check router status.')
+      setProvisioningState(result.status)
+      if (result.status === 'configured') setProvisioningMessage('Router services confirmed. This router is ready to go live.')
+      else if (result.status === 'applied') setProvisioningMessage('Router is online. Run the Confirm router services command in WinBox.')
+      else if (result.status === 'downloaded') setProvisioningMessage('Script downloaded; waiting for RouterOS to finish and confirm.')
+      else if (result.status === 'expired') setProvisioningMessage('Provisioning link expired. Create a new script to continue.')
+      else setProvisioningMessage('Router has not confirmed configuration yet. Keep the setup page open and try again.')
+    } catch (error) {
+      setProvisioningCheckError(error instanceof Error ? error.message : 'Could not check router status.')
+    } finally {
+      setCheckingProvisioningStatus(false)
     }
   }
 
@@ -928,6 +954,8 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
           <div className="script-frame"><pre>{applyCommand}</pre><button className="script-copy" onClick={() => copyConfig(applyCommand)}><Copy size={14} />{copied === 'router' ? 'Copied' : 'Copy script'}</button></div>
           <div className="provision-notice pending-notice"><AlertTriangle size={17} /><span>The detected WAN port is excluded. Review the script before applying; unmanaged services on the bridge will cause it to stop rather than overwrite them.</span></div>
           <div className={`provision-notice ${provisioningState === 'configured' ? '' : 'pending-notice'}`} role="status">{provisioningState === 'configured' ? <CircleCheck size={17} /> : <Clock3 size={17} />}<span>{provisioningState === 'configured' ? 'RouterOS confirmed that the service configuration was applied.' : 'Waiting for RouterOS to apply the service configuration and confirm it...'}</span></div>
+          {provisioningState !== 'configured' && <div className="provision-confirm-actions"><p>Go live unlocks after the router confirms setup. If you already ran the command, check its status here.</p><button type="button" className="outline-button" onClick={() => void checkProvisioningStatus()} disabled={checkingProvisioningStatus}>{checkingProvisioningStatus ? 'Checking…' : 'Check status'}</button></div>}
+          {provisioningCheckError && <p className="router-discovery-status error" role="alert">{provisioningCheckError}</p>}
           <div className="provision-summary"><div><span>ROUTER</span><strong>{safeIdentity}</strong></div><div><span>BRIDGE PORTS</span><strong>{selectedPorts.filter((port) => !routerInventory?.wanInterfaces.includes(port)).join(', ')}</strong></div><div><span>SERVICES</span><strong>{services.join(', ')}</strong></div></div>
         </>}
       </section>
