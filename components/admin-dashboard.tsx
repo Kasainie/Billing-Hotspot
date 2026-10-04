@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -25,7 +25,6 @@ import {
   Gauge,
   Globe2,
   LayoutDashboard,
-  Map as MapIcon,
   MessageCircle,
   Menu,
   MoreHorizontal,
@@ -34,7 +33,6 @@ import {
   Palette,
   Router,
   Search,
-  Server,
   Settings2,
   ShieldCheck,
   Signal,
@@ -62,8 +60,7 @@ const navigationSections: { label?: string; items: { label: string; icon: Lucide
     { label: 'Live sessions', icon: Wifi },
     { label: 'Plans', icon: Package },
     { label: 'Portal design', icon: Palette },
-    { label: 'Devices', icon: Router, children: [{ label: 'Routers', view: 'Routers', icon: Network }, { label: 'TR-069', view: 'TR-069' }, { label: 'Equipment', view: 'Equipment', icon: Server }] },
-    { label: 'Fiber map', icon: MapIcon },
+    { label: 'Devices', icon: Router, children: [{ label: 'Routers', view: 'Routers', icon: Network }, { label: 'TR-069', view: 'TR-069' }] },
   ] },
   { label: 'FINANCE', items: [
     { label: 'Billing', icon: FileText, children: [{ label: 'Payments', view: 'Payments', icon: CreditCard }, { label: 'Payment settings', view: 'Payment settings', icon: Settings2 }, { label: 'Invoices', view: 'Invoices' }, { label: 'Expenses', view: 'Expenses' }] },
@@ -77,7 +74,7 @@ const crudEntityByPage: Partial<Record<string, 'customers' | 'packages' | 'payme
   Payments: 'payments',
 }
 
-const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'Equipment' | 'TR-069' | 'Invoices'>> = {
+const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'TR-069' | 'Invoices'>> = {
   Leads: 'Leads',
   'Ticket list': 'Ticket list',
   'Ticket analytics': 'Ticket analytics',
@@ -85,7 +82,6 @@ const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ti
   'Voucher list': 'Voucher list',
   'Generate vouchers': 'Generate vouchers',
   'Voucher analytics': 'Voucher analytics',
-  Equipment: 'Equipment',
   'TR-069': 'TR-069',
   Invoices: 'Invoices',
 }
@@ -1278,9 +1274,13 @@ function PackagePanel({ initialFilter = '' }: { initialFilter?: string }) {
 
 function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customers' | 'packages' | 'payments'; initialFilter?: string }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
+  const [subscriberPlans, setSubscriberPlans] = useState<{ id: string; name: string; type: string; monthlyPrice: number; durationSeconds: number; availability: string }[]>([])
+  const [subscriberPlansError, setSubscriberPlansError] = useState('')
   const [recordFilter, setRecordFilter] = useState(initialFilter)
   const [name, setName] = useState('')
   const [detail, setDetail] = useState('')
+  const [subscriberPhone, setSubscriberPhone] = useState('')
+  const [subscriberPlanId, setSubscriberPlanId] = useState('')
   const [radiusUsername, setRadiusUsername] = useState('')
   const [radiusPassword, setRadiusPassword] = useState('')
   const [confirmRadiusPassword, setConfirmRadiusPassword] = useState('')
@@ -1291,6 +1291,12 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
   const [messageIsError, setMessageIsError] = useState(false)
   const [editingExpiryId, setEditingExpiryId] = useState('')
   const [expiryInput, setExpiryInput] = useState('')
+  const [detailsLoadingId, setDetailsLoadingId] = useState('')
+  const [expandedDetailsId, setExpandedDetailsId] = useState('')
+  const [subscriberDetails, setSubscriberDetails] = useState<Record<string, unknown> | null>(null)
+  const [detailsError, setDetailsError] = useState('')
+  const [showSubscriberPassword, setShowSubscriberPassword] = useState(false)
+  const [copiedCredential, setCopiedCredential] = useState('')
   const labels = { sites: 'Routers', customers: 'Subscribers', packages: 'Plans', payments: 'Payments' }
   const toggleSubscriberForm = () => {
     if (subscriberFormOpen) {
@@ -1302,6 +1308,72 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
     }
     setSubscriberFormOpen(!subscriberFormOpen)
   }
+  const toggleSubscriberDetails = async (customerId: string) => {
+    if (expandedDetailsId === customerId) {
+      setExpandedDetailsId('')
+      setSubscriberDetails(null)
+      setDetailsError('')
+      setShowSubscriberPassword(false)
+      return
+    }
+    setExpandedDetailsId(customerId)
+    setDetailsLoadingId(customerId)
+    setDetailsError('')
+    setSubscriberDetails(null)
+    setShowSubscriberPassword(false)
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(customerId)}/details`, { cache: 'no-store' })
+      const result = await response.json() as Record<string, unknown> & { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to load subscriber details.')
+      setSubscriberDetails(result)
+    } catch (reason) {
+      setDetailsError(reason instanceof Error ? reason.message : 'Unable to load subscriber details.')
+    } finally {
+      setDetailsLoadingId('')
+    }
+  }
+  const copySubscriberCredential = async (kind: 'username' | 'password' | 'accountNumber', value: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedCredential(kind)
+      window.setTimeout(() => setCopiedCredential(''), 1800)
+    } catch {
+      setDetailsError(`Could not copy the ${kind === 'accountNumber' ? 'account number' : kind}. Please select and copy it manually.`)
+    }
+  }
+
+  useEffect(() => {
+    if (entity !== 'customers') return
+    let active = true
+    const loadSubscriberPlans = async () => {
+      try {
+        const response = await fetch('/api/packages', { cache: 'no-store' })
+        const result = await response.json() as { error?: string } | Record<string, unknown>[]
+        if (!response.ok || !Array.isArray(result)) throw new Error(!Array.isArray(result) && result.error ? result.error : 'Unable to load service plans.')
+        const plans = result.filter((plan): plan is Record<string, unknown> => typeof plan === 'object' && plan !== null)
+          .filter((plan) => plan.active === true && plan.availability !== 'off')
+          .map((plan) => ({
+            id: String(plan.id),
+            name: String(plan.name),
+            type: String(plan.type || 'Hotspot'),
+            monthlyPrice: Number(plan.monthlyPrice) || 0,
+            durationSeconds: Number(plan.durationSeconds) || 0,
+            availability: String(plan.availability || 'live'),
+          }))
+        if (active) {
+          setSubscriberPlans(plans)
+          setSubscriberPlansError(plans.length ? '' : 'Create an enabled plan before adding a subscriber.')
+        }
+      } catch (error) {
+        if (active) {
+          setSubscriberPlans([])
+          setSubscriberPlansError(error instanceof Error ? error.message : 'Unable to load service plans.')
+        }
+      }
+    }
+    void loadSubscriberPlans()
+    return () => { active = false }
+  }, [entity])
 
   const load = () => fetch(`/api/${entity}`, { cache: 'no-store' }).then(async (response) => {
     const data = await response.json()
@@ -1318,6 +1390,9 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
   const create = async () => {
     if (!name.trim()) { setMessageIsError(true); return setMessage('Enter the subscriber name.') }
     if (entity === 'customers' && (!radiusUsername.trim() || !radiusPassword)) { setMessageIsError(true); return setMessage('Enter a RADIUS username and password.') }
+    if (entity === 'customers' && !subscriberPlanId) { setMessageIsError(true); return setMessage('Choose a service plan.') }
+    const selectedSubscriberPlan = subscriberPlans.find((plan) => plan.id === subscriberPlanId)
+    if (entity === 'customers' && selectedSubscriberPlan?.type === 'PPPoE' && !subscriberPhone.trim()) { setMessageIsError(true); return setMessage('Enter a phone number for the PPPoE account.') }
     if (entity === 'customers' && radiusPassword.trim().length < 12) { setMessageIsError(true); return setMessage('RADIUS password must be at least 12 characters.') }
     if (entity === 'customers' && radiusPassword !== confirmRadiusPassword) { setMessageIsError(true); return setMessage('The RADIUS passwords do not match.') }
     setSaving(true)
@@ -1326,7 +1401,7 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
     const body = entity === 'sites'
       ? { name, location: detail || 'Central Sector' }
       : entity === 'customers'
-        ? { name: name.trim(), email: detail.trim(), radiusUsername: radiusUsername.trim(), password: radiusPassword }
+        ? { name: name.trim(), email: detail.trim(), phone: subscriberPhone.trim(), packageId: subscriberPlanId, radiusUsername: radiusUsername.trim(), password: radiusPassword }
         : entity === 'packages'
           ? { name, downloadMbps: 20, uploadMbps: 10, monthlyPrice: 1800 }
           : { amount: 1800, method: detail || 'Mobile Money', reference: `PAY-${Date.now()}` }
@@ -1337,10 +1412,10 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
         setMessageIsError(true)
         return setMessage(result.error || 'Unable to save record')
       }
-      setName(''); setDetail(''); setRadiusUsername(''); setRadiusPassword(''); setConfirmRadiusPassword('')
+      setName(''); setDetail(''); setSubscriberPhone(''); setSubscriberPlanId(''); setRadiusUsername(''); setRadiusPassword(''); setConfirmRadiusPassword('')
       setShowRadiusPassword(false)
       if (entity === 'customers') setSubscriberFormOpen(false)
-      setMessage(entity === 'customers' ? 'Subscriber created safely suspended. Activate the account and set its expiry before service begins.' : 'Record created')
+      setMessage(entity === 'customers' ? 'Subscriber created safely suspended with the selected plan. Activate the account and set its expiry before service begins; use View details to retrieve the login and any PPPoE account number.' : 'Record created')
       try {
         await load()
       } catch (reason) {
@@ -1388,33 +1463,54 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       setSaving(false)
     }
   }
-  return <section className={`crud-workspace${entity === 'customers' ? ' subscriber-workspace' : ''}`}><div className="page-heading"><div><div className="live-label"><StatusDot /> LIVE DATA</div><h1>{labels[entity]}</h1><p>{entity === 'customers' ? 'Manage customer contact details, Wi-Fi logins, service plans, and account access.' : 'Manage records persisted in Supabase.'}</p></div><button className="primary-button" type="button" onClick={() => entity === 'customers' ? toggleSubscriberForm() : void create()} disabled={saving}>{saving ? 'Saving...' : entity === 'customers' ? subscriberFormOpen ? 'Close form' : 'Add subscriber' : 'Add record'}</button></div>
+  const selectedSubscriberPlan = subscriberPlans.find((plan) => plan.id === subscriberPlanId)
+  return <section className={`crud-workspace${entity === 'customers' ? ' subscriber-workspace' : ''}`}><div className="page-heading"><div><div className="live-label"><StatusDot /> LIVE DATA</div><h1>{labels[entity]}</h1><p>{entity === 'customers' ? 'Manage customer contact details, PPPoE and Wi-Fi logins, service plans, and account access.' : 'Manage records persisted in Supabase.'}</p></div><button className="primary-button" type="button" onClick={() => entity === 'customers' ? toggleSubscriberForm() : void create()} disabled={saving}>{saving ? 'Saving...' : entity === 'customers' ? subscriberFormOpen ? 'Close form' : 'Add subscriber' : 'Add record'}</button></div>
     {entity === 'customers' && <div className="subscriber-info-card"><span className="subscriber-info-icon" aria-hidden="true">i</span><p><strong>Account access</strong> New subscribers start suspended for safety. Set an expiry date and choose <strong>Confirm activation</strong> before they can connect. You can suspend or renew accounts at any time.</p></div>}
     {entity === 'customers' ? (subscriberFormOpen ? <form className="subscriber-create-form panel" onSubmit={(event) => { event.preventDefault(); void create() }}>
       <div className="subscriber-form-heading"><div><span className="eyebrow">NEW SUBSCRIBER</span><h2>Create subscriber account</h2><p>Add the customer details and a unique login for your FreeRADIUS server.</p></div></div>
       <div className="subscriber-form-grid">
         <label>Full name <span aria-hidden="true">*</span><input required maxLength={120} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Ama Mensah" /></label>
         <label>Email address <span aria-hidden="true">*</span><input required type="email" maxLength={254} autoComplete="email" value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="name@example.com" /></label>
+        <label>Service plan <span aria-hidden="true">*</span><select required value={subscriberPlanId} onChange={(event) => setSubscriberPlanId(event.target.value)}><option value="">Select a plan</option>{subscriberPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} · {plan.type} · KSh {plan.monthlyPrice.toLocaleString('en-KE')}{plan.availability === 'hidden' ? ' · Hidden' : ''}</option>)}</select><small>{subscriberPlansError || (selectedSubscriberPlan ? `${selectedSubscriberPlan.type} plan · ${Math.ceil(selectedSubscriberPlan.durationSeconds / 86400)} day${Math.ceil(selectedSubscriberPlan.durationSeconds / 86400) === 1 ? '' : 's'}` : 'Choose the service plan this subscriber will use.')}</small></label>
+        <label>Phone number{selectedSubscriberPlan?.type === 'PPPoE' && <> <span aria-hidden="true">*</span></>}<input type="tel" required={selectedSubscriberPlan?.type === 'PPPoE'} autoComplete="tel" maxLength={32} value={subscriberPhone} onChange={(event) => setSubscriberPhone(event.target.value)} placeholder="e.g. 0712 345 678" /><small>Required for PPPoE so an account number can be assigned.</small></label>
         <label>RADIUS username <span aria-hidden="true">*</span><input required minLength={3} maxLength={64} pattern="[A-Za-z0-9._@-]{3,64}" autoComplete="username" value={radiusUsername} onChange={(event) => setRadiusUsername(event.target.value)} placeholder="3–64 letters, numbers, . _ @ -" /><small>Must be unique across all workspaces on this RADIUS server.</small></label>
         <label>RADIUS password <span aria-hidden="true">*</span><div className="subscriber-password-field"><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={radiusPassword} onChange={(event) => setRadiusPassword(event.target.value)} placeholder="At least 12 characters" /><button type="button" className="password-visibility-button" onClick={() => setShowRadiusPassword((visible) => !visible)} aria-label={showRadiusPassword ? 'Hide RADIUS password' : 'Show RADIUS password'}>{showRadiusPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>Use 12–128 characters. The password is provisioned to RADIUS.</small></label>
         <label className="subscriber-confirm-field">Confirm RADIUS password <span aria-hidden="true">*</span><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={confirmRadiusPassword} onChange={(event) => setConfirmRadiusPassword(event.target.value)} placeholder="Re-enter the password" /></label>
       </div>
       {message && <p className={`subscriber-form-message ${messageIsError ? 'is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}
-      <div className="subscriber-form-footer"><span><strong>*</strong> Required fields</span><button className="primary-button" type="submit" disabled={saving}>{saving ? 'Creating subscriber…' : 'Create subscriber account'}</button></div>
+      <div className="subscriber-form-footer"><span><strong>*</strong> Required fields</span><button className="primary-button" type="submit" disabled={saving || subscriberPlans.length === 0}>{saving ? 'Creating subscriber…' : 'Create subscriber account'}</button></div>
     </form> : null) : <div className="crud-form"><input value={name} onChange={(event) => setName(event.target.value)} placeholder={entity === 'payments' ? 'Amount or payment label' : `${labels[entity]} name`} aria-label="Record name" /><input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder={entity === 'sites' ? 'Location' : 'Method or detail'} aria-label="Record detail" /><button className="outline-button" onClick={() => void create()} disabled={saving}>Create</button>{message && <span className="form-message">{message}</span>}</div>}
     {entity === 'customers' && !subscriberFormOpen && message && <p className={`subscriber-flash-message ${messageIsError ? 'is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}
-    <div className="panel crud-table"><div className="panel-heading"><div><h3>{entity === 'customers' ? 'Subscriber accounts' : 'Records'}</h3><span>{recordFilter ? `${filteredRows.length} matching · ${rows.length} total` : `${rows.length} loaded from Supabase`}</span></div><input className="record-filter" value={recordFilter} onChange={(event) => setRecordFilter(event.target.value)} placeholder={`Filter ${labels[entity].toLowerCase()}...`} aria-label={`Filter ${labels[entity].toLowerCase()}`} /><button className="text-button" onClick={() => { void load().catch((reason) => setMessage(reason instanceof Error ? reason.message : 'Unable to refresh records.')) }}>Refresh</button></div>{message && entity !== 'customers' && <p className="form-message" role="status">{message}</p>}<div className="table-scroll"><table><thead><tr>{entity === 'customers' ? <><th>Subscriber</th><th>Wi-Fi login</th><th>Plan</th><th>Account status</th><th>Expires</th><th>Actions</th></> : <><th>Name / ID</th><th>Status</th><th>Details</th><th /></>}</tr></thead><tbody>{filteredRows.map((row) => {
+    <div className="panel crud-table"><div className="panel-heading"><div><h3>{entity === 'customers' ? 'Subscriber accounts' : 'Records'}</h3><span>{recordFilter ? `${filteredRows.length} matching · ${rows.length} total` : `${rows.length} loaded from Supabase`}</span></div><input className="record-filter" value={recordFilter} onChange={(event) => setRecordFilter(event.target.value)} placeholder={`Filter ${labels[entity].toLowerCase()}...`} aria-label={`Filter ${labels[entity].toLowerCase()}`} /><button className="text-button" onClick={() => { void load().catch((reason) => setMessage(reason instanceof Error ? reason.message : 'Unable to refresh records.')) }}>Refresh</button></div>{message && entity !== 'customers' && <p className="form-message" role="status">{message}</p>}<div className="table-scroll"><table><thead><tr>{entity === 'customers' ? <><th>Subscriber</th><th>PPPoE / Wi-Fi login</th><th>Plan</th><th>Account status</th><th>Expires</th><th>Actions</th></> : <><th>Name / ID</th><th>Status</th><th>Details</th><th /></>}</tr></thead><tbody>{filteredRows.map((row) => {
     const expiry = typeof row.expiresAt === 'string' ? new Date(row.expiresAt) : null
     const isExpired = Boolean(expiry && expiry.getTime() <= Date.now())
     const status = entity === 'customers' && row.status === 'active' && isExpired ? 'expired' : String(row.status || (row.active ? 'active' : 'inactive'))
-    if (entity === 'customers') return <tr key={String(row.id)}>
+    const storedRadiusPassword = typeof subscriberDetails?.radiusPassword === 'string' ? subscriberDetails.radiusPassword : ''
+    const accountNumber = typeof subscriberDetails?.accountNumber === 'string' ? subscriberDetails.accountNumber : ''
+    if (entity === 'customers') return <Fragment key={String(row.id)}><tr>
       <td><strong>{String(row.name || 'Unnamed subscriber')}</strong><span>{String(row.email || 'No email address')}</span>{typeof row.phone === 'string' && row.phone.trim() ? <span>{row.phone}</span> : null}<small className="subscriber-created">Added {typeof row.createdAt === 'string' ? new Date(row.createdAt).toLocaleDateString() : 'date unavailable'}</small></td>
       <td><strong className="subscriber-login">{String(row.radiusUsername || 'No login')}</strong><span>RADIUS username</span></td>
       <td><strong>{String(row.plan || 'No plan assigned')}</strong>{Number(row.monthlyRate) > 0 && <span>KSh {Number(row.monthlyRate).toLocaleString('en-KE')} / month</span>}</td>
       <td><span className={`subscriber-status subscriber-status-${status.replace(/[^a-z0-9-]/g, '-')}`}>{status === 'active' ? 'Active' : status === 'suspended' ? 'Suspended' : status === 'expired' ? 'Expired' : status}</span></td>
       <td>{expiry && Number.isFinite(expiry.getTime()) ? <><strong>{expiry.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span>{expiry.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit' })}</span></> : <span className="subscriber-no-expiry">No expiry set</span>}</td>
-      <td>{row.radiusUsername ? <div className="subscriber-actions">{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></div> : <span>Login unavailable</span>}</td>
-    </tr>
+      <td>{row.radiusUsername ? <div className="subscriber-actions"><button className="subscriber-details-toggle" type="button" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={() => void toggleSubscriberDetails(String(row.id))}>{detailsLoadingId === String(row.id) ? 'Loading…' : expandedDetailsId === String(row.id) ? 'Hide details' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></div> : <span>Login unavailable</span>}</td>
+    </tr>{expandedDetailsId === String(row.id) && <tr className="subscriber-detail-row"><td colSpan={6}>{detailsLoadingId === String(row.id) ? <p className="subscriber-detail-loading" role="status">Loading secure subscriber details…</p> : detailsError ? <p className="subscriber-form-message is-error" role="alert">{detailsError}</p> : subscriberDetails && String(subscriberDetails.id) === String(row.id) ? <section className="subscriber-detail-card" aria-label={`Details for ${String(row.name || 'subscriber')}`}>
+      <div className="subscriber-detail-heading"><div><span className="eyebrow">SUBSCRIBER DETAILS</span><h4>{String(subscriberDetails.name || row.name || 'Subscriber')}</h4></div><button type="button" className="text-button" onClick={() => { setExpandedDetailsId(''); setSubscriberDetails(null); setDetailsError(''); setShowSubscriberPassword(false) }}>Close</button></div>
+      {detailsError && <p className="subscriber-form-message is-error" role="alert">{detailsError}</p>}
+      <div className="subscriber-detail-grid">
+        <div><span>Contact email</span><strong>{String(subscriberDetails.email || 'Not provided')}</strong></div>
+        <div><span>Phone number</span><strong>{String(subscriberDetails.phone || 'Not provided')}</strong></div>
+        <div><span>Service plan</span><strong>{String(subscriberDetails.plan || 'No plan assigned')}</strong></div>
+        <div><span>Monthly rate</span><strong>{Number(subscriberDetails.monthlyRate) > 0 ? `KSh ${Number(subscriberDetails.monthlyRate).toLocaleString('en-KE')}` : 'Not set'}</strong></div>
+        <div><span>Account status</span><strong>{String(subscriberDetails.status || status)}</strong></div>
+        <div><span>Service expiry</span><strong>{typeof subscriberDetails.expiresAt === 'string' ? new Date(subscriberDetails.expiresAt).toLocaleString('en-KE') : 'No expiry set'}</strong></div>
+      </div>
+      <div className="subscriber-login-details"><div><span>PPPoE / RADIUS username</span><strong>{String(subscriberDetails.radiusUsername || row.radiusUsername)}</strong><button type="button" onClick={() => void copySubscriberCredential('username', String(subscriberDetails.radiusUsername || row.radiusUsername))}>{copiedCredential === 'username' ? 'Copied' : 'Copy username'}</button></div>
+        {accountNumber && <div><span>Subscriber account number · M-Pesa PayBill reference</span><strong>{accountNumber}</strong><button type="button" onClick={() => void copySubscriberCredential('accountNumber', accountNumber)}>{copiedCredential === 'accountNumber' ? 'Copied' : 'Copy number'}</button></div>}
+        <div><span>Current PPPoE / RADIUS password</span><strong className="subscriber-password-value">{showSubscriberPassword ? storedRadiusPassword || 'No password found in RADIUS' : storedRadiusPassword ? '••••••••••••' : 'Not available'}</strong>{storedRadiusPassword && <><button type="button" onClick={() => setShowSubscriberPassword((visible) => !visible)}>{showSubscriberPassword ? 'Hide password' : 'Show password'}</button><button type="button" onClick={() => void copySubscriberCredential('password', storedRadiusPassword)}>{copiedCredential === 'password' ? 'Copied' : 'Copy password'}</button></>}</div>
+      </div>
+      <p className="subscriber-credential-warning">Share these login details only with the verified subscriber. If the password is unavailable, contact your RADIUS administrator to reset it.</p>
+    </section> : null}</td></tr>}</Fragment>
     return <tr key={String(row.id)}><td><strong>{String(row.name || row.reference || row.id).slice(0, 34)}</strong></td><td><span className="table-status">{status}</span></td><td className="mono">{String(row.radiusUsername || row.location || row.email || row.monthlyPrice || row.amount || '')}</td><td><button className="text-button danger-text" onClick={() => void remove(String(row.id))}>Delete</button></td></tr>
   })}{filteredRows.length === 0 && <tr><td colSpan={4}>{rows.length === 0 && entity === 'customers' ? 'No subscribers yet. Add your first subscriber to this workspace.' : 'No matching records.'}</td></tr>}</tbody></table></div></div></section>
 }

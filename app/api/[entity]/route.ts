@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { and, desc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { customers, packages, payments, radcheck, sites } from '@/lib/db/schema'
+import { customers, packages, payments, pppoeAccounts, radcheck, radreply, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { normalizeKenyanPhone } from '@/lib/daraja'
+import { toHotspotRadiusReplies } from '@/lib/hotspot-products'
 
 const tables = { sites, customers, packages, payments } as const
 type Entity = keyof typeof tables
@@ -27,13 +29,14 @@ function rateInMbps(value: string) {
 }
 
 function validate(entity: Entity, input: Record<string, unknown>) {
-  const required = entity === 'sites' ? ['name', 'location'] : entity === 'customers' ? ['name', 'email', 'radiusUsername', 'password'] : entity === 'packages' ? ['name', 'type', 'availability', 'rateLimit', 'monthlyPrice', 'durationSeconds', 'devicesPerAccount'] : ['amount']
+  const required = entity === 'sites' ? ['name', 'location'] : entity === 'customers' ? ['name', 'email', 'radiusUsername', 'password', 'packageId'] : entity === 'packages' ? ['name', 'type', 'availability', 'rateLimit', 'monthlyPrice', 'durationSeconds', 'devicesPerAccount'] : ['amount']
   for (const key of required) {
     if (input[key] === undefined || input[key] === null || (typeof input[key] === 'string' && !input[key].trim())) return `${key} is required`
   }
   if (entity === 'customers' && typeof input.email === 'string' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) return 'email is invalid'
   if (entity === 'customers' && (typeof input.radiusUsername !== 'string' || !/^[a-zA-Z0-9._@-]{3,64}$/.test(input.radiusUsername.trim()))) return 'RADIUS username must be 3-64 letters, numbers, dots, underscores, @ signs, or hyphens'
   if (entity === 'customers' && (typeof input.password !== 'string' || input.password.trim().length < 12 || input.password.length > 128)) return 'RADIUS password must be 12-128 characters'
+  if (entity === 'customers' && (typeof input.packageId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.packageId))) return 'Select a valid service plan'
   if (entity === 'packages') {
     if (!packageTypes.includes(String(input.type))) return 'Select a valid package type'
     if (!packageAvailabilities.includes(String(input.availability))) return 'Select a valid package availability'
@@ -108,39 +111,99 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
 
   if (entity === 'customers') {
     const radiusUsername = (input.radiusUsername as string).trim().toLowerCase()
+    const packageId = input.packageId as string
+    const phoneInput = typeof input.phone === 'string' ? input.phone.trim() : ''
+    const normalizedPhone = phoneInput ? normalizeKenyanPhone(phoneInput) : null
     try {
-      const customer = await db.transaction(async (tx) => {
+      const result = await db.transaction(async (tx) => {
+        const [plan] = await tx.select().from(packages).where(and(
+          eq(packages.id, packageId),
+          eq(packages.tenantId, tenantId),
+          eq(packages.active, true),
+        )).limit(1)
+        if (!plan || plan.availability === 'off') return { customer: null, error: 'The selected plan is unavailable. Refresh and choose an enabled plan.', status: 400 }
+        if (plan.type === 'PPPoE' && !normalizedPhone) return { customer: null, error: 'A valid Kenyan phone number is required for PPPoE subscribers.', status: 400 }
+
         const [existingRadiusUser] = await tx.select({ id: radcheck.id }).from(radcheck).where(and(eq(radcheck.username, radiusUsername), eq(radcheck.tenantId, tenantId))).limit(1)
-        if (existingRadiusUser) return null
+        if (existingRadiusUser) return { customer: null, error: 'RADIUS username already exists', status: 409 }
+        if (plan.type === 'PPPoE' && normalizedPhone) {
+          const [existingPppoeAccount] = await tx.select({ accountNumber: pppoeAccounts.accountNumber }).from(pppoeAccounts).where(and(
+            eq(pppoeAccounts.phone, normalizedPhone),
+            eq(pppoeAccounts.tenantId, tenantId),
+          )).limit(1)
+          if (existingPppoeAccount) return { customer: null, error: 'This phone number already has a PPPoE account.', status: 409 }
+        }
 
         const [createdCustomer] = await tx.insert(customers).values({
           tenantId,
           name: clean(input.name) as string,
-          email: clean(input.email) as string,
+          email: (clean(input.email) as string).toLowerCase(),
+          phone: normalizedPhone || (phoneInput || null),
+          plan: plan.name,
+          monthlyRate: plan.monthlyPrice,
           radiusUsername,
           status: 'suspended',
         }).returning()
 
-        await tx.insert(radcheck).values({
-          tenantId,
-          username: radiusUsername,
-          attribute: 'Cleartext-Password',
-          op: ':=',
-          value: input.password as string,
-        })
-        await tx.insert(radcheck).values({
-          tenantId,
-          username: radiusUsername,
-          attribute: 'Auth-Type',
-          op: ':=',
-          value: 'Reject',
-        })
+        const checkRules = [
+          {
+            tenantId,
+            username: radiusUsername,
+            attribute: 'Cleartext-Password',
+            op: ':=' as ':=' | '==' | '=~',
+            value: input.password as string,
+          },
+          {
+            tenantId,
+            username: radiusUsername,
+            attribute: 'Auth-Type',
+            op: ':=' as const,
+            value: 'Reject',
+          },
+          {
+            tenantId,
+            username: radiusUsername,
+            attribute: 'Simultaneous-Use',
+            op: ':=' as const,
+            value: String(plan.devicesPerAccount),
+          },
+        ]
+        if (plan.scheduleEnabled && plan.scheduleSpec) {
+          checkRules.push({ tenantId, username: radiusUsername, attribute: 'Login-Time', op: '==' as const, value: plan.scheduleSpec })
+        }
+        if (plan.nasRestrictions.length) {
+          const allowedNas = plan.nasRestrictions.map((address) => address.replace(/\./g, '\\.')).join('|')
+          checkRules.push({ tenantId, username: radiusUsername, attribute: 'NAS-IP-Address', op: '=~' as const, value: `^(${allowedNas})$` })
+        }
+        await tx.insert(radcheck).values(checkRules)
 
-        return createdCustomer
+        const replyRules = toHotspotRadiusReplies(radiusUsername, {
+          durationSeconds: plan.durationSeconds,
+          devicesPerAccount: plan.devicesPerAccount,
+          rateLimit: plan.rateLimit,
+          burstLimit: plan.burstLimit,
+          burstThreshold: plan.burstThreshold,
+          burstTimeSeconds: plan.burstTimeSeconds,
+          fupEnabled: plan.fupEnabled,
+          fupLimitBytes: plan.fupLimitBytes,
+        }).map((rule) => ({ ...rule, tenantId }))
+        await tx.insert(radreply).values(replyRules)
+
+        if (plan.type === 'PPPoE' && normalizedPhone) {
+          await tx.insert(pppoeAccounts).values({
+            tenantId,
+            phone: normalizedPhone,
+            name: createdCustomer.name,
+            email: createdCustomer.email,
+            customerId: createdCustomer.id,
+          })
+        }
+
+        return { customer: createdCustomer, error: null, status: 201 }
       })
 
-      if (!customer) return NextResponse.json({ error: 'RADIUS username already exists' }, { status: 409 })
-      return NextResponse.json(customer, { status: 201 })
+      if (!result.customer) return NextResponse.json({ error: result.error }, { status: result.status })
+      return NextResponse.json(result.customer, { status: 201 })
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
         return NextResponse.json({ error: 'RADIUS username already exists' }, { status: 409 })

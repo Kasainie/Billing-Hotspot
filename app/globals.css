@@ -514,6 +514,14 @@ td { color: #5e6469; }
 .checkout-submit:disabled { cursor: wait; opacity: .65; }
 .checkout-message { margin: 14px 0 0; border-radius: 6px; background: #eef7f3; padding: 11px 12px; color: #306c57; font-size: 12px; line-height: 1.5; }
 .checkout-message.is-error { background: #fff2ef; color: #973d31; }
+.pppoe-account-number-note { margin: -7px 0 16px; border-left: 3px solid #168b7b; padding: 8px 11px; color: #536963; background: #f3f8f6; font-size: 12px; line-height: 1.55; }
+.pppoe-account-number-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px 16px; margin-top: 14px; border: 1px solid #acd8ca; border-radius: 10px; background: linear-gradient(115deg, #eff9f5, #f8fcfa); padding: 15px 16px; }
+.pppoe-account-number-card > div { display: grid; gap: 5px; }
+.pppoe-account-number-card > div > span { color: #276d5b; font-size: 10px; font-weight: 800; letter-spacing: .07em; }
+.pppoe-account-number-card > div > small { color: #59736b; font-size: 11px; line-height: 1.45; }
+.pppoe-account-number-card > strong { color: #145d50; font: 700 23px Arial, Helvetica, sans-serif; letter-spacing: .045em; }
+.pppoe-account-number-card > button { grid-column: 1 / -1; justify-self: start; min-height: 35px; border: 1px solid #168b7b; border-radius: 6px; background: #fff; padding: 6px 12px; color: #126d5e; cursor: pointer; font-size: 12px; font-weight: 700; }
+.pppoe-account-number-card > button:hover { background: #e9f6f1; }
 .checkout-retry { display: block; margin: 12px auto 0; border: 0; background: transparent; color: #087f76; font-size: 11px; font-weight: 700; text-decoration: underline; }
 .checkout-hint { margin: 17px 0 0; color: #81918d; font-size: 10px; line-height: 1.55; }
 .subscription-panel { width: min(100%, 900px); border: 1px solid #dce6e3; border-radius: 10px; background: #fff; padding: 30px; box-shadow: 0 16px 45px #173f3814; }
@@ -685,6 +693,8 @@ td { color: #5e6469; }
   .subscription-plan { padding: 14px; }
   .checkout-shell { padding: 20px 12px; }
   .checkout-panel { padding: 23px 19px; }
+  .pppoe-account-number-card { gap: 8px 10px; padding: 13px; }
+  .pppoe-account-number-card > strong { font-size: 20px; }
   .checkout-steps { gap: 5px; font-size: 7px; }
   .checkout-steps > span { gap: 4px; }
 }
@@ -859,8 +869,8 @@ td { color: #5e6469; }
 .subscriber-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .subscriber-form-grid > label { display: flex; min-width: 0; flex-direction: column; gap: 7px; color: #3a454b; font-size: 11px; font-weight: 650; }
 .subscriber-form-grid > label > span { color: #c54545; }
-.subscriber-form-grid > label > input, .subscriber-password-field > input { width: 100%; min-width: 0; min-height: 42px; border: 1px solid #dce2e5; border-radius: 7px; outline: none; padding: 10px 12px; color: #283238; background: #fff; font-size: 12px; transition: border-color .16s ease, box-shadow .16s ease; }
-.subscriber-form-grid > label > input:focus, .subscriber-password-field:focus-within > input { border-color: #299678; box-shadow: 0 0 0 3px #2996781c; }
+.subscriber-form-grid > label > input, .subscriber-form-grid > label > select, .subscriber-password-field > input { width: 100%; min-width: 0; min-height: 42px; border: 1px solid #dce2e5; border-radius: 7px; outline: none; padding: 10px 12px; color: #283238; background: #fff; font-size: 12px; transition: border-color .16s ease, box-shadow .16s ease; }
+.subscriber-form-grid > label > input:focus, .subscriber-form-grid > label > select:focus, .subscriber-password-field:focus-within > input { border-color: #299678; box-shadow: 0 0 0 3px #2996781c; }
 .subscriber-form-grid > label > small { color: #7c878c; font-size: 10px; font-weight: 400; line-height: 1.4; }
 .subscriber-password-field { position: relative; display: flex; align-items: center; }
 .subscriber-password-field > input { padding-right: 43px; }
@@ -908,6 +918,28 @@ td { color: #5e6469; }
 .subscriber-workspace .subscriber-reactivation input { width: 100%; min-height: 40px; font-family: Arial, Helvetica, sans-serif; font-size: 13px; }
 .subscriber-workspace .table-scroll { padding-bottom: 3px; }
 .subscriber-workspace .crud-table td[colspan] { padding: 24px 12px; color: #596970; font-size: 14px; }
+.subscriber-details-toggle { min-height: 34px; border: 1px solid #c8ddd5; border-radius: 5px; background: #f5faf7; padding: 6px 10px; color: #246b50; cursor: pointer; font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 700; }
+.subscriber-details-toggle:hover:not(:disabled) { border-color: #83b8a3; background: #ebf6f0; }
+.subscriber-details-toggle:disabled { cursor: wait; opacity: .65; }
+.subscriber-detail-row > td { padding: 12px 0 18px !important; background: #f8faf9; }
+.subscriber-detail-loading { margin: 0; padding: 16px 20px; color: #536963; font-size: 13px; }
+.subscriber-detail-card { display: flex; flex-direction: column; gap: 17px; border: 1px solid #dfe8e4; border-radius: 9px; background: #fff; padding: 18px; white-space: normal; }
+.subscriber-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; border-bottom: 1px solid #edf0ee; padding-bottom: 12px; }
+.subscriber-detail-heading .eyebrow { color: #287a5f; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.subscriber-detail-heading h4 { margin: 4px 0 0; color: #26343a; font-family: Georgia, 'Times New Roman', serif; font-size: 19px; }
+.subscriber-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.subscriber-detail-grid > div { display: flex; min-width: 0; flex-direction: column; gap: 5px; border: 1px solid #edf0ee; border-radius: 6px; padding: 10px; }
+.subscriber-detail-grid span, .subscriber-login-details > div > span { color: #596970; font-size: 11px; }
+.subscriber-detail-grid strong { color: #2d3b40; font-size: 13px; overflow-wrap: anywhere; }
+.subscriber-login-details { display: grid; gap: 9px; border: 1px solid #d6e6df; border-radius: 8px; background: #f5faf7; padding: 13px; }
+.subscriber-login-details > div { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px 12px; border-bottom: 1px solid #e3ede8; padding: 7px 0 11px; }
+.subscriber-login-details > div:last-child { border: 0; padding-bottom: 4px; }
+.subscriber-login-details > div > span { grid-column: 1 / -1; color: #3f5e53; font-size: 11px; font-weight: 700; }
+.subscriber-login-details > div > strong { min-width: 0; color: #223a32; font-size: 14px; overflow-wrap: anywhere; }
+.subscriber-login-details .subscriber-password-value { font-family: Consolas, 'Courier New', monospace; letter-spacing: .025em; }
+.subscriber-login-details > div > button { min-height: 32px; border: 1px solid #ceded6; border-radius: 5px; background: #fff; padding: 5px 9px; color: #286e56; cursor: pointer; font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 700; }
+.subscriber-login-details > div > button:hover { background: #ebf6f0; }
+.subscriber-credential-warning { margin: 0; border-left: 3px solid #d2a246; padding: 8px 11px; color: #6e592d; background: #fff9ed; font-size: 11px; line-height: 1.55; }
 @media (max-width: 720px) {
   .operations-page-heading { align-items: flex-start; flex-direction: row; }
   .operations-page-heading > .outline-button { padding: 8px; font-size: 0; }
@@ -928,4 +960,15 @@ td { color: #5e6469; }
   .subscriber-workspace .crud-table .record-filter { width: 100%; }
   .subscriber-info-card { padding: 12px; }
   .subscriber-info-card p { font-size: 12px; }
+  .subscriber-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .subscriber-detail-card { padding: 13px; }
+  .subscriber-login-details { padding: 10px; }
+  .subscriber-login-details > div { grid-template-columns: minmax(0, 1fr) auto; }
+  .subscriber-login-details > div > button:last-child { grid-column: 2; }
+}
+@media (max-width: 420px) {
+  .subscriber-detail-grid { grid-template-columns: 1fr; }
+  .subscriber-login-details > div { grid-template-columns: 1fr; }
+  .subscriber-login-details > div > span { grid-column: 1; }
+  .subscriber-login-details > div > button, .subscriber-login-details > div > button:last-child { grid-column: 1; justify-self: start; }
 }

@@ -29,6 +29,7 @@ export function PppoeCheckout() {
   const [phone, setPhone] = useState('')
   const [paymentId, setPaymentId] = useState('')
   const [accountNumber, setAccountNumber] = useState('')
+  const [accountNumberCopied, setAccountNumberCopied] = useState(false)
   const [status, setStatus] = useState<'idle' | 'starting' | 'pending' | 'complete' | 'failed'>('idle')
   const [message, setMessage] = useState('')
   const [credentials, setCredentials] = useState<{ username: string; password: string; accountNumber: string; receipt?: string | null } | null>(null)
@@ -118,6 +119,15 @@ export function PppoeCheckout() {
   }
 
   const selectedPackage = packages.find((plan) => plan.id === packageId)
+  const copyAccountNumber = async () => {
+    try {
+      await navigator.clipboard.writeText(accountNumber || credentials?.accountNumber || '')
+      setAccountNumberCopied(true)
+      window.setTimeout(() => setAccountNumberCopied(false), 2000)
+    } catch {
+      setMessage('Unable to copy the account number. Please select and copy it manually.')
+    }
+  }
 
   return (
     <main className="checkout-shell">
@@ -129,7 +139,7 @@ export function PppoeCheckout() {
           <h1>Your PPPoE account is ready.</h1>
           <p className="checkout-copy">{message}</p>
           <div className="credential-box">
-            <div><span>M-Pesa PayBill account</span><strong>{credentials.accountNumber}</strong></div>
+            <div><span>Subscriber account number · M-Pesa PayBill</span><strong>{credentials.accountNumber}</strong></div>
             <div><span>PPPoE username</span><strong>{credentials.username}</strong></div>
             <div><span>Password</span><strong>{credentials.password}</strong></div>
             {credentials.receipt && <div><span>M-Pesa receipt</span><strong>{credentials.receipt}</strong></div>}
@@ -140,6 +150,7 @@ export function PppoeCheckout() {
           <h1>Get connected at home.</h1>
           <p className="checkout-copy">Choose a PPPoE plan and pay securely with M-Pesa. Your PPPoE login is created after payment is confirmed.</p>
           <div className="checkout-steps" aria-label="Signup steps"><span className="checkout-step-active"><b>1</b> Your details</span><i /><span><b>2</b> M-Pesa payment</span><i /><span><b>3</b> Get connected</span></div>
+          <p className="pppoe-account-number-note">Your subscriber account number is assigned when you start checkout. It will appear here to save for future M-Pesa payments.</p>
           {catalogError && <p className="checkout-message is-error" role="alert">{catalogError}</p>}
           {!catalogError && packages.length === 0 && <p className="checkout-message" role="status">There are no live PPPoE packages available right now. Contact customer care.</p>}
           {selectedPackage && <div className="selected-package"><span className="selected-package-label">YOUR HOME PLAN</span><span className="selected-package-name">{selectedPackage.name}</span><strong>KSh {selectedPackage.monthlyPrice.toLocaleString('en-KE')}</strong><small>{selectedPackage.rateLimit} speed <i /> {Math.ceil(selectedPackage.durationSeconds / 86400)} days</small></div>}
@@ -150,7 +161,11 @@ export function PppoeCheckout() {
             {packages.length > 1 && <label>Change package<select value={packageId} onChange={(event) => setPackageId(event.target.value)} required disabled={status === 'pending'}>{packages.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} — KSh {plan.monthlyPrice.toLocaleString('en-KE')}</option>)}</select></label>}
             <button className="checkout-submit" type="submit" disabled={status === 'starting' || status === 'pending' || !selectedPackage || Boolean(catalogError)}>{status === 'pending' ? 'Waiting for M-Pesa approval...' : 'Pay with M-Pesa'}</button>
           </form>
-          {accountNumber && status === 'pending' && <p className="checkout-message" role="status">Your PPPoE PayBill account number is <strong>{accountNumber}</strong>. Save it for future payments.</p>}
+          {accountNumber && status === 'pending' && <section className="pppoe-account-number-card" aria-label="Subscriber account number">
+            <div><span>YOUR SUBSCRIBER ACCOUNT NUMBER</span><small>Use this number as your M-Pesa PayBill account reference.</small></div>
+            <strong>{accountNumber}</strong>
+            <button type="button" onClick={() => void copyAccountNumber()}>{accountNumberCopied ? 'Copied' : 'Copy number'}</button>
+          </section>}
           {message && <p className={`checkout-message ${status === 'failed' ? 'is-error' : ''}`} role="status">{message}</p>}
           {status === 'failed' && <button className="checkout-retry" type="button" onClick={() => { setStatus('idle'); setMessage('') }}>Try payment again</button>}
           <p className="checkout-hint">M-Pesa PINs are entered only in the Safaricom prompt. This page never asks for your PIN.</p>
