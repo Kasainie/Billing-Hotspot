@@ -230,7 +230,7 @@ test('portal design catalog has a stylesheet for every non-default template', ()
   }
 })
 
-test('subscriber service script creates Hotspot DHCP and RADIUS PPPoE on the selected bridge', () => {
+test('subscriber service script safely reuses matching bridge DHCP and configures Hotspot and PPPoE', () => {
   const script = buildSubscriberServiceScript({
     bridgeName: 'lktech',
     ports: ['ether2', 'ether3'],
@@ -246,9 +246,27 @@ test('subscriber service script creates Hotspot DHCP and RADIUS PPPoE on the sel
   assert.match(script, /hotspot walled-garden add dst-host="billing\.lktech\.life" action=allow/)
   assert.match(script, /billing-pppoe-profile/)
   assert.match(script, /pppoe-server server add service-name="billing-pppoe" interface="lktech"/)
-  assert.match(script, /A DHCP server already exists/)
+  assert.match(script, /Existing DHCP network must match 172\.31\.0\.0\/24 with gateway 172\.31\.0\.1/)
+  assert.match(script, /Existing DHCP pool must stay within 172\.31\.0\.0\/24/)
+  assert.match(script, /interface="lktech" and disabled=no/)
+  assert.doesNotMatch(script, /A DHCP server already exists/)
   assert.match(script, /Refusing to move ether2; it already belongs to another bridge/)
   assert.match(script, /Refusing to bridge active DHCP uplink ether2/)
+})
+
+test('existing 192.168.88.0/24 DHCP can be reused without creating a second server', () => {
+  const script = buildSubscriberServiceScript({
+    bridgeName: 'bridge',
+    ports: ['ether2', 'ether3'],
+    services: ['Hotspot'],
+    hotspotSubnet: '192.168.88.0/24',
+  })
+
+  assert.match(script, /Existing DHCP network must match 192\.168\.88\.0\/24 with gateway 192\.168\.88\.1/)
+  assert.match(script, /Existing DHCP pool must stay within 192\.168\.88\.0\/24/)
+  assert.ok(script.includes(':if ([:len [/ip dhcp-server find where interface="bridge" and disabled=no]] = 0)'))
+  assert.match(script, /address="192\.168\.88\.1\/24" interface="bridge"/)
+  assert.match(script, /hotspot-address="192\.168\.88\.1"/)
 })
 
 test('Hotspot anti-sharing protection adds a scoped TTL rule and removes it when disabled', () => {

@@ -241,8 +241,25 @@ export function buildSubscriberServiceScript({
 
   const commands: string[] = []
   if (usesHotspot) {
+    const poolPrefix = hotspotNetwork!.gateway.replace(/\.1$/, '.')
     commands.push(
-      `:if ([:len [/ip dhcp-server find where interface="${bridgeName}" and name!="billing-hotspot-dhcp"]] > 0) do={:error "A DHCP server already exists on ${bridgeName}; reconcile it before enabling the managed Hotspot DHCP server"}`,
+      `:local existingBridgeDhcp [/ip dhcp-server find where interface="${bridgeName}" and disabled=no and name!="billing-hotspot-dhcp"]`,
+      ':if ([:len $existingBridgeDhcp] > 1) do={:error "Multiple DHCP servers are active on this bridge; reconcile them before enabling Hotspot"}',
+      ':if ([:len $existingBridgeDhcp] = 1) do={',
+      `  :if ([:len [/ip dhcp-server network find where address="${hotspotNetwork!.cidr}" and gateway="${hotspotNetwork!.gateway}"]] = 0) do={:error "Existing DHCP network must match ${hotspotNetwork!.cidr} with gateway ${hotspotNetwork!.gateway}; change the selected Hotspot subnet or reconcile DHCP first"}`,
+      '  :local existingBridgeDhcpId [:pick $existingBridgeDhcp 0]',
+      '  :local existingBridgePoolName [/ip dhcp-server get $existingBridgeDhcpId address-pool]',
+      '  :if ($existingBridgePoolName = "static-only") do={:error "Static-only DHCP cannot be verified safely for Hotspot; configure a matching dynamic pool first"}',
+      '  :local existingBridgePoolIds [/ip pool find where name=$existingBridgePoolName]',
+      '  :if ([:len $existingBridgePoolIds] != 1) do={:error "The existing DHCP address pool could not be verified; reconcile it before enabling Hotspot"}',
+      '  :local existingBridgePoolRanges [/ip pool get [:pick $existingBridgePoolIds 0] ranges]',
+      '  :if ([:find $existingBridgePoolRanges ","] != nil) do={:error "The existing DHCP pool has multiple ranges; reconcile it before enabling Hotspot"}',
+      '  :local existingBridgePoolSeparator [:find $existingBridgePoolRanges "-"]',
+      '  :if ([:typeof $existingBridgePoolSeparator] = "nil") do={:error "The existing DHCP pool range could not be verified; reconcile it before enabling Hotspot"}',
+      '  :local existingBridgePoolStart [:pick $existingBridgePoolRanges 0 $existingBridgePoolSeparator]',
+      '  :local existingBridgePoolEnd [:pick $existingBridgePoolRanges ($existingBridgePoolSeparator + 1) [:len $existingBridgePoolRanges]]',
+      `  :if (([:pick $existingBridgePoolStart 0 ${poolPrefix.length}] != "${poolPrefix}") or ([:pick $existingBridgePoolEnd 0 ${poolPrefix.length}] != "${poolPrefix}")) do={:error "Existing DHCP pool must stay within ${hotspotNetwork!.cidr}; choose the matching Hotspot subnet or reconcile DHCP first"}`,
+      '}',
       `:if ([:len [/ip hotspot find where interface="${bridgeName}" and name!="billing-hotspot"]] > 0) do={:error "A Hotspot server already exists on ${bridgeName}; reconcile it before enabling the managed Hotspot server"}`,
       `:if ([:len [/ip address find where interface="${bridgeName}" and address!="${hotspotNetwork!.gateway}/24"]] > 0) do={:error "${bridgeName} already has another IP address; reconcile it before enabling Hotspot"}`,
       `:if ([:len [/ip address find where address="${hotspotNetwork!.gateway}/24" and interface!="${bridgeName}"]] > 0) do={:error "Hotspot gateway address is already used on another interface"}`,
@@ -268,7 +285,7 @@ export function buildSubscriberServiceScript({
       `:if ([:len [/ip address find where interface="${bridgeName}" and address="${hotspotNetwork.gateway}/24"]] = 0) do={/ip address add address="${hotspotNetwork.gateway}/24" interface="${bridgeName}" comment="billing-system-managed-hotspot"}`,
       `:if ([:len [/ip pool find where name="billing-hotspot-pool"]] = 0) do={/ip pool add name="billing-hotspot-pool" ranges="${hotspotNetwork.range}"} else={/ip pool set [find where name="billing-hotspot-pool"] ranges="${hotspotNetwork.range}"}`,
       `:if ([:len [/ip dhcp-server network find where address="${hotspotNetwork.cidr}"]] = 0) do={/ip dhcp-server network add address="${hotspotNetwork.cidr}" gateway="${hotspotNetwork.gateway}" dns-server=1.1.1.1,8.8.8.8}`,
-      `:if ([:len [/ip dhcp-server find where name="billing-hotspot-dhcp"]] = 0) do={/ip dhcp-server add name="billing-hotspot-dhcp" interface="${bridgeName}" address-pool="billing-hotspot-pool" lease-time=1h disabled=no} else={/ip dhcp-server set [find where name="billing-hotspot-dhcp"] interface="${bridgeName}" address-pool="billing-hotspot-pool" lease-time=1h disabled=no}`,
+      `:if ([:len [/ip dhcp-server find where interface="${bridgeName}" and disabled=no]] = 0) do={:if ([:len [/ip dhcp-server find where name="billing-hotspot-dhcp"]] = 0) do={/ip dhcp-server add name="billing-hotspot-dhcp" interface="${bridgeName}" address-pool="billing-hotspot-pool" lease-time=1h disabled=no} else={/ip dhcp-server set [find where name="billing-hotspot-dhcp"] interface="${bridgeName}" address-pool="billing-hotspot-pool" lease-time=1h disabled=no}}`,
       ':local hotspotDirectory "hotspot"',
       ':if ([:len [/file find where name="flash"]] > 0) do={:set hotspotDirectory "flash/hotspot"}',
       `:if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m}`,
