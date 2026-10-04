@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Raven 4 | Hotspot Billing',
+  title: 'LKTECH | Hotspot Billing',
   description: 'Centralized ISP and hotspot billing operations dashboard.',
   generator: 'v0.app',
   icons: {

@@ -26,6 +26,7 @@ export async function GET(_request: NextRequest, context: RouteContext<'/provisi
         eq(routerProvisioningTokens.tokenHash, hashToken(token)),
         lt(routerProvisioningTokens.expiresAt, new Date()),
         ne(routerProvisioningTokens.status, 'applied'),
+        ne(routerProvisioningTokens.status, 'configured'),
         isNotNull(routerProvisioningTokens.configScript),
       ))
 

@@ -17,6 +17,32 @@ function safeJsonParse(raw: string): unknown {
   }
 }
 
+function parseRouterInventoryRecords(raw: string): Record<string, unknown> {
+  const inventory = {
+    interfaces: [] as Array<{ name: string; running: string; disabled: string }>,
+    bridgePorts: [] as Array<{ interface: string; bridge: string }>,
+    wanInterfaces: [] as string[],
+    bridges: [] as string[],
+  }
+
+  for (const record of raw.split(';')) {
+    const [kind, ...fields] = record.trim().split('|')
+    if (kind === 'I' && fields.length === 1) {
+      inventory.interfaces.push({ name: fields[0], running: 'false', disabled: 'false' })
+    } else if (kind === 'I' && fields.length === 3) {
+      inventory.interfaces.push({ name: fields[0], running: fields[1], disabled: fields[2] })
+    } else if (kind === 'P' && fields.length === 2) {
+      inventory.bridgePorts.push({ interface: fields[0], bridge: fields[1] })
+    } else if (kind === 'W' && fields.length === 1) {
+      inventory.wanInterfaces.push(fields[0])
+    } else if (kind === 'B' && fields.length === 1) {
+      inventory.bridges.push(fields[0])
+    }
+  }
+
+  return inventory
+}
+
 export async function readRouterInventoryPayload(request: Request): Promise<Record<string, unknown>> {
   const clone = request.clone()
 
@@ -30,7 +56,7 @@ export async function readRouterInventoryPayload(request: Request): Promise<Reco
   const rawText = await request.text()
   const parsed = safeJsonParse(rawText)
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
-  return {}
+  return parseRouterInventoryRecords(rawText)
 }
 
 export function isValidProvisioningBaseUrl(baseUrl: URL, env: { NODE_ENV?: string } = process.env) {
@@ -49,11 +75,13 @@ export function buildProvisioningScript({
   radiusServerAddress,
   radiusSecret,
   completeUrl,
+  tenantSlug,
 }: {
   routerName: string
   radiusServerAddress: string
   radiusSecret: string
   completeUrl: string
+  tenantSlug?: string
 }) {
   const safeName = routerName.replace(/\s+/g, ' ').trim()
   const radiusServices = 'ppp,hotspot'
@@ -67,6 +95,9 @@ export function buildProvisioningScript({
   ]
   const baseUrl = new URL(completeUrl).origin
   const hotspotBundleFiles = ['certificates.rsc', 'config.rsc', 'hotspot-files.rsc', 'hotspot.rsc']
+  const tenantQuery = tenantSlug && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(tenantSlug)
+    ? `?tenant=${encodeURIComponent(tenantSlug)}`
+    : ''
   const configScript = [
     ':local routerOsVersion [/system resource get version]',
     ':local versionDot [:find $routerOsVersion "."]',
@@ -74,15 +105,29 @@ export function buildProvisioningScript({
     ':if ([:pick $routerOsVersion 0 3] = "7.0") do={:error "RouterOS 7.1 or newer is required"}',
     `/system identity set name="${safeName}"`,
     ...radiusClientCommands,
-    ':local routerInterfaces [/interface ethernet print as-value]',
-    ':local currentBridgePorts [/interface bridge port print as-value]',
-    ':local boundDhcpClients [/ip dhcp-client print as-value where status="bound"]',
-    ':local currentBridges [/interface bridge print as-value]',
-    ':local routerInventory {interfaces=$routerInterfaces;bridgePorts=$currentBridgePorts;wanInterfaces=$boundDhcpClients;bridges=$currentBridges}',
-    ':local inventoryJson [:serialize to=json value=$routerInventory]',
-    `/tool fetch url="${completeUrl}" http-method=post http-data=$inventoryJson http-header-field="content-type:application/json" keep-result=no`,
+    ':local inventoryData ""',
+    ':foreach interfaceId in=[/interface ethernet find] do={',
+    '  :local interfaceName [/interface ethernet get $interfaceId name]',
+    '  :local interfaceRunning [/interface ethernet get $interfaceId running]',
+    '  :local interfaceDisabled [/interface ethernet get $interfaceId disabled]',
+    '  :set inventoryData ($inventoryData . "I|" . $interfaceName . "|" . $interfaceRunning . "|" . $interfaceDisabled . ";")',
+    '}',
+    ':foreach bridgePortId in=[/interface bridge port find] do={',
+    '  :local portInterface [/interface bridge port get $bridgePortId interface]',
+    '  :local portBridge [/interface bridge port get $bridgePortId bridge]',
+    '  :set inventoryData ($inventoryData . "P|" . $portInterface . "|" . $portBridge . ";")',
+    '}',
+    ':foreach dhcpClientId in=[/ip dhcp-client find where status="bound"] do={',
+    '  :local wanInterface [/ip dhcp-client get $dhcpClientId interface]',
+    '  :set inventoryData ($inventoryData . "W|" . $wanInterface . ";")',
+    '}',
+    ':foreach bridgeId in=[/interface bridge find] do={',
+    '  :local bridgeName [/interface bridge get $bridgeId name]',
+    '  :set inventoryData ($inventoryData . "B|" . $bridgeName . ";")',
+    '}',
+    `/tool fetch url="${completeUrl}" http-method=post http-data=$inventoryData http-header-field="content-type:text/plain" keep-result=no`,
     ...hotspotBundleFiles.flatMap((fileName) => [
-      `/tool fetch url="${baseUrl}/hotspot/${fileName}" dst-path=${fileName} keep-result=yes`,
+      `/tool fetch url="${baseUrl}/hotspot/${fileName}${fileName === 'hotspot-files.rsc' ? tenantQuery : ''}" dst-path=${fileName} keep-result=yes`,
       ':delay 2s',
       `/import ${fileName}`,
     ]),
@@ -121,13 +166,18 @@ const hotspotBundleScripts: Record<string, string> = {
 
 const hotspotAssetNames = ['login.html', 'status.html', 'logout.html', 'error.html', 'alogin.html', 'api.json', 'style.css', 'md5.js']
 
-export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https://billing.lktech.life'): string | null {
+export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https://billing.lktech.life', tenantSlug = ''): string | null {
   const normalizedName = String(fileName || '').trim().toLowerCase()
   if (normalizedName === 'hotspot-files.rsc') {
     const assetBase = new URL('/hotspot-assets/', assetBaseUrl).toString()
-    const fetchAssets = (directory: string) => hotspotAssetNames.map((assetName) => (
-      `/tool fetch url="${assetBase}${assetName}" dst-path="${directory}/${assetName}" keep-result=yes`
-    ))
+    const validTenantSlug = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(tenantSlug) ? tenantSlug : ''
+    const fetchAssets = (directory: string) => hotspotAssetNames.map((assetName) => {
+      const assetUrl = assetName === 'login.html'
+        ? new URL('/api/hotspot/portal-login', assetBaseUrl)
+        : new URL(assetName, assetBase)
+      if (assetName === 'login.html' && validTenantSlug) assetUrl.searchParams.set('tenant', validTenantSlug)
+      return `/tool fetch url="${assetUrl.toString()}" dst-path="${directory}/${assetName}" keep-result=yes`
+    })
     return [
       '# hotspot-files.rsc',
       ':if ([:len [/file find where name="flash"]] > 0) do={',
@@ -141,6 +191,10 @@ export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https:/
     ].join('\n')
   }
   return hotspotBundleScripts[normalizedName] ?? null
+}
+
+export function selectRouterBridgeName(bridgeNames: string[]) {
+  return bridgeNames.find((name) => ['lktech', 'lktech-bridge'].includes(name.trim().toLowerCase())) || bridgeNames[0] || null
 }
 
 export function parseServiceSubnet(value: string) {
@@ -160,12 +214,14 @@ export function buildSubscriberServiceScript({
   bridgeName,
   ports,
   services,
+  hotspotAntiSharing = false,
   hotspotSubnet,
   pppoeSubnet,
 }: {
   bridgeName: string
   ports: string[]
   services: string[]
+  hotspotAntiSharing?: boolean
   hotspotSubnet?: string
   pppoeSubnet?: string
 }) {
@@ -218,7 +274,16 @@ export function buildSubscriberServiceScript({
       `:if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m}`,
       `:if ([:len [/ip hotspot find where name="billing-hotspot"]] = 0) do={/ip hotspot add name="billing-hotspot" interface="${bridgeName}" address-pool=none profile="billing-hotspot-profile" disabled=no} else={/ip hotspot set [find where name="billing-hotspot"] interface="${bridgeName}" address-pool=none profile="billing-hotspot-profile" disabled=no}`,
       `:if ([:len [/ip firewall nat find where comment="billing-system-managed-hotspot-nat"]] = 0) do={/ip firewall nat add chain=srcnat action=masquerade src-address="${hotspotNetwork.cidr}" comment="billing-system-managed-hotspot-nat"}`,
+      ':if ([:len [/ip hotspot walled-garden find where dst-host="billing.lktech.life" and action="allow"]] = 0) do={/ip hotspot walled-garden add dst-host="billing.lktech.life" action=allow comment="billing-system-managed-portal"}',
     )
+  }
+
+  if (hotspotNetwork && hotspotAntiSharing) {
+    commands.push(
+      `:if ([:len [/ip firewall mangle find where comment="billing-system-managed-hotspot-anti-sharing"]] = 0) do={/ip firewall mangle add chain=postrouting out-interface="${bridgeName}" dst-address="${hotspotNetwork.cidr}" action=change-ttl new-ttl=set:1 comment="billing-system-managed-hotspot-anti-sharing"} else={/ip firewall mangle set [find where comment="billing-system-managed-hotspot-anti-sharing"] chain=postrouting out-interface="${bridgeName}" dst-address="${hotspotNetwork.cidr}" action=change-ttl new-ttl=set:1}`,
+    )
+  } else {
+    commands.push(':if ([:len [/ip firewall mangle find where comment="billing-system-managed-hotspot-anti-sharing"]] > 0) do={/ip firewall mangle remove [find where comment="billing-system-managed-hotspot-anti-sharing"]}')
   }
 
   if (pppoeNetwork) {
@@ -239,6 +304,6 @@ export function buildFetchCommand({ scriptUrl, completeUrl }: { scriptUrl: strin
   return `/tool fetch mode=${protocol} url="${scriptUrl}" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc`
 }
 
-export function buildServiceConfigFetchCommand({ scriptUrl }: { scriptUrl: string }) {
-  return `/tool fetch url="${scriptUrl}" dst-path=billing-services.rsc; :delay 2s; /import billing-services.rsc`
+export function buildServiceConfigFetchCommand({ scriptUrl, configuredUrl }: { scriptUrl: string; configuredUrl: string }) {
+  return `/tool fetch url="${scriptUrl}" dst-path=billing-services.rsc; :delay 2s; /import billing-services.rsc; /tool fetch url="${configuredUrl}" keep-result=no`
 }

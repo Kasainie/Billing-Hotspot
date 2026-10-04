@@ -1,47 +1,62 @@
-import { NextResponse } from 'next/server'
-import { desc } from 'drizzle-orm'
+import { NextRequest, NextResponse } from 'next/server'
+import { and, count, desc, eq, gte, lte, sum } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { customers, packages, payments, sites } from '@/lib/db/schema'
+import { getTenantSession } from '@/lib/db/tenant'
 
-const fallbackData = {
-  sites: [
-    { id: 'site-1', name: 'Central Hub', location: 'Accra Central', status: 'active', customersCount: 184, monthlyRevenue: 8600, createdAt: new Date().toISOString() },
-    { id: 'site-2', name: 'North Ridge', location: 'Tema', status: 'active', customersCount: 96, monthlyRevenue: 5100, createdAt: new Date().toISOString() },
-    { id: 'site-3', name: 'Lakeside Estate', location: 'East Legon', status: 'maintenance', customersCount: 72, monthlyRevenue: 3900, createdAt: new Date().toISOString() },
-  ],
-  customers: [
-    { id: 'customer-1', siteId: 'site-1', name: 'Amina Yusuf', email: 'amina@example.com', phone: '+233245000000', status: 'active', plan: 'Pro 50', monthlyRate: 240, expiresAt: new Date(Date.now() + 86400000 * 20).toISOString(), createdAt: new Date().toISOString() },
-    { id: 'customer-2', siteId: 'site-2', name: 'Daniel Osei', email: 'daniel@example.com', phone: '+233245000001', status: 'active', plan: 'Home 20', monthlyRate: 120, expiresAt: new Date(Date.now() + 86400000 * 12).toISOString(), createdAt: new Date().toISOString() },
-    { id: 'customer-3', siteId: 'site-3', name: 'Grace Boateng', email: 'grace@example.com', phone: '+233245000002', status: 'active', plan: 'Starter 10', monthlyRate: 80, expiresAt: new Date(Date.now() + 86400000 * 9).toISOString(), createdAt: new Date().toISOString() },
-  ],
-  payments: [
-    { id: 'payment-1', customerId: 'customer-1', amount: 240, status: 'paid', method: 'Mobile Money', paidAt: new Date().toISOString(), reference: 'PAY-84521' },
-    { id: 'payment-2', customerId: 'customer-2', amount: 120, status: 'paid', method: 'Card', paidAt: new Date().toISOString(), reference: 'PAY-84520' },
-    { id: 'payment-3', customerId: 'customer-3', amount: 80, status: 'pending', method: 'Mobile Money', paidAt: new Date().toISOString(), reference: 'PAY-84519' },
-  ],
-  packages: [
-    { id: 'package-1', name: 'Starter 10', downloadMbps: 10, uploadMbps: 5, monthlyPrice: 80, active: true, createdAt: new Date().toISOString() },
-    { id: 'package-2', name: 'Home 20', downloadMbps: 20, uploadMbps: 10, monthlyPrice: 120, active: true, createdAt: new Date().toISOString() },
-    { id: 'package-3', name: 'Pro 50', downloadMbps: 50, uploadMbps: 25, monthlyPrice: 240, active: true, createdAt: new Date().toISOString() },
-  ],
-}
-
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const session = await getTenantSession(request)
+  if (!session) return NextResponse.json({ error: 'Sign in to view the dashboard.' }, { status: 401 })
+  const tenantId = session.tenantId
   const hasDatabase = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim())
 
   if (!hasDatabase) {
-    return NextResponse.json(fallbackData)
+    return NextResponse.json({ error: 'Dashboard data requires a configured database.' }, { status: 503 })
   }
 
   try {
-    const [siteRows, customerRows, paymentRows, packageRows] = await Promise.all([
-      db.select().from(sites).orderBy(desc(sites.createdAt)),
-      db.select().from(customers).orderBy(desc(customers.createdAt)).limit(100),
-      db.select().from(payments).orderBy(desc(payments.paidAt)).limit(100),
-      db.select().from(packages).orderBy(desc(packages.createdAt)),
+    const range = request.nextUrl.searchParams.get('range')
+    const rangeMilliseconds = range === '24 hours' ? 24 * 60 * 60 * 1000 : range === '7 days' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000
+    const paymentSince = new Date(Date.now() - rangeMilliseconds)
+    const now = new Date()
+    const expiringBefore = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+    const [siteRows, customerRows, paymentRows, packageRows, expiringCustomerRows, activeCustomerCount, paidPaymentSummary, customerCountsBySite] = await Promise.all([
+      db.select().from(sites).where(eq(sites.tenantId, tenantId)).orderBy(desc(sites.createdAt)),
+      db.select().from(customers).where(eq(customers.tenantId, tenantId)).orderBy(desc(customers.createdAt)).limit(100),
+      db.select().from(payments).where(eq(payments.tenantId, tenantId)).orderBy(desc(payments.paidAt)).limit(100),
+      db.select().from(packages).where(eq(packages.tenantId, tenantId)).orderBy(desc(packages.createdAt)),
+      db.select().from(customers).where(and(
+        eq(customers.tenantId, tenantId),
+        eq(customers.status, 'active'),
+        gte(customers.expiresAt, now),
+        lte(customers.expiresAt, expiringBefore),
+      )).orderBy(customers.expiresAt).limit(100),
+      db.select({ value: count() }).from(customers).where(and(eq(customers.tenantId, tenantId), eq(customers.status, 'active'))),
+      db.select({ amount: sum(payments.amount), count: count() }).from(payments).where(and(
+        eq(payments.tenantId, tenantId),
+        eq(payments.status, 'paid'),
+        gte(payments.paidAt, paymentSince),
+        lte(payments.paidAt, now),
+      )),
+      db.select({ siteId: customers.siteId, count: count() }).from(customers).where(eq(customers.tenantId, tenantId)).groupBy(customers.siteId),
     ])
-    return NextResponse.json({ sites: siteRows, customers: customerRows, payments: paymentRows, packages: packageRows })
-  } catch {
-    return NextResponse.json(fallbackData)
+    const siteCustomerCounts = new Map(customerCountsBySite.map((row) => [row.siteId, row.count]))
+    return NextResponse.json({
+      sites: siteRows.map((site) => ({ ...site, customersCount: siteCustomerCounts.get(site.id) ?? 0 })),
+      customers: customerRows,
+      payments: paymentRows,
+      packages: packageRows,
+      expiringCustomers: expiringCustomerRows,
+      summary: {
+        activeCustomers: activeCustomerCount[0]?.value ?? 0,
+        siteCount: siteRows.length,
+        activePackages: packageRows.filter((plan) => plan.active).length,
+        paidRevenue: Number(paidPaymentSummary[0]?.amount ?? 0),
+        paidPaymentCount: paidPaymentSummary[0]?.count ?? 0,
+      },
+    })
+  } catch (error) {
+    console.error('Failed to load tenant dashboard data', error)
+    return NextResponse.json({ error: 'Unable to load dashboard data.' }, { status: 503 })
   }
 }

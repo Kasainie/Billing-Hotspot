@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { and, eq, gt, isNotNull, ne } from 'drizzle-orm'
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
-import { readRouterInventoryPayload } from '@/lib/router-provisioning'
+import { readRouterInventoryPayload, selectRouterBridgeName } from '@/lib/router-provisioning'
 import { routerProvisioningTokens } from '@/lib/db/schema'
 
 function hashToken(token: string) {
@@ -116,7 +116,7 @@ export async function POST(request: NextRequest, context: RouteContext<'/provisi
     interfaces,
     bridgePorts,
     wanInterfaces,
-    bridgeName: bridgeNames.includes('centripid-bridge') ? 'centripid-bridge' : bridgeNames[0] || null,
+    bridgeName: selectRouterBridgeName(bridgeNames),
   }
 
   try {

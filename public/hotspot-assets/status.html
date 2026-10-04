@@ -4,15 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="30">
-  <title>Connection status</title>
+  <meta name="theme-color" content="#f3f7f6">
+  <title>LKTech connection</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="portal-shell">
     <section class="portal-panel">
-      <div class="portal-mark" aria-hidden="true">N</div>
-      <p class="portal-kicker">CONNECTION STATUS</p>
-      <h1>You are connected</h1>
+      <div class="portal-brand" aria-label="LKTech"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
+      <p class="portal-kicker"><span class="online-dot"></span> CONNECTION ACTIVE</p>
+      <h1>You are online.</h1>
+      <p class="portal-copy">Your LKTech connection is ready to use.</p>
       <dl class="session-details">
         <div><dt>Account</dt><dd>$(username)</dd></div>
         <div><dt>Address</dt><dd>$(ip)</dd></div>
@@ -21,7 +23,7 @@
         <div><dt>Data sent</dt><dd>$(bytes-out-nice)</dd></div>
       </dl>
       <a class="portal-button secondary" href="$(link-logout)">Disconnect</a>
-      <p class="portal-footnote">This page refreshes every 30 seconds.</p>
+      <p class="portal-footnote">Session details refresh every 30 seconds.</p>
     </section>
   </main>
 </body>

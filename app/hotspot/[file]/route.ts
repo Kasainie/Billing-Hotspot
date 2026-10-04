@@ -6,7 +6,9 @@ export async function GET(
 ) {
   const { file } = await params
   const assetBaseUrl = process.env.PROVISIONING_BASE_URL || new URL(request.url).origin
-  const script = getHotspotBundleScript(file, assetBaseUrl)
+  const requestFile = new URL(request.url).pathname.split('/').pop() || ''
+  const tenantSlug = new URL(request.url).searchParams.get('tenant') || ''
+  const script = getHotspotBundleScript(file, assetBaseUrl, tenantSlug) || getHotspotBundleScript(requestFile, assetBaseUrl, tenantSlug)
 
   if (!script) {
     return new Response('Hotspot bundle file not found.', {

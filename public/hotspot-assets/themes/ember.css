@@ -1,0 +1,26 @@
+body.hotspot-home { background: #f5e9e7; color: #3a2928; --portal-graphic-primary: #c64f45; --portal-graphic-secondary: #342a29; --portal-price-accent: #b7443b; --portal-speed-accent: #863e39; --portal-time-accent: #715653; --portal-photo-wash: linear-gradient(180deg, rgba(57, 25, 22, .08), rgba(57, 25, 22, .32)); --portal-panel-wash: rgba(255, 255, 255, .78); --portal-card-wash: rgba(251, 245, 243, .84); --portal-voucher-wash: rgba(251, 244, 242, .82); }
+.hotspot-home .portal-stack { max-width: 480px; color: #3a2928; }
+.hotspot-home .portal-brand { color: #3a2928; }
+.hotspot-home .network-status { color: #745b58; }
+.hotspot-home .welcome-panel, .hotspot-home .package-section, .hotspot-home .account-section, .hotspot-home .receipt-section { border-color: #e3cbc7; background: var(--portal-panel-wash); box-shadow: 0 8px 20px #54241e12; }
+.hotspot-home .welcome-panel h1, .hotspot-home .section-heading h2, .hotspot-home .account-section h2, .hotspot-home .receipt-section h2 { color: #3a2928; }
+.hotspot-home .welcome-panel .portal-kicker, .hotspot-home .section-eyebrow { color: #b44e45; }
+.hotspot-home .welcome-panel > p:last-child, .hotspot-home .account-section > p:not(.section-eyebrow), .hotspot-home .receipt-section > div:first-child > p:last-child { color: #755e5a; }
+.hotspot-home .currency-label { border-color: #e1cbc7; color: #745854; }
+.hotspot-home .package-loading { border-color: #e1cbc7; background: var(--portal-card-wash); color: #745854; }
+.hotspot-home .package-card { border-color: #e0c8c3; background: var(--portal-card-wash); }
+.hotspot-home .package-name { color: #573b38; }
+.hotspot-home .package-currency, .hotspot-home .package-detail-label { color: #795f5b; }
+.hotspot-home .package-speed { color: var(--portal-speed-accent); }
+.hotspot-home .package-duration { color: var(--portal-time-accent); }
+.hotspot-home .package-card:hover, .hotspot-home .package-card.selected { border-color: #c64f45; background: #fff1ee; box-shadow: inset 0 0 0 1px #c64f45; }
+.hotspot-home .purchase-form > label, .hotspot-home .account-fields label, .hotspot-home .receipt-fields label { color: #614542; }
+.hotspot-home input { border-color: #dbc4bf; background: #fffdfc; color: #3a2928; }
+.hotspot-home .purchase-button, .hotspot-home .account-button { background: #c64f45; }
+.hotspot-home .purchase-button:hover:not(:disabled), .hotspot-home .account-button:hover { background: #a94037; }
+.hotspot-home .payment-hint, .hotspot-home .purchase-status { color: #795f5b; }
+.hotspot-home .voucher-link { border-color: #dec9c5; background: var(--portal-voucher-wash); color: #654943; }
+.hotspot-home .portal-footer { border-color: #dec8c3; color: #755a56; }
+.hotspot-home .orbit-middle { border-style: dashed; transform: rotate(-32deg) scaleY(.76); }
+.hotspot-home .graphic-satellite { border-radius: 2px; transform: rotate(45deg); }
+.hotspot-home .graphic-cable { background: repeating-linear-gradient(90deg, var(--portal-graphic-primary) 0 8px, transparent 8px 11px); }
