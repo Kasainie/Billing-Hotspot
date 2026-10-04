@@ -187,8 +187,9 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Provisioning link is not ready for configuration or has expired.' }, { status: 409 })
     }
 
+    const configurationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
     await db.update(routerProvisioningTokens)
-      .set({ configScript })
+      .set({ configScript, expiresAt: configurationExpiresAt })
       .where(and(eq(routerProvisioningTokens.id, record.id), eq(routerProvisioningTokens.tenantId, session.tenantId)))
 
     const scriptUrl = new URL(`/provision/${token}/configure`, baseUrl).toString()
