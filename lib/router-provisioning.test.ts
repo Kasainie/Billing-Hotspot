@@ -30,9 +30,9 @@ test('service configuration is downloaded and imported as a RouterOS file', () =
     scriptUrl: 'https://billing.example.com/provision/token123/configure',
     configuredUrl: 'https://billing.example.com/provision/token123/configured',
   })
-  assert.match(command, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configure" dst-path=billing-services\.rsc/)
-  assert.match(command, /\/import billing-services\.rsc/)
-  assert.match(command, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configured" keep-result=no$/)
+  assert.match(command, /^:do \{ \/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configure" dst-path=billing-services\.rsc;/)
+  assert.match(command, /\/import billing-services\.rsc;/)
+  assert.match(command, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configured" keep-result=no \} on-error=\{:put "LKTECH service configuration failed; confirmation was not sent"\}$/)
 })
 
 test('detected LKTech bridge is preferred over the legacy Centipid bridge', () => {
