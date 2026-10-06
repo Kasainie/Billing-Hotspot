@@ -10,6 +10,20 @@ export function parseRouterTimestamp(value: Date | string | null) {
   return Number.isFinite(timestamp.getTime()) ? timestamp : null
 }
 
+export function getLiveRouterUptimeSeconds(
+  uptimeSeconds: number | null,
+  lastSeenAt: Date | string | null,
+  now: number,
+  online: boolean,
+) {
+  if (uptimeSeconds === null) return null
+  const heartbeatTime = parseRouterTimestamp(lastSeenAt)?.getTime()
+  const elapsedSeconds = online && heartbeatTime !== undefined
+    ? Math.max(0, Math.floor((now - heartbeatTime) / 1_000))
+    : 0
+  return uptimeSeconds + elapsedSeconds
+}
+
 export function parseRouterUptime(value: string) {
   const compact = value.match(/^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i)
   if (compact && compact.slice(1).some(Boolean)) {

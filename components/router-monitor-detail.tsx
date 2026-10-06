@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Clock3, Cpu, HardDrive, MemoryStick, RefreshCw, Router as RouterIcon, Thermometer, Wifi } from 'lucide-react'
+import { getLiveRouterUptimeSeconds } from '@/lib/router-monitoring'
 
 export type RouterMonitorRecord = {
   id: string
@@ -132,14 +133,21 @@ export function RouterMonitorDetail({
   onReprovision: () => void
   onRemove: () => void
 }) {
-  const [range, setRange] = useState<(typeof ranges)[number]['id']>('24h')
+  const [range, setRange] = useState<(typeof ranges)[number]['id']>('1h')
   const [tab, setTab] = useState<MonitorTab>('System')
   const [samples, setSamples] = useState<MetricSample[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
+  const [liveClock, setLiveClock] = useState(() => Date.now())
   const loadInFlight = useRef(false)
+
+  useEffect(() => {
+    const tick = () => setLiveClock(Date.now())
+    const interval = window.setInterval(tick, 1_000)
+    return () => window.clearInterval(interval)
+  }, [])
 
   const loadMetrics = useCallback(async () => {
     if (!router.monitored) {
@@ -170,7 +178,7 @@ export function RouterMonitorDetail({
     void loadMetrics()
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadMetrics()
-    }, 15_000)
+    }, 1_000)
     const refreshOnFocus = () => {
       if (document.visibilityState === 'visible') void loadMetrics()
     }
@@ -182,6 +190,12 @@ export function RouterMonitorDetail({
   }, [loadMetrics])
 
   const latest = samples.at(-1)
+  const liveUptimeSeconds = getLiveRouterUptimeSeconds(
+    router.uptimeSeconds,
+    router.lastSeenAt,
+    liveClock,
+    router.status === 'online',
+  )
   const bandwidthRates = useMemo(() => samples.slice(1).flatMap((sample, index) => {
     const previous = samples[index]
     const elapsedSeconds = (new Date(sample.sampledAt).getTime() - new Date(previous.sampledAt).getTime()) / 1000
@@ -230,7 +244,7 @@ export function RouterMonitorDetail({
         <div className="router-detail-facts">
           <span>{router.boardName || 'RouterOS device'}</span>
           <span>{router.routerOsVersion || 'RouterOS version unavailable'}</span>
-          <span>Up {formatDuration(router.uptimeSeconds)}</span>
+          <span>Up {formatDuration(liveUptimeSeconds)}</span>
           {router.lastSeenAt && <span>Heartbeat {formatSampleTime(router.lastSeenAt)}</span>}
         </div>
         <div className="router-detail-actions">
@@ -276,7 +290,7 @@ export function RouterMonitorDetail({
               <ResourceBar icon={MemoryStick} label="Memory" value={router.memoryUsedPercent} />
               <ResourceBar icon={HardDrive} label="Disk" value={router.diskUsedPercent} />
               <ResourceValue icon={Thermometer} label="Temperature" value={latest?.temperatureCelsius === null || latest?.temperatureCelsius === undefined ? '—' : `${latest.temperatureCelsius} °C`} />
-              <ResourceValue icon={Clock3} label="Uptime" value={formatDuration(router.uptimeSeconds)} />
+              <ResourceValue icon={Clock3} label="Uptime" value={formatDuration(liveUptimeSeconds)} />
               <ResourceValue icon={RouterIcon} label="RouterOS" value={router.routerOsVersion || '—'} />
               <ResourceValue icon={Wifi} label="Heartbeat" value={router.status === 'online' ? 'Online' : 'No recent report'} />
               <ResourceValue icon={HardDrive} label="Samples" value={loading ? 'Loading…' : `${samples.length} in range`} />
@@ -284,7 +298,7 @@ export function RouterMonitorDetail({
             <section className="router-monitor-health panel router-connection-panel">
               <div className="router-monitor-side-heading"><strong>Connection &amp; monitoring</strong></div>
               <ResourceValue icon={Clock3} label="Last heartbeat" value={router.lastSeenAt ? formatSampleTime(router.lastSeenAt) : 'Never received'} />
-              <ResourceValue icon={RefreshCw} label="Reporting interval" value="30 seconds" />
+              <ResourceValue icon={RefreshCw} label="Reporting interval" value="1 second" />
               <ResourceValue icon={RouterIcon} label="Device model" value={router.boardName || 'Unavailable'} />
               <button className="router-script-link" type="button" onClick={onReprovision}>Copy monitoring install script</button>
             </section>
@@ -306,7 +320,7 @@ export function RouterMonitorDetail({
         <li><span>Disk capacity</span><strong className={router.diskUsedPercent !== null && router.diskUsedPercent < 90 ? 'is-good' : 'is-warning'}>{router.diskUsedPercent === null ? 'No data' : `${Math.round(router.diskUsedPercent)}% used`}</strong></li>
         <li><span>Latest report</span><strong>{router.lastSeenAt ? formatSampleTime(router.lastSeenAt) : 'Never received'}</strong></li>
       </ul><button className="outline-button" type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={14} /> Run checks again</button></section>}
-      <div className="router-monitor-last-updated">{loading ? 'Loading telemetry…' : lastRefreshedAt ? `Dashboard refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()} · router reports every 30 sec` : 'Waiting for telemetry'}<button type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={12} className={refreshing ? 'is-spinning' : undefined} /> Refresh</button></div>
+      <div className="router-monitor-last-updated">{loading ? 'Loading telemetry…' : lastRefreshedAt ? `Dashboard refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()} · router reports every second` : 'Waiting for telemetry'}<button type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={12} className={refreshing ? 'is-spinning' : undefined} /> Refresh</button></div>
     </section>
   )
 }

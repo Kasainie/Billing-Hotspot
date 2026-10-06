@@ -32,7 +32,7 @@ export function buildRouterMonitorScript({
     '  :local payload [:serialize value=$report to=json]',
     '  :do {/tool fetch url=$reportUrl http-method=post http-data=$payload http-header-field=("content-type:application/json,x-router-monitor-id:" . $monitorId . ",x-router-monitor-token:" . $monitorToken) keep-result=no} on-error={:log warning "LKTECH router monitoring heartbeat failed"}',
     '}',
-    '/system scheduler add name="lktech-monitor" interval=30s start-time=startup on-event="/system script run lktech-monitor" policy=read,write,test',
+    '/system scheduler add name="lktech-monitor" interval=1s start-time=startup on-event="/system script run lktech-monitor" policy=read,write,test',
     '/system script run lktech-monitor',
   ].join('\n')
 }

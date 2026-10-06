@@ -5,7 +5,7 @@ import { getTenantSession } from '@/lib/db/tenant'
 import { parseRouterTimestamp } from '@/lib/router-monitoring'
 
 const ranges = {
-  '1h': { duration: '1 hour', bucket: '1 minute' },
+  '1h': { duration: '1 hour', bucket: '1 second' },
   '24h': { duration: '24 hours', bucket: '1 minute' },
   '7d': { duration: '7 days', bucket: '1 hour' },
   '30d': { duration: '30 days', bucket: '3 hours' },

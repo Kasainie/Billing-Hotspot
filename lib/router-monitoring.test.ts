@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildProvisioningScript } from './router-provisioning.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { calculateRouterHealth, parseRouterTimestamp, parseRouterUptime } from './router-monitoring.ts'
+import { calculateRouterHealth, getLiveRouterUptimeSeconds, parseRouterTimestamp, parseRouterUptime } from './router-monitoring.ts'
 
 test('guided provisioning installs monitoring as part of the router configuration', () => {
   const script = buildProvisioningScript({
@@ -17,19 +17,19 @@ test('guided provisioning installs monitoring as part of the router configuratio
     },
   })
 
-  assert.match(script, /name="lktech-monitor" interval=30s/)
+  assert.match(script, /name="lktech-monitor" interval=1s/)
   assert.match(script, /\/api\/routers\/telemetry/)
   assert.ok(script.indexOf('name="lktech-monitor"') > script.indexOf('/import hotspot.rsc'))
 })
 
-test('router monitor setup installs an authenticated RouterOS heartbeat every 30 seconds', () => {
+test('router monitor setup installs an authenticated RouterOS heartbeat every second', () => {
   const script = buildRouterMonitorScript({
     routerId: 'a5746f73-7b79-4c0e-a52c-9c057e3074f8',
     monitorToken: 'a'.repeat(43),
     telemetryUrl: 'https://billing.example.com/api/routers/telemetry',
   })
 
-  assert.match(script, /interval=30s/)
+  assert.match(script, /interval=1s/)
   assert.match(script, /\/system script run lktech-monitor/)
   assert.match(script, /x-router-monitor-id/)
   assert.match(script, /x-router-monitor-token/)
@@ -67,6 +67,14 @@ test('router timestamps accept Date and database string values and reject invali
   assert.equal(parseRouterTimestamp(new Date(timestamp))?.toISOString(), timestamp)
   assert.equal(parseRouterTimestamp(null), null)
   assert.equal(parseRouterTimestamp('not-a-timestamp'), null)
+})
+
+test('router uptime advances from the latest heartbeat and stays fixed when offline', () => {
+  const lastSeenAt = '2026-10-06T10:00:00.000Z'
+  const now = Date.parse(lastSeenAt) + 23_000
+  assert.equal(getLiveRouterUptimeSeconds(3120, lastSeenAt, now, true), 3143)
+  assert.equal(getLiveRouterUptimeSeconds(3120, lastSeenAt, now, false), 3120)
+  assert.equal(getLiveRouterUptimeSeconds(null, lastSeenAt, now, true), null)
 })
 
 test('router health is unavailable offline and responds to resource pressure', () => {

@@ -1053,7 +1053,7 @@ function RouterManagement() {
     void load()
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load()
-    }, 15_000)
+    }, 1_000)
     const refreshOnFocus = () => {
       if (document.visibilityState === 'visible') void load()
     }
@@ -1203,7 +1203,7 @@ function RouterManagement() {
             </tbody>
           </table>
         </div>
-        <div className="router-table-footer">Routers report securely every 30 seconds; this page refreshes every 15 seconds while visible. Existing routers need the updated monitor script to use the faster interval.</div>
+        <div className="router-table-footer">Routers report securely every second; this page refreshes every second while visible. Existing routers need the updated monitor script to use this interval.</div>
       </div>
       <div className="router-management-footer"><button type="button" className="router-refresh-button" onClick={() => void load()} disabled={refreshing}><RefreshCw size={13} className={refreshing ? 'is-spinning' : undefined} />{refreshing ? 'Refreshing…' : 'Refresh routers'}</button></div>
     </section>
