@@ -1,4 +1,4 @@
-import { bigint, boolean, integer, jsonb, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core'
+import { bigint, boolean, index, integer, jsonb, pgTable, primaryKey, serial, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core'
 
 export const DEFAULT_TENANT_ID = 'default'
 
@@ -184,6 +184,9 @@ export const vouchers = pgTable('vouchers', {
   packageId: uuid('package_id').notNull().references(() => packages.id, { onDelete: 'restrict' }),
   username: text('username').notNull(),
   status: text('status').notNull().default('active'),
+  validitySeconds: integer('validity_seconds'),
+  activatedAt: timestamp('activated_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex('vouchers_tenant_username_unique_idx').on(table.tenantId, table.username),
@@ -283,6 +286,44 @@ export const routerProvisioningTokens = pgTable('router_provisioning_tokens', {
   appliedAt: timestamp('applied_at', { withTimezone: true }),
 })
 
+export const routerMonitors = pgTable('router_monitors', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  siteId: uuid('site_id').notNull().references(() => sites.id, { onDelete: 'cascade' }),
+  routerName: text('router_name').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  previousTokenHash: text('previous_token_hash'),
+  previousTokenExpiresAt: timestamp('previous_token_expires_at', { withTimezone: true }),
+  enabled: boolean('enabled').notNull().default(true),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  lastSourceIp: text('last_source_ip'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('router_monitors_tenant_name_unique_idx').on(table.tenantId, table.routerName),
+  uniqueIndex('router_monitors_token_hash_unique_idx').on(table.tokenHash),
+])
+
+export const routerMetricSamples = pgTable('router_metric_samples', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  routerId: uuid('router_id').notNull().references(() => routerMonitors.id, { onDelete: 'cascade' }),
+  sampledAt: timestamp('sampled_at', { withTimezone: true }).notNull().defaultNow(),
+  cpuLoad: integer('cpu_load').notNull(),
+  freeMemoryBytes: bigint('free_memory_bytes', { mode: 'number' }).notNull(),
+  totalMemoryBytes: bigint('total_memory_bytes', { mode: 'number' }).notNull(),
+  freeDiskBytes: bigint('free_disk_bytes', { mode: 'number' }),
+  totalDiskBytes: bigint('total_disk_bytes', { mode: 'number' }),
+  totalRxBytes: bigint('total_rx_bytes', { mode: 'number' }),
+  totalTxBytes: bigint('total_tx_bytes', { mode: 'number' }),
+  activeHotspotUsers: integer('active_hotspot_users').notNull().default(0),
+  activePppoeUsers: integer('active_pppoe_users').notNull().default(0),
+  uptimeSeconds: bigint('uptime_seconds', { mode: 'number' }).notNull(),
+  routerOsVersion: text('router_os_version'),
+  boardName: text('board_name'),
+  temperatureCelsius: integer('temperature_celsius'),
+}, (table) => [
+  index('router_metric_samples_router_sampled_idx').on(table.routerId, table.sampledAt),
+])
+
 export const radreply = pgTable('radreply', {
   id: serial('id').primaryKey(),
   tenantId: text('tenant_id').notNull().default(DEFAULT_TENANT_ID),
@@ -366,7 +407,7 @@ export const hotspotPurchases = pgTable('hotspot_purchases', {
   uniqueIndex('hotspot_purchases_receipt_unique_idx').on(table.receipt),
 ])
 
-export const schema = { tenants, tenantUsers, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens }
+export const schema = { tenants, tenantUsers, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerMetricSamples }
 export type Site = typeof sites.$inferSelect
 export type Customer = typeof customers.$inferSelect
 export type Payment = typeof payments.$inferSelect

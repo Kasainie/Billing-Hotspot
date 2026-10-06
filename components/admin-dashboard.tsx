@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -31,7 +31,9 @@ import {
   Network,
   Package,
   Palette,
+  Plus,
   Router,
+  RefreshCw,
   Search,
   Settings2,
   ShieldCheck,
@@ -48,6 +50,8 @@ import { defaultHotspotPortalBranding, hotspotPortalTemplates, isHotspotPortalTe
 import { PaymentSettings } from '@/components/payment-settings'
 import { PaymentReconciliation } from '@/components/payment-reconciliation'
 import { OperationsWorkspace } from '@/components/operations-workspace'
+import { LiveHotspotSessions } from '@/components/live-hotspot-sessions'
+import { RouterMonitorDetail, type RouterMonitorRecord } from '@/components/router-monitor-detail'
 
 const navigationSections: { label?: string; items: { label: string; icon: LucideIcon; count?: string; children?: { label: string; view: string; icon?: LucideIcon }[] }[] }[] = [
   { items: [{ label: 'Overview', icon: LayoutDashboard }] },
@@ -215,18 +219,31 @@ export function AdminDashboard() {
     const refreshDashboardData = async () => {
       try {
         const response = await fetch(`/api/dashboard?range=${encodeURIComponent(range)}`, { cache: 'no-store' })
-        if (!response.ok) {
-          const result = await response.json() as { error?: string }
-          throw new Error(result.error || 'Dashboard data is unavailable.')
+        const body = await response.text()
+        if (!body.trim()) {
+          throw new Error(`Dashboard request failed (HTTP ${response.status}): server returned an empty response.`)
         }
-        const data = await response.json() as DashboardData
+        let result: unknown
+        try {
+          result = JSON.parse(body)
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error
+          throw new Error(`Dashboard request failed (HTTP ${response.status}): server returned invalid JSON.`)
+        }
+        if (!response.ok) {
+          const errorMessage = result && typeof result === 'object' && 'error' in result && typeof result.error === 'string'
+            ? result.error
+            : `Dashboard request failed (HTTP ${response.status}).`
+          throw new Error(errorMessage)
+        }
+        const data = result as DashboardData
         if (!cancelled) {
           setDashboardData(data)
           setDataStatus('live')
         }
       } catch (error) {
         if (!cancelled) {
-          console.error('Unable to load dashboard data', error)
+          console.warn('Unable to load dashboard data', error)
           setDataStatus('error')
           setDashboardNotice(error instanceof Error ? error.message : 'Unable to load dashboard data.')
         }
@@ -328,6 +345,7 @@ export function AdminDashboard() {
       { id: 'subscribers', label: 'Subscribers', detail: 'Manage customer accounts', target: 'Subscribers', type: 'Page' },
       { id: 'plans', label: 'Plans', detail: 'Manage internet packages', target: 'Plans', type: 'Page' },
       { id: 'payments', label: 'Payments', detail: 'View billing transactions', target: 'Payments', type: 'Page' },
+      { id: 'live-sessions', label: 'Live sessions', detail: 'See connected hotspot devices', target: 'Live sessions', type: 'Page' },
       { id: 'routers', label: 'Routers', detail: 'Provision network devices', target: 'Routers', type: 'Page' },
       { id: 'portal-design', label: 'Portal design', detail: 'Customize the hotspot portal', target: 'Portal design', type: 'Page' },
       { id: 'payment-settings', label: 'Payment settings', detail: 'Configure payment providers', target: 'Payment settings', type: 'Page' },
@@ -539,7 +557,7 @@ export function AdminDashboard() {
           </div>
         </div></header>
         <div className="page-wrap" data-dashboard-network={dashboardSections.network} data-dashboard-activity={dashboardSections.activity} data-dashboard-operations={dashboardSections.operations}>
-          {activeNav === 'Routers' ? <RouterProvisioning onExit={() => setActiveNav('Overview')} onProvision={() => setActiveNav('Subscribers')} /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'Payments' ? <PaymentReconciliation /> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} /> : <ModulePanel title={activeNav} /> : null}
+          {activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'Payments' ? <PaymentReconciliation /> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} /> : <ModulePanel title={activeNav} /> : null}
           {activeNav === 'Overview' ? <>
           <div className="page-heading"><div><div className="live-label"><StatusDot tone={networkStatusTone} /> WORKSPACE OVERVIEW</div><h1>{timeGreeting || 'Welcome'}, {currentUser.trim().split(/\s+/)[0] || 'there'}.</h1><p>Workspace records and billing activity for your network.</p></div><div className="heading-actions"><button ref={customizeButtonRef} type="button" className="outline-button" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={openDashboardCustomization}><SlidersHorizontal size={15} /> Customize</button><button type="button" className="primary-button" onClick={exportDashboardReport}><ArrowDownRight size={15} /> Export report</button></div></div>
           {dashboardNotice && <p className="dashboard-notice" role="status">{dashboardNotice}<button type="button" aria-label="Dismiss message" onClick={() => setDashboardNotice('')}><X size={13} /></button></p>}
@@ -614,7 +632,7 @@ type RouterInventory = {
   bridgeName: string | null
 }
 
-const defaultHotspotSubnet = '172.31.0.0/24'
+const defaultHotspotSubnet = '192.168.88.0/24'
 const defaultPppoeSubnet = '172.31.1.0/24'
 const defaultBridgeName = 'lktech'
 
@@ -695,6 +713,8 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
       const configScript = buildSubscriberServiceScript({
         bridgeName: activeBridgeName,
         ports,
+        managedPorts: [...validInterfaces].filter((port) => !wanInterfaces.has(port)),
+        wanPorts: [...wanInterfaces],
         services,
         hotspotAntiSharing,
         hotspotSubnet: services.includes('Hotspot') ? activeHotspotSubnet : undefined,
@@ -926,6 +946,7 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
                 {!isWan && <button type="button" className="router-port-wan-toggle" aria-pressed={manualWanPort === portName} onClick={() => toggleWanPort(portName)}>{manualWanPort === portName ? 'Marked WAN' : 'Mark WAN'}</button>}
               </div>
             })}</div> : <p className="router-setup-hint">{routerInventory ? 'No ports were received from the router. Add the interface names shown in WinBox below.' : 'Waiting for router interface discovery. Keep the provisioning page open.'}</p>}
+            <p className="router-setup-hint">Only checked ports carry subscriber services. Existing members of this bridge that are unchecked will be removed when the script runs; ports on other bridges and marked WAN ports are left unchanged.</p>
             {!hasDiscoveredPorts && <div className="manual-port-entry">
               <label htmlFor="manual-router-port">Interface name</label>
               <div><input id="manual-router-port" value={manualPortName} maxLength={48} onChange={(event) => setManualPortName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addManualPort() } }} placeholder="e.g. ether2" /><button type="button" className="manual-port-add" onClick={addManualPort}>Add port</button></div>
@@ -934,7 +955,7 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
           </section>
 
           <section className="router-setup-section subnet-section">
-            <div className="router-setup-title"><div><h2>Subnet</h2><p>Optional custom networks. Defaults to 172.31.0.0/24 for Hotspot and 172.31.1.0/24 for PPPoE.</p></div></div>
+            <div className="router-setup-title"><div><h2>Subnet</h2><p>Optional custom networks. Defaults to the MikroTik LAN 192.168.88.0/24 for Hotspot and 172.31.1.0/24 for PPPoE.</p></div></div>
             <label className="subnet-toggle"><input type="checkbox" checked={useCustomSubnet} onChange={(event) => setUseCustomSubnet(event.target.checked)} /><span>Use custom subnet</span></label>
             {useCustomSubnet && <>
               {services.includes('Hotspot') && <label className="subnet-input">Hotspot and DHCP network<input value={hotspotSubnet} onChange={(event) => setHotspotSubnet(event.target.value)} aria-invalid={!hotspotNetwork} placeholder={defaultHotspotSubnet} /></label>}
@@ -942,7 +963,7 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
             </>}
             <p className="router-setup-hint">Hotspot creates a DHCP pool, RADIUS login profile, portal, and NAT rule. PPPoE creates a RADIUS-backed server and address pool. The script stops if an unmanaged server already uses the selected bridge.</p>
             {duplicateServiceNetworks && <p className="router-discovery-status error" role="alert">Hotspot and PPPoE must use different networks.</p>}
-            {((services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork)) && <p className="router-discovery-status error" role="alert">Enter a private network ending in `.0/24`, such as 172.31.0.0/24.</p>}
+            {((services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork)) && <p className="router-discovery-status error" role="alert">Enter a private network ending in `.0/24`, such as 192.168.88.0/24.</p>}
           </section>
 
           {configurationError && <p className="router-discovery-status error" role="alert">{configurationError}</p>}
@@ -952,7 +973,7 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
         {step === 3 && <>
           <div className="provision-card-heading"><h2>Confirm router services</h2><p>Paste this command in WinBox → New Terminal. It applies the selected settings and sends confirmation back to LKTECH.</p></div>
           <div className="script-frame"><pre>{applyCommand}</pre><button className="script-copy" onClick={() => copyConfig(applyCommand)}><Copy size={14} />{copied === 'router' ? 'Copied' : 'Copy script'}</button></div>
-          <div className="provision-notice pending-notice"><AlertTriangle size={17} /><span>The detected WAN port is excluded. Review the script before applying; unmanaged services on the bridge will cause it to stop rather than overwrite them.</span></div>
+          <div className="provision-notice pending-notice"><AlertTriangle size={17} /><span>The detected WAN port is protected. Unchecked ports already on {activeBridgeName} will be removed from that bridge; this disconnects devices on those ports. Ports assigned to other bridges are left alone.</span></div>
           <div className={`provision-notice ${provisioningState === 'configured' ? '' : 'pending-notice'}`} role="status">{provisioningState === 'configured' ? <CircleCheck size={17} /> : <Clock3 size={17} />}<span>{provisioningState === 'configured' ? 'RouterOS confirmed that the service configuration was applied.' : 'Run the command above in the MikroTik terminal. Confirmation normally arrives within seconds.'}</span></div>
           {provisioningState !== 'configured' && <div className="provision-confirm-actions"><p>Go live unlocks after the router confirms setup. If you already ran the command, check its status here.</p><button type="button" className="outline-button" onClick={() => void checkProvisioningStatus()} disabled={checkingProvisioningStatus}>{checkingProvisioningStatus ? 'Checking…' : 'Check status'}</button></div>}
           {provisioningCheckError && <p className="router-discovery-status error" role="alert">{provisioningCheckError}</p>}
@@ -965,6 +986,226 @@ export function RouterProvisioning({ onExit, onProvision, initialSiteName = 'Cen
         {step < steps.length - 1 && step !== 2 && <button className="wizard-next" disabled={(step === 0 && (!routerName.trim() || !fetchCommand || (requiresProvisioningKey && provisioningAdminKey.length < 32))) || (step === 1 && provisioningState !== 'applied')} onClick={() => setStep((current) => current + 1)}>{step === 0 ? 'Provision' : 'Configure services'}<ArrowRight size={15} /></button>}
         {step === steps.length - 1 && <button className="wizard-next" disabled={provisioningState !== 'configured'} onClick={onProvision}>Go live<Check size={15} /></button>}
       </div>
+    </section>
+  )
+}
+
+type RouterSessionsSummary = { activeSessions: number; connectedDevices: number; sessions: unknown[]; error?: string }
+type RouterListResponse = {
+  routers: RouterMonitorRecord[]
+  summary: { total: number; online: number; offline: number; notConfigured: number }
+  error?: string
+}
+type RouterInstallScript = { script: string; routerName: string }
+type RouterFilter = 'all' | 'online' | 'offline' | 'not_configured'
+
+function RouterManagement() {
+  const [routers, setRouters] = useState<RouterMonitorRecord[]>([])
+  const [summary, setSummary] = useState({ total: 0, online: 0, offline: 0, notConfigured: 0 })
+  const [activeSessions, setActiveSessions] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState('')
+  const [filter, setFilter] = useState('')
+  const [filterStatus, setFilterStatus] = useState<RouterFilter>('all')
+  const [showProvisioning, setShowProvisioning] = useState(false)
+  const [selectedRouterId, setSelectedRouterId] = useState('')
+  const [installScript, setInstallScript] = useState<RouterInstallScript | null>(null)
+  const [scriptBusy, setScriptBusy] = useState(false)
+  const [scriptCopied, setScriptCopied] = useState(false)
+  const [copiedError, setCopiedError] = useState('')
+  const loadInFlight = useRef(false)
+
+  const load = useCallback(async () => {
+    if (loadInFlight.current) return
+    loadInFlight.current = true
+    setRefreshing(true)
+    const [routersResult, sessionsResult] = await Promise.allSettled([
+      fetch('/api/routers', { cache: 'no-store' }).then(async (response) => {
+        const result = await response.json() as RouterListResponse
+        if (!response.ok) throw new Error(result.error || 'Unable to load router monitors.')
+        return result
+      }),
+      fetch('/api/hotspot/sessions', { cache: 'no-store' }).then(async (response) => {
+        const result = await response.json() as RouterSessionsSummary
+        if (!response.ok) throw new Error(result.error || 'Unable to load live session totals.')
+        return result
+      }),
+    ])
+
+    const errors: string[] = []
+    if (routersResult.status === 'fulfilled') {
+      setRouters(routersResult.value.routers)
+      setSummary(routersResult.value.summary)
+    } else errors.push(routersResult.reason instanceof Error ? routersResult.reason.message : 'Unable to load router monitors.')
+    if (sessionsResult.status === 'fulfilled') setActiveSessions(sessionsResult.value.activeSessions)
+    else {
+      setActiveSessions(null)
+      errors.push(sessionsResult.reason instanceof Error ? sessionsResult.reason.message : 'Unable to load live session totals.')
+    }
+    setError(errors.length ? errors.join(' ') : '')
+    setLoading(false)
+    setRefreshing(false)
+    loadInFlight.current = false
+  }, [])
+
+  useEffect(() => {
+    void load()
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load()
+    }, 15_000)
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'visible') void load()
+    }
+    document.addEventListener('visibilitychange', refreshOnFocus)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
+    }
+  }, [load])
+
+  const filteredRouters = useMemo(() => {
+    const term = filter.trim().toLowerCase()
+    return routers.filter((router) =>
+      `${router.routerName} ${router.location}`.toLowerCase().includes(term) &&
+      (filterStatus === 'all' || router.status === filterStatus))
+  }, [filter, filterStatus, routers])
+  const selectedRouter = routers.find((router) => router.id === selectedRouterId)
+
+  const generateMonitorScript = async (router: RouterMonitorRecord) => {
+    setSelectedRouterId(router.id)
+    setScriptBusy(true)
+    setCopiedError('')
+    try {
+      const endpoint = router.monitored
+        ? `/api/routers/${encodeURIComponent(router.id)}/monitoring`
+        : '/api/routers/monitoring'
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: router.monitored
+          ? undefined
+          : JSON.stringify({ siteId: router.siteId, routerName: router.routerName }),
+      })
+      const result = await response.json() as RouterInstallScript & { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to prepare a monitoring install script.')
+      setInstallScript(result)
+      await load()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to prepare a monitoring install script.')
+    } finally {
+      setScriptBusy(false)
+    }
+  }
+
+  const removeRouterMonitor = async (router: RouterMonitorRecord) => {
+    if (!window.confirm(`Remove monitoring for ${router.routerName}? Its monitoring history will also be deleted.`)) return
+    try {
+      const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/monitoring`, { method: 'DELETE' })
+      const result = response.status === 204 ? null : await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result?.error || 'Unable to remove router monitoring.')
+      setSelectedRouterId('')
+      await load()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to remove router monitoring.')
+    }
+  }
+
+  const copyMonitorScript = async () => {
+    if (!installScript) return
+    try {
+      await navigator.clipboard.writeText(installScript.script)
+      setScriptCopied(true)
+      setCopiedError('')
+    } catch {
+      setCopiedError('Could not copy the script. Select the script text and copy it manually.')
+    }
+  }
+
+  if (showProvisioning) {
+    return <RouterProvisioning
+      onExit={() => { setShowProvisioning(false); void load() }}
+      onProvision={() => { setShowProvisioning(false); void load() }}
+    />
+  }
+
+  if (selectedRouter) {
+    return <>
+      <RouterMonitorDetail
+        router={selectedRouter}
+        onBack={() => setSelectedRouterId('')}
+        onReprovision={() => void generateMonitorScript(selectedRouter)}
+        onRemove={() => void removeRouterMonitor(selectedRouter)}
+      />
+      {scriptBusy && <p className="router-detail-script-status" role="status">Preparing a new one-time monitor script…</p>}
+      {installScript && <div className="router-script-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setInstallScript(null) }}>
+        <section className="router-script-modal panel" role="dialog" aria-modal="true" aria-labelledby="router-script-title">
+          <div className="router-script-modal-heading"><div><span>SECURE ROUTER MONITORING</span><h2 id="router-script-title">Install on {installScript.routerName}</h2><p>Paste this one-time script into the MikroTik terminal. It replaces the previous LKTECH monitor token.</p></div><button type="button" aria-label="Close" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}><X size={17} /></button></div>
+          <label className="router-script-label">RouterOS install script<textarea readOnly value={installScript.script} rows={10} onFocus={(event) => event.currentTarget.select()} /></label>
+          {copiedError && <p className="router-discovery-status error" role="alert">{copiedError}</p>}
+          <div className="router-script-modal-actions"><button type="button" className="outline-button" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}>Close</button><button type="button" className="router-link-button" onClick={() => void copyMonitorScript()}><Copy size={14} /> {scriptCopied ? 'Copied' : 'Copy script'}</button></div>
+        </section>
+      </div>}
+    </>
+  }
+
+  return (
+    <section className="router-management">
+      <div className="router-management-heading">
+        <div>
+          <div className="router-management-breadcrumb"><span>NETWORK</span><span aria-hidden="true">—</span><span>ROUTERS</span></div>
+          <h1>NAS &amp; <span>routers.</span></h1>
+          <p>Link a router, paste the script, go live with PPPoE or Hotspot. <button type="button" className="router-learn-link" onClick={() => setShowProvisioning(true)}>Learn more <ArrowRight size={12} /></button></p>
+        </div>
+        <button type="button" className="router-link-button" onClick={() => setShowProvisioning(true)}><Plus size={15} /> Link MikroTik</button>
+      </div>
+
+      {error && <p className="dashboard-notice" role="alert">{error}</p>}
+
+      <div className="router-metrics">
+        <article><span>ROUTERS</span><strong>{loading ? '—' : summary.total.toLocaleString()}</strong><small>{summary.notConfigured.toLocaleString()} waiting for monitor install</small></article>
+        <article><span>ONLINE</span><strong>{loading ? '—' : summary.online.toLocaleString()}</strong><small>heartbeat received in last 3 minutes</small></article>
+        <article><span>OFFLINE</span><strong>{loading ? '—' : summary.offline.toLocaleString()}</strong><small>no recent heartbeat</small></article>
+        <article><span>LIVE SESSIONS</span><strong>{activeSessions === null ? '—' : activeSessions.toLocaleString()}</strong><small>open RADIUS sessions workspace-wide</small></article>
+      </div>
+
+      <div className="router-list-toolbar">
+        <div className="router-list-filters" aria-label="Filter routers by monitoring status">
+          {([
+            ['all', 'All', summary.total],
+            ['online', 'Online', summary.online],
+            ['offline', 'Offline', summary.offline],
+            ['not_configured', 'Setup needed', summary.notConfigured],
+          ] as const).map(([value, label, count]) => <button key={value} type="button" className={filterStatus === value ? 'active' : ''} aria-pressed={filterStatus === value} onClick={() => setFilterStatus(value)}>{label}<span>{loading ? '—' : count}</span></button>)}
+        </div>
+        <label className="router-search"><Search size={15} /><input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Search name or location…" aria-label="Search routers by name or location" />{filter && <button type="button" aria-label="Clear search" onClick={() => setFilter('')}><X size={14} /></button>}</label>
+      </div>
+
+      <div className="router-table-wrap">
+        <div className="table-scroll">
+          <table className="router-management-table">
+            <thead><tr><th>ROUTER</th><th>STATUS</th><th>HOTSPOT / PPPoE</th><th>ROUTEROS</th><th>LAST ONLINE</th><th /></tr></thead>
+            <tbody>
+              {filteredRouters.map((router) => (
+                <tr key={router.id}>
+                  <td><strong>{router.routerName}</strong><span>{router.boardName || router.location}</span></td>
+                  <td><span className={`router-monitoring-status ${router.status}`}>{router.status === 'not_configured' ? 'Setup needed' : router.status === 'online' ? 'Online' : 'Offline'}</span></td>
+                  <td>{router.activeHotspotUsers === null || router.activePppoeUsers === null ? '—' : `${router.activeHotspotUsers} / ${router.activePppoeUsers}`}</td>
+                  <td>{router.routerOsVersion || '—'}</td>
+                  <td>{router.lastSeenAt ? new Date(router.lastSeenAt).toLocaleString() : 'Never reported'}</td>
+                  <td>{router.monitored
+                    ? <div className="router-row-actions"><button type="button" className="router-row-action" onClick={() => setSelectedRouterId(router.id)}>Monitor</button><button type="button" className="router-row-action" aria-label={`Reprovision monitoring for ${router.routerName}`} disabled={scriptBusy} onClick={() => void generateMonitorScript(router)}><RefreshCw size={13} /></button></div>
+                    : <button type="button" className="router-row-action enable-monitor-action" disabled={scriptBusy} onClick={() => void generateMonitorScript(router)}>{scriptBusy ? 'Preparing…' : 'Enable monitor'}</button>}</td>
+                </tr>
+              ))}
+              {!loading && filteredRouters.length === 0 && <tr><td colSpan={6}>{routers.length ? 'No routers match your search.' : 'No network sites are registered. Link a MikroTik router to get started.'}</td></tr>}
+              {loading && <tr><td colSpan={6}>Loading router monitors…</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div className="router-table-footer">Routers report securely every 30 seconds; this page refreshes every 15 seconds while visible. Existing routers need the updated monitor script to use the faster interval.</div>
+      </div>
+      <div className="router-management-footer"><button type="button" className="router-refresh-button" onClick={() => void load()} disabled={refreshing}><RefreshCw size={13} className={refreshing ? 'is-spinning' : undefined} />{refreshing ? 'Refreshing…' : 'Refresh routers'}</button></div>
     </section>
   )
 }

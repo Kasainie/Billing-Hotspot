@@ -1,15 +1,15 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowDownToLine, Plus, RefreshCw, Ticket, Trash2, X } from 'lucide-react'
+import { ArrowDownToLine, CalendarClock, Clock3, Plus, RefreshCw, ShieldCheck, Ticket, Trash2, X } from 'lucide-react'
 
 type ModuleView = 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'Equipment' | 'TR-069' | 'Invoices'
 type Lead = { id: string; name: string; email: string | null; phone: string | null; source: string | null; notes: string | null; status: string; createdAt: string }
 type SupportTicket = { id: string; requesterName: string; requesterEmail: string | null; subject: string; description: string; priority: string; status: string; assignedTo: string | null; createdAt: string; updatedAt: string }
 type Expense = { id: string; category: string; description: string; amount: number; paidTo: string | null; reference: string | null; occurredAt: string }
-type Voucher = { id: string; packageId: string; packageName: string; username: string; status: string; createdAt: string }
-type VoucherPackage = { id: string; name: string; rateLimit: string; monthlyPrice: number }
-type GeneratedVoucher = { id: string; username: string; password: string; packageName: string }
+type Voucher = { id: string; packageId: string; packageName: string; username: string; status: string; validitySeconds: number | null; activatedAt: string | null; expiresAt: string | null; createdAt: string }
+type VoucherPackage = { id: string; name: string; rateLimit: string; monthlyPrice: number; durationSeconds: number }
+type GeneratedVoucher = { id: string; username: string; password: string; packageName: string; validitySeconds: number }
 type Equipment = { id: string; name: string; category: string; serialNumber: string | null; manufacturer: string | null; model: string | null; status: string; condition: string; purchasedAt: string | null; notes: string | null; siteId: string | null; siteName: string | null }
 type Tr069Device = { id: string; siteId: string | null; siteName: string | null; serialNumber: string; manufacturer: string | null; model: string | null; firmwareVersion: string | null; status: string; lastInformAt: string | null; notes: string | null; createdAt: string }
 type Invoice = { id: string; customerId: string; customerName: string; customerEmail: string; customerPhone: string | null; invoiceNumber: string; periodStart: string; periodEnd: string; dueAt: string; amount: number; description: string; status: string; paidAt: string | null; createdAt: string }
@@ -26,6 +26,28 @@ function formatAmount(value: number) {
 function formatDate(value: string) {
   const date = new Date(value)
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : '—'
+}
+
+function formatVoucherDate(value: string | null) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isFinite(date.getTime())
+    ? `${new Intl.DateTimeFormat('en-KE', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Africa/Nairobi' }).format(date)} EAT`
+    : '—'
+}
+
+function formatVoucherValidity(seconds: number | null) {
+  if (!seconds || seconds <= 0) return 'No expiry configured'
+  if (seconds % 86400 === 0) return `${seconds / 86400} ${seconds / 86400 === 1 ? 'day' : 'days'}`
+  if (seconds % 3600 === 0) return `${seconds / 3600} ${seconds / 3600 === 1 ? 'hour' : 'hours'}`
+  if (seconds % 60 === 0) return `${seconds / 60} minutes`
+  return `${seconds} seconds`
+}
+
+function getVoucherState(voucher: Voucher, now: number) {
+  if (voucher.status === 'disabled') return 'disabled'
+  if (voucher.expiresAt && new Date(voucher.expiresAt).getTime() <= now) return 'expired'
+  return voucher.activatedAt ? 'in_use' : 'ready'
 }
 
 function recordCount(totals: { status: string; count: number }[] | undefined, status: string) {
@@ -65,6 +87,8 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [filter, setFilter] = useState('')
+  const [voucherStatusFilter, setVoucherStatusFilter] = useState('all')
+  const [voucherNow, setVoucherNow] = useState(() => Date.now())
   const [leadForm, setLeadForm] = useState({ name: '', email: '', phone: '', source: '', notes: '' })
   const [ticketForm, setTicketForm] = useState({ requesterName: '', requesterEmail: '', subject: '', description: '', priority: 'normal' })
   const [expenseForm, setExpenseForm] = useState({ category: '', description: '', amount: '', paidTo: '', reference: '', occurredAt: new Date().toISOString().slice(0, 10) })
@@ -102,11 +126,25 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
     void load()
   }, [load])
 
+  useEffect(() => {
+    if (entity !== 'vouchers') return
+    const timer = window.setInterval(() => setVoucherNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [entity])
+
   const filteredItems = useMemo(() => {
     const term = filter.trim().toLowerCase()
     if (!term) return items
     return items.filter((item) => JSON.stringify(item).toLowerCase().includes(term))
   }, [filter, items])
+  const filteredVouchers = useMemo(() => (filteredItems as Voucher[])
+    .filter((voucher) => voucherStatusFilter === 'all' || getVoucherState(voucher, voucherNow) === voucherStatusFilter),
+  [filteredItems, voucherStatusFilter, voucherNow])
+  const voucherCounts = useMemo(() => {
+    const counts = { ready: 0, in_use: 0, expired: 0, disabled: 0 }
+    for (const voucher of items as Voucher[]) counts[getVoucherState(voucher, voucherNow)] += 1
+    return counts
+  }, [items, voucherNow])
 
   async function createRecord(body: Record<string, unknown>) {
     setSaving(true)
@@ -122,7 +160,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
       if (!response.ok) throw new Error(result.error || 'Unable to save this record.')
       if (entity === 'vouchers') {
         setGeneratedVouchers(result.vouchers || [])
-        setNotice(`${result.vouchers?.length || 0} voucher credentials created and added to RADIUS. Save or download the credentials now; passwords are only shown once.`)
+        setNotice(`${result.vouchers?.length || 0} voucher credentials created. Their plan validity starts on first connection; save or download the one-time passwords now.`)
         setVoucherForm((current) => ({ ...current, quantity: '10' }))
       } else if (entity === 'invoices') {
         setNotice(`Billing period ${result.period}: ${result.created} invoices issued; ${result.skipped} already existed or were not eligible out of ${result.eligible} active subscribers.`)
@@ -187,8 +225,23 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
 
   function downloadGeneratedVouchers() {
     downloadCsv(`lktech-vouchers-${new Date().toISOString().slice(0, 10)}.csv`, [
-      ['Username', 'Password', 'Plan'],
-      ...generatedVouchers.map((voucher) => [voucher.username, voucher.password, voucher.packageName]),
+      ['Username', 'Password', 'Plan', 'Valid for', 'Expiry'],
+      ...generatedVouchers.map((voucher) => [voucher.username, voucher.password, voucher.packageName, formatVoucherValidity(voucher.validitySeconds), 'Starts on first connection']),
+    ])
+  }
+
+  function downloadVoucherRegister() {
+    downloadCsv(`lktech-issued-vouchers-${new Date().toISOString().slice(0, 10)}.csv`, [
+      ['Username', 'Plan', 'Status', 'Created', 'First connection', 'Expires', 'Validity'],
+      ...filteredVouchers.map((voucher) => [
+        voucher.username,
+        voucher.packageName,
+        getVoucherState(voucher, voucherNow).replace('_', ' '),
+        voucher.createdAt,
+        voucher.activatedAt || '',
+        voucher.expiresAt || '',
+        formatVoucherValidity(voucher.validitySeconds),
+      ]),
     ])
   }
 
@@ -220,7 +273,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
               : 'Create RADIUS-backed hotspot credentials and track issued voucher codes.'
 
   return (
-    <section className="operations-workspace">
+    <section className={`operations-workspace${entity === 'vouchers' ? ' voucher-workspace' : ''}`}>
       <div className="page-heading operations-page-heading">
         <div><div className="live-label"><Ticket size={13} /> WORKSPACE OPERATIONS</div><h1>{title}</h1><p>{description}</p></div>
         <button type="button" className="outline-button" onClick={() => void load()} disabled={loading}><RefreshCw size={14} /> Refresh</button>
@@ -290,8 +343,58 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
         <RecordTable title="Invoice register" items={filteredItems.length} loading={loading} filter={filter} setFilter={setFilter} filterLabel="Filter invoices" emptyText="No invoices found. Generate a billing period to create invoices." headers={['Invoice / subscriber', 'Billing period', 'Due date', 'Amount', 'Status', 'Actions']}><tbody>{(filteredItems as Invoice[]).map((invoice) => <tr key={invoice.id}><td><strong>{invoice.invoiceNumber}</strong><span>{invoice.customerName} · {invoice.customerEmail}</span></td><td>{new Date(invoice.periodStart).toLocaleDateString()} – {new Date(invoice.periodEnd).toLocaleDateString()}<span>{invoice.description}</span></td><td>{formatDate(invoice.dueAt)}</td><td>{formatAmount(invoice.amount)}</td><td><span className={`table-status ${invoice.status === 'void' ? 'is-disabled' : ''}`}>{invoice.status}</span></td><td>{invoice.status === 'issued' ? <div className="subscriber-actions"><button type="button" className="text-button" disabled={saving} onClick={() => void updateRecord(invoice.id, { status: 'paid' })}>Mark paid</button><button type="button" className="text-button danger-text" disabled={saving} onClick={() => void updateRecord(invoice.id, { status: 'void' })}>Void</button></div> : invoice.status === 'draft' ? <button type="button" className="text-button" disabled={saving} onClick={() => void updateRecord(invoice.id, { status: 'issued' })}>Issue</button> : '—'}</td></tr>)}</tbody></RecordTable>
         <div className="operations-export-row"><button type="button" className="outline-button" onClick={downloadInvoices}><ArrowDownToLine size={14} /> Export filtered invoices</button><span>CSV contains the currently filtered rows.</span></div>
       </> : <>
-        {view === 'Generate vouchers' && <><form className="operations-form panel" onSubmit={(event) => { event.preventDefault(); void createRecord({ ...voucherForm, quantity: Number(voucherForm.quantity) }) }}><h2>Generate hotspot vouchers</h2><p>Credentials are created in your workspace and registered with RADIUS. Passwords are shown only once.</p><div className="operations-form-grid"><label>Active plan<select required value={voucherForm.packageId} onChange={(event) => setVoucherForm({ ...voucherForm, packageId: event.target.value })}><option value="">Select a plan</option>{availablePackages.map((plan) => <option value={plan.id} key={plan.id}>{plan.name} · {plan.rateLimit}</option>)}</select></label><label>Quantity<input required type="number" min="1" max="100" value={voucherForm.quantity} onChange={(event) => setVoucherForm({ ...voucherForm, quantity: event.target.value })} /></label></div><button type="submit" className="primary-button" disabled={saving || !availablePackages.length}><Ticket size={14} /> {saving ? 'Generating…' : 'Generate vouchers'}</button>{!loading && availablePackages.length === 0 && <p className="operations-help">Create and activate an internet plan before generating vouchers.</p>}</form>{generatedVouchers.length > 0 && <section className="panel generated-vouchers"><div className="panel-heading"><div><h3>New credentials</h3><span>Passwords are not stored for later retrieval</span></div><button type="button" className="outline-button" onClick={downloadGeneratedVouchers}><ArrowDownToLine size={14} /> Download CSV</button></div><div className="table-scroll"><table><thead><tr><th>Username</th><th>Password</th><th>Plan</th></tr></thead><tbody>{generatedVouchers.map((voucher) => <tr key={voucher.id}><td className="mono">{voucher.username}</td><td className="mono">{voucher.password}</td><td>{voucher.packageName}</td></tr>)}</tbody></table></div></section>}</>}
-        <RecordTable title="Issued vouchers" items={filteredItems.length} loading={loading} filter={filter} setFilter={setFilter} filterLabel="Filter vouchers" emptyText="No vouchers have been generated." headers={['Username', 'Plan', 'Status', 'Created', '']}><tbody>{(filteredItems as Voucher[]).map((voucher) => <tr key={voucher.id}><td className="mono">{voucher.username}</td><td>{voucher.packageName}</td><td><span className={`table-status ${voucher.status === 'disabled' ? 'is-disabled' : ''}`}>{voucher.status}</span></td><td>{formatDate(voucher.createdAt)}</td><td>{voucher.status === 'active' && <button type="button" className="text-button danger-text" disabled={saving} onClick={() => void updateRecord(voucher.id, { status: 'disabled' })}>Disable</button>}</td></tr>)}</tbody></RecordTable>
+        {view === 'Generate vouchers' && <>
+          <section className="voucher-expiry-banner">
+            <span className="voucher-expiry-icon"><CalendarClock size={21} /></span>
+            <div><strong>Validity starts on first connection</strong><p>Each voucher’s plan timer begins when it first signs in. Its exact expiry date and time are then tracked below.</p></div>
+            <span className="voucher-expiry-check"><ShieldCheck size={17} /> RADIUS expiry</span>
+          </section>
+          <form className="operations-form panel voucher-create-form" onSubmit={(event) => { event.preventDefault(); void createRecord({ ...voucherForm, quantity: Number(voucherForm.quantity) }) }}>
+            <div className="voucher-form-heading"><span className="voucher-form-icon"><Ticket size={19} /></span><div><h2>Generate hotspot vouchers</h2><p>Issue secure credentials for the selected plan. Passwords are shown only once.</p></div></div>
+            <div className="operations-form-grid">
+              <label>Active plan<select required value={voucherForm.packageId} onChange={(event) => setVoucherForm({ ...voucherForm, packageId: event.target.value })}><option value="">Select a plan</option>{availablePackages.map((plan) => <option value={plan.id} key={plan.id}>{plan.name} · {plan.rateLimit} · {formatVoucherValidity(plan.durationSeconds)}</option>)}</select></label>
+              <label>Quantity<input required type="number" min="1" max="100" value={voucherForm.quantity} onChange={(event) => setVoucherForm({ ...voucherForm, quantity: event.target.value })} /></label>
+            </div>
+            {voucherForm.packageId && <p className="voucher-plan-expiry"><Clock3 size={14} /> Selected plan validity: <strong>{formatVoucherValidity(availablePackages.find((plan) => plan.id === voucherForm.packageId)?.durationSeconds ?? null)}</strong> after first connection</p>}
+            <button type="submit" className="primary-button" disabled={saving || !availablePackages.length}><Ticket size={14} /> {saving ? 'Generating…' : 'Generate vouchers'}</button>
+            {!loading && availablePackages.length === 0 && <p className="operations-help">Create and activate an internet plan before generating vouchers.</p>}
+          </form>
+          {generatedVouchers.length > 0 && <section className="panel generated-vouchers"><div className="panel-heading"><div><h3>New credentials</h3><span>Save or download these one-time passwords now.</span></div><button type="button" className="outline-button" onClick={downloadGeneratedVouchers}><ArrowDownToLine size={14} /> Download CSV</button></div><div className="table-scroll"><table><thead><tr><th>Username</th><th>Password</th><th>Plan</th><th>Validity / expiry</th></tr></thead><tbody>{generatedVouchers.map((voucher) => <tr key={voucher.id}><td className="mono">{voucher.username}</td><td className="mono">{voucher.password}</td><td>{voucher.packageName}</td><td><strong>{formatVoucherValidity(voucher.validitySeconds)}</strong><span>Starts on first connection</span></td></tr>)}</tbody></table></div></section>}
+        </>}
+        <section className="operations-stat-grid voucher-stat-grid" aria-label="Voucher status summary">
+          {([
+            ['ready', 'Ready to use', 'Waiting for first connection', Ticket],
+            ['in_use', 'In use', 'Validity timer started', Clock3],
+            ['expired', 'Expired', 'Plan validity completed', CalendarClock],
+            ['disabled', 'Disabled', 'Blocked by an administrator', ShieldCheck],
+          ] as const).map(([key, label, caption, Icon]) => <article className={`voucher-stat-card voucher-stat-${key}`} key={key}><span className="voucher-stat-icon"><Icon size={18} /></span><span className="eyebrow">{label}</span><strong>{loading ? '—' : formatAmount(voucherCounts[key])}</strong><small>{caption}</small></article>)}
+        </section>
+        <section className="panel operations-panel voucher-register">
+          <div className="panel-heading">
+            <div><h3>Issued vouchers</h3><span>{loading ? 'Loading records…' : `${filteredVouchers.length} matching vouchers · expiry shown in East Africa Time`}</span></div>
+            <div className="voucher-register-tools">
+              <input className="record-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Search username or plan" aria-label="Search vouchers" />
+              <select aria-label="Filter vouchers by status" value={voucherStatusFilter} onChange={(event) => setVoucherStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="ready">Ready</option><option value="in_use">In use</option><option value="expired">Expired</option><option value="disabled">Disabled</option></select>
+              <button type="button" className="outline-button" disabled={!filteredVouchers.length} onClick={downloadVoucherRegister}><ArrowDownToLine size={14} /> Export CSV</button>
+            </div>
+          </div>
+          <div className="table-scroll"><table><thead><tr><th>Username</th><th>Plan</th><th>Status</th><th>Created</th><th>First connection</th><th>Expires · EAT</th><th /></tr></thead><tbody>
+            {filteredVouchers.map((voucher) => {
+              const state = getVoucherState(voucher, voucherNow)
+              return <tr key={voucher.id}>
+                <td className="mono voucher-username">{voucher.username}</td>
+                <td>{voucher.packageName}<span>{formatVoucherValidity(voucher.validitySeconds)}</span></td>
+                <td><span className={`voucher-state-chip voucher-state-${state}`}>{state === 'in_use' ? 'In use' : state === 'ready' ? 'Ready' : state}</span></td>
+                <td>{formatVoucherDate(voucher.createdAt)}</td>
+                <td>{voucher.activatedAt ? formatVoucherDate(voucher.activatedAt) : voucher.validitySeconds ? 'On first sign-in' : 'Not tracked'}</td>
+                <td className={state === 'expired' ? 'voucher-expiry-expired' : ''}>{voucher.expiresAt ? formatVoucherDate(voucher.expiresAt) : voucher.validitySeconds ? 'After first sign-in' : 'Not tracked'}</td>
+                <td>{voucher.status === 'active' && <button type="button" className="text-button danger-text" disabled={saving} onClick={() => void updateRecord(voucher.id, { status: 'disabled' })}>Disable</button>}</td>
+              </tr>
+            })}
+            {!loading && filteredVouchers.length === 0 && <tr><td colSpan={7}>{filter || voucherStatusFilter !== 'all' ? 'No vouchers match these filters.' : 'No vouchers have been generated.'}</td></tr>}
+          </tbody></table></div>
+          <div className="voucher-register-footer"><span><Clock3 size={14} /> Expiry begins at the voucher’s first successful hotspot connection.</span><span>{items.length} records loaded</span></div>
+        </section>
       </>}
     </section>
   )

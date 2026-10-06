@@ -863,6 +863,64 @@ td { color: #5e6469; }
 .operations-panel td .mono { overflow-wrap: anywhere; }
 .generated-vouchers .panel-heading { align-items: center; }
 .generated-vouchers .panel-heading .outline-button { min-height: 35px; }
+.voucher-workspace { gap: 18px; color: #23343c; }
+.voucher-workspace .operations-page-heading .live-label { color: #168b7b; }
+.voucher-workspace .operations-page-heading h1 { color: #173a45; letter-spacing: -.035em; }
+.voucher-workspace .operations-page-heading p { color: #61747e; font-size: 13px; }
+.voucher-expiry-banner { display: flex; align-items: center; gap: 14px; border: 1px solid #bde5d9; border-radius: 13px; background: linear-gradient(110deg, #e8f8f3, #effbfc 72%, #f3f2ff); padding: 15px 17px; box-shadow: 0 8px 24px #1b786510; }
+.voucher-expiry-icon, .voucher-form-icon { display: grid; width: 43px; height: 43px; flex: 0 0 43px; place-items: center; border: 1px solid #bce6d8; border-radius: 12px; background: #fff; color: #118675; }
+.voucher-expiry-banner > div { min-width: 0; flex: 1; }
+.voucher-expiry-banner > div strong { color: #145b52; font-size: 13px; }
+.voucher-expiry-banner p { margin: 4px 0 0; color: #4f6e70; font-size: 12px; line-height: 1.5; }
+.voucher-expiry-check { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #cce9df; border-radius: 999px; background: #ffffffa8; padding: 7px 10px; color: #167766; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.voucher-create-form { gap: 17px; border-color: #dce9e7; border-radius: 13px; padding: 21px; box-shadow: 0 9px 28px #1c39320b; }
+.voucher-form-heading { display: flex; align-items: center; gap: 12px; }
+.voucher-form-heading h2 { color: #203c49; font-size: 17px; }
+.voucher-form-heading p { margin: 4px 0 0; color: #667982; font-size: 12px; line-height: 1.5; }
+.voucher-form-icon { border-color: #d3d7fb; background: #f3f3ff; color: #6265bb; }
+.voucher-create-form .operations-form-grid { grid-template-columns: minmax(0, 1.4fr) minmax(140px, .65fr); gap: 16px; }
+.voucher-create-form .operations-form-grid label { gap: 7px; color: #344c55; font-size: 12px; }
+.voucher-create-form .operations-form-grid input, .voucher-create-form .operations-form-grid select { min-height: 44px; border-color: #d4e1e2; border-radius: 8px; padding: 10px 12px; color: #233a45; font-size: 13px; }
+.voucher-create-form .operations-form-grid input:focus, .voucher-create-form .operations-form-grid select:focus { border-color: #25a696; outline: 0; box-shadow: 0 0 0 3px #25a6961b; }
+.voucher-plan-expiry { display: flex; align-items: center; gap: 6px; margin: -5px 0 0 !important; color: #52716f !important; font-size: 12px !important; }
+.voucher-plan-expiry svg { color: #168b7b; }
+.voucher-plan-expiry strong { color: #145b52; }
+.voucher-create-form > .primary-button { min-height: 43px; border-radius: 8px; background: linear-gradient(110deg, #087f76, #149a86); box-shadow: 0 5px 13px #087f7622; font-size: 13px; }
+.voucher-create-form > .primary-button:hover:not(:disabled) { background: linear-gradient(110deg, #066a63, #0d8878); }
+.voucher-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.voucher-stat-card { position: relative; display: grid; min-height: 126px; grid-template-columns: 1fr auto; align-content: start; gap: 7px 12px; overflow: hidden; border: 1px solid #e1e9e9; border-radius: 12px; background: linear-gradient(145deg, #fff, #f9fbfc); padding: 15px; box-shadow: 0 7px 20px #1b33460b; }
+.voucher-stat-card::after { position: absolute; right: -19px; bottom: -32px; width: 85px; height: 85px; border: 14px solid currentColor; border-radius: 50%; content: ''; opacity: .045; }
+.voucher-stat-icon { display: grid; width: 34px; height: 34px; grid-row: 1 / span 2; place-items: center; border-radius: 10px; background: #eaf7f3; color: #148473; }
+.voucher-stat-card .eyebrow { align-self: center; color: #536870; font-size: 11px; font-weight: 700; }
+.voucher-stat-card > strong { grid-column: 1 / -1; color: #183843; font-size: 26px; line-height: 1; }
+.voucher-stat-card > small { grid-column: 1 / -1; color: #718188; font-size: 10px; }
+.voucher-stat-in_use .voucher-stat-icon { background: #eff0ff; color: #6669c5; }
+.voucher-stat-expired .voucher-stat-icon { background: #fff1ef; color: #c45a4e; }
+.voucher-stat-disabled .voucher-stat-icon { background: #f1f3f5; color: #6c7780; }
+.voucher-register { overflow: hidden; border-color: #dce7e8; border-radius: 12px; padding: 0; box-shadow: 0 9px 28px #1c39320b; }
+.voucher-register > .panel-heading { gap: 14px; margin: 0; border-bottom: 1px solid #e8eeee; padding: 17px 18px; }
+.voucher-register .panel-heading h3 { color: #203c49; font-size: 15px; }
+.voucher-register .panel-heading > div:first-child > span { margin-top: 5px; color: #687b83; font-size: 11px; }
+.voucher-register-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.voucher-register-tools .record-filter { width: 205px; min-height: 38px; border-radius: 7px; padding: 8px 10px; font-size: 12px; }
+.voucher-register-tools select { min-height: 38px; border: 1px solid #d9e3e4; border-radius: 7px; background: #fff; padding: 7px 9px; color: #334951; font-size: 12px; }
+.voucher-register-tools .outline-button { min-height: 38px; font-size: 11px; white-space: nowrap; }
+.voucher-register .table-scroll { padding: 0 17px; }
+.voucher-register table { min-width: 850px; border-collapse: separate; border-spacing: 0; }
+.voucher-register th { border-bottom: 1px solid #e5ecec; background: #f7fafb; padding: 12px 10px; color: #65777e; font-size: 10px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.voucher-register td { border-bottom: 1px solid #edf1f1; padding: 13px 10px; color: #435860; font-size: 12px; line-height: 1.5; }
+.voucher-register tbody tr:hover { background: #f7fbfa; }
+.voucher-register td > span:not(.voucher-state-chip) { color: #77878c; font-size: 10px; }
+.voucher-register .voucher-username { color: #255d73; font-size: 12px; font-weight: 700; }
+.voucher-state-chip { display: inline-flex !important; width: fit-content; align-items: center; border: 1px solid transparent; border-radius: 999px; padding: 4px 9px; font-size: 10px !important; font-weight: 750; line-height: 1.2 !important; text-transform: capitalize; }
+.voucher-state-ready { border-color: #c5e9dd; background: #eaf8f2; color: #187353 !important; }
+.voucher-state-in_use { border-color: #d4d5f7; background: #f0f0ff; color: #5557aa !important; }
+.voucher-state-expired { border-color: #f2ceca; background: #fff1ef; color: #a23f36 !important; }
+.voucher-state-disabled { border-color: #dce1e4; background: #f1f3f5; color: #66747b !important; }
+.voucher-register .voucher-expiry-expired { color: #a23f36; font-weight: 700; }
+.voucher-register-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid #e8eeee; padding: 12px 18px; color: #6d7e84; font-size: 10px; }
+.voucher-register-footer > span:first-child { display: inline-flex; align-items: center; gap: 7px; }
+.voucher-register-footer svg { color: #168b7b; }
 .table-status.is-disabled { color: #a52c3c; background: #fff1f1; }
 .subscriber-create-form { display: flex; flex-direction: column; gap: 20px; border-color: #e1e6e8; padding: 22px; }
 .subscriber-form-heading { border-bottom: 1px solid #edf0f1; padding-bottom: 14px; }
@@ -948,10 +1006,22 @@ td { color: #5e6469; }
   .operations-page-heading > .outline-button { padding: 8px; font-size: 0; }
   .operations-page-heading > .outline-button svg { width: 16px; height: 16px; }
   .operations-form-grid { grid-template-columns: 1fr; }
+  .voucher-create-form .operations-form-grid { grid-template-columns: 1fr; }
   .operations-wide { grid-column: auto; }
   .operations-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .voucher-stat-card { min-height: 112px; padding: 12px; }
   .operations-panel, .operations-form { padding: 13px; }
   .generated-vouchers .panel-heading { align-items: flex-start; flex-direction: column; }
+  .voucher-expiry-banner { align-items: flex-start; flex-wrap: wrap; padding: 13px; }
+  .voucher-expiry-banner > div { flex: 1 1 calc(100% - 60px); }
+  .voucher-expiry-check { margin-left: 57px; }
+  .voucher-register > .panel-heading { align-items: flex-start; flex-direction: column; padding: 14px; }
+  .voucher-register-tools { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+  .voucher-register-tools .record-filter { width: 100%; }
+  .voucher-register-tools select { flex: 1; min-width: 105px; }
+  .voucher-register-tools .outline-button { flex: 1; justify-content: center; }
+  .voucher-register .table-scroll { padding: 0 10px; }
+  .voucher-register-footer { align-items: flex-start; flex-direction: column; padding: 11px 13px; }
   .subscriber-create-form { padding: 16px; }
   .subscriber-form-grid { grid-template-columns: 1fr; gap: 13px; }
   .subscriber-confirm-field { grid-column: auto; max-width: none; }
@@ -974,4 +1044,183 @@ td { color: #5e6469; }
   .subscriber-login-details > div { grid-template-columns: 1fr; }
   .subscriber-login-details > div > span { grid-column: 1; }
   .subscriber-login-details > div > button, .subscriber-login-details > div > button:last-child { grid-column: 1; justify-self: start; }
+}
+.live-sessions-workspace { display: flex; flex-direction: column; gap: 16px; }
+.live-sessions-workspace .page-heading { margin-bottom: 0; }
+.live-sessions-workspace .page-heading .outline-button { flex-shrink: 0; }
+.live-sessions-summary { display: grid; grid-template-columns: minmax(210px, 300px); }
+.is-spinning { animation: live-session-spin .8s linear infinite; }
+@keyframes live-session-spin { to { transform: rotate(360deg); } }
+.router-management { display: flex; flex-direction: column; gap: 17px; }
+.router-management-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 4px 0 18px; border-bottom: 1px solid #e3e6e8; }
+.router-management-breadcrumb { display: flex; align-items: center; gap: 8px; color: #788087; font: 10px monospace; letter-spacing: .08em; }
+.router-management-heading h1 { margin: 10px 0 5px; color: #1f292e; font-size: 25px; letter-spacing: -.04em; }
+.router-management-heading h1 span { color: #f58200; }
+.router-management-heading p { display: flex; align-items: center; gap: 6px; margin: 0; color: #6d7a80; font-size: 12px; }
+.router-learn-link { display: inline-flex; align-items: center; gap: 3px; border: 0; padding: 0; color: #30383d; background: transparent; font: inherit; }
+.router-learn-link:hover { color: #e87a00; }
+.router-link-button { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 7px; min-height: 39px; border: 0; border-radius: 22px; padding: 0 17px; color: #211708; background: #ff8900; font-size: 12px; font-weight: 650; }
+.router-link-button:hover { background: #f47f00; }
+.router-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid #e0e4e7; border-radius: 15px; background: #fff; }
+.router-metrics article { display: flex; min-height: 105px; flex-direction: column; justify-content: center; gap: 8px; padding: 15px 17px; }
+.router-metrics article + article { border-left: 1px solid #e4e7e9; }
+.router-metrics article > span { color: #707a80; font-size: 10px; letter-spacing: .06em; }
+.router-metrics article > strong { color: #161e22; font-size: 23px; line-height: 1; }
+.router-metrics article > small { color: #788087; font-size: 10px; line-height: 1.35; }
+.router-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.router-list-count { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; border: 1px solid #dfe4e8; border-radius: 22px; padding: 3px 12px 3px 4px; background: #fff; color: #6e7880; font-size: 11px; }
+.router-list-count strong { display: grid; min-width: 57px; min-height: 30px; place-items: center; border-radius: 18px; color: #fff; background: #141a1f; font-weight: 600; }
+.router-list-count > span { min-width: 16px; text-align: center; }
+.router-search { display: flex; width: min(335px, 100%); min-height: 38px; align-items: center; gap: 8px; border: 1px solid #dfe4e8; border-radius: 22px; padding: 0 11px; color: #788087; background: #fff; }
+.router-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: #30383d; background: transparent; font: inherit; font-size: 11px; }
+.router-search input::placeholder { color: #8a9298; }
+.router-search button { display: grid; flex: 0 0 auto; place-items: center; border: 0; color: #788087; background: transparent; }
+.router-table-wrap { overflow: hidden; border: 1px solid #dfe4e8; border-radius: 14px; background: #fff; }
+.router-management-table { min-width: 680px; }
+.router-management-table th { height: 40px; padding-bottom: 0; background: #f8f9fa; }
+.router-management-table td { height: 58px; }
+.router-management-table td:first-child strong { color: #242d32; font-size: 12px; font-weight: 600; }
+.router-management-table td:first-child span { display: block; margin-top: 4px; color: #79828a; font-size: 10px; }
+.router-management-table td:nth-child(3) { text-align: center; }
+.router-monitoring-status { display: inline-flex !important; width: fit-content; align-items: center; margin: 0 !important; border: 1px solid #e5e7ea; border-radius: 15px; padding: 4px 8px; color: #707880 !important; background: #f7f8f9; font-size: 10px !important; white-space: nowrap; }
+.router-unknown-value { color: #828a90; }
+.router-table-footer { border-top: 1px solid #edf0f2; padding: 11px 13px; color: #737d84; font-size: 10px; line-height: 1.45; }
+.router-management-footer { display: flex; justify-content: flex-end; }
+.router-refresh-button { display: inline-flex; align-items: center; gap: 6px; border: 0; padding: 4px; color: #647079; background: transparent; font-size: 10px; }
+.router-refresh-button:disabled { cursor: wait; }
+@media (max-width: 720px) {
+  .router-management { gap: 13px; }
+  .router-management-heading { align-items: flex-start; flex-direction: column; }
+  .router-management-heading p { align-items: flex-start; flex-wrap: wrap; }
+  .router-link-button { align-self: flex-start; }
+  .router-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .router-metrics article { min-height: 94px; }
+  .router-metrics article:nth-child(3) { border-left: 0; border-top: 1px solid #e4e7e9; }
+  .router-metrics article:nth-child(4) { border-top: 1px solid #e4e7e9; }
+  .router-list-toolbar { align-items: stretch; flex-direction: column; }
+  .router-search { width: 100%; }
+}
+.router-monitoring-status.online { border-color: #ccebdd; color: #168451 !important; background: #f0fbf5; }
+.router-monitoring-status.offline { border-color: #f0d1d1; color: #bd4848 !important; background: #fff5f5; }
+.router-monitoring-status.not_configured { border-color: #f2dfc4; color: #ae6b15 !important; background: #fff8ee; }
+.router-list-filters { display: flex; align-items: center; gap: 3px; overflow-x: auto; border: 1px solid #dfe4e8; border-radius: 22px; padding: 3px; background: #fff; }
+.router-list-filters button { display: inline-flex; min-height: 30px; align-items: center; gap: 6px; flex: 0 0 auto; border: 0; border-radius: 18px; padding: 0 11px; color: #5d6870; background: transparent; font-size: 10px; }
+.router-list-filters button.active { color: #fff; background: #151b20; }
+.router-list-filters button span { display: grid; min-width: 17px; height: 17px; place-items: center; border-radius: 9px; color: inherit; background: rgba(127,137,145,.12); font-size: 9px; }
+.router-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.router-row-action { display: inline-flex; min-height: 28px; align-items: center; justify-content: center; gap: 5px; border: 1px solid #dfe4e8; border-radius: 15px; padding: 0 9px; color: #38434a; background: #fff; font-size: 10px; white-space: nowrap; }
+.router-row-action:hover { border-color: #f0b46d; color: #bd6500; }
+.enable-monitor-action { border-color: #f4d5ae; color: #a75c05; background: #fff9f1; }
+.router-detail-workspace { display: flex; flex-direction: column; gap: 16px; }
+.router-detail-back { display: inline-flex; width: fit-content; align-items: center; gap: 7px; border: 0; padding: 0; color: #727d84; background: transparent; font-size: 10px; }
+.router-detail-back:hover { color: #df7700; }
+.router-detail-heading { display: flex; flex-direction: column; gap: 12px; padding-bottom: 17px; border-bottom: 1px solid #e3e6e8; }
+.router-detail-title { display: flex; align-items: center; gap: 10px; }
+.router-detail-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; }
+.router-detail-icon.is-online { color: #168451; background: #eaf8f0; }
+.router-detail-icon.is-offline { color: #bd4848; background: #fff0f0; }
+.router-detail-title h1 { margin: 0; color: #202a30; font-size: 23px; letter-spacing: -.035em; }
+.router-detail-state { display: inline-flex; border: 1px solid #e0e4e8; border-radius: 14px; padding: 4px 9px; color: #66717a; background: #fff; font-size: 10px; text-transform: capitalize; }
+.router-detail-state.online { border-color: #ccebdd; color: #168451; background: #f0fbf5; }
+.router-detail-state.offline { border-color: #f0d1d1; color: #bd4848; background: #fff5f5; }
+.router-detail-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 9px 16px; color: #657078; font-size: 11px; }
+.router-detail-facts span + span::before { content: ''; display: inline-block; width: 3px; height: 3px; margin: 0 10px 3px 0; border-radius: 50%; background: #afb6bb; }
+.router-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.router-detail-actions .outline-button { min-height: 34px; padding: 7px 11px; }
+.router-remove-button { margin-left: auto; color: #a84747; }
+.router-detail-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid #e0e4e7; border-radius: 14px; background: #fff; }
+.router-detail-stats article { display: flex; min-height: 106px; flex-direction: column; justify-content: center; gap: 7px; padding: 13px 16px; }
+.router-detail-stats article + article { border-left: 1px solid #e4e7e9; }
+.router-detail-stats article > span { color: #707a80; font-size: 9px; letter-spacing: .06em; }
+.router-detail-stats article > strong { color: #161e22; font-size: 22px; line-height: 1.15; }
+.router-detail-stats article > small { color: #788087; font-size: 9px; line-height: 1.4; }
+.router-monitor-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.router-monitor-tabs, .router-monitor-ranges { display: flex; align-items: center; gap: 3px; overflow-x: auto; border: 1px solid #dfe4e8; border-radius: 24px; padding: 3px; background: #fff; }
+.router-monitor-tabs button, .router-monitor-ranges button { display: inline-flex; min-height: 31px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 18px; padding: 0 12px; color: #58646b; background: transparent; font-size: 10px; }
+.router-monitor-tabs button.active { color: #fff; background: #151b20; }
+.router-monitor-ranges { border-radius: 10px; background: #f7f8f9; }
+.router-monitor-ranges button { min-width: 42px; }
+.router-monitor-ranges button.active { color: #202a30; background: #fff; box-shadow: 0 1px 4px #19252d1c; font-weight: 650; }
+.router-monitor-tabs button span { display: grid; min-width: 16px; height: 16px; place-items: center; border-radius: 9px; background: rgba(127,137,145,.16); font-size: 9px; }
+.router-monitor-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(275px, .95fr); align-items: start; gap: 14px; }
+.router-monitor-main, .router-monitor-side, .router-monitor-reports { display: flex; min-width: 0; flex-direction: column; gap: 13px; }
+.router-monitor-chart { overflow: hidden; padding: 15px; background: #f0f2f4; }
+.router-monitor-chart-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 13px; }
+.router-monitor-chart-heading > div { display: flex; align-items: center; gap: 8px; color: #f18308; }
+.router-monitor-chart-heading strong { color: #263138; font-size: 12px; }
+.router-monitor-chart-heading > span { color: #768088; font-size: 9px; text-align: right; }
+.router-chart-empty { display: grid; min-height: 76px; place-items: center; border: 1px solid #e4e8eb; border-radius: 12px; padding: 12px; color: #747f86; background: #fff; font-size: 11px; text-align: center; }
+.router-chart-plot { position: relative; min-height: 190px; overflow: hidden; border: 1px solid #e4e8eb; border-radius: 12px; padding: 12px 12px 27px; background: #fff; }
+.router-chart-grid { position: absolute; inset: 20px 14px 39px; display: flex; flex-direction: column; justify-content: space-between; }
+.router-chart-grid i { border-top: 1px solid #e8ecef; }
+.router-chart-plot svg { position: relative; width: 100%; height: 147px; overflow: visible; }
+.router-chart-endpoints { display: flex; justify-content: space-between; color: #808990; font-size: 8px; }
+.router-monitor-health { overflow: hidden; padding: 15px 0 0; }
+.router-monitor-side-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 14px 12px; }
+.router-monitor-side-heading strong { color: #273138; font-size: 12px; }
+.router-monitor-side-heading > span { color: #e47a05; font-size: 10px; font-weight: 650; }
+.router-health-ring { display: grid; width: 116px; height: 116px; place-items: center; margin: 3px auto 12px; border-radius: 50%; background: conic-gradient(#ff8700 var(--health-percent), #e7eaed 0); }
+.router-health-ring > div { display: flex; width: 93px; height: 93px; align-items: center; justify-content: center; flex-direction: column; border-radius: 50%; background: #fff; }
+.router-health-ring strong { color: #1f282e; font-size: 25px; }
+.router-health-ring span { color: #838b91; font-size: 9px; }
+.router-resource { padding: 9px 14px; border-top: 1px solid #edf0f2; }
+.router-resource > div:first-child, .router-resource-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.router-resource > div:first-child span, .router-resource-value > span { display: inline-flex; align-items: center; gap: 8px; color: #47545c; font-size: 10px; }
+.router-resource svg, .router-resource-value svg { color: #7c878e; }
+.router-resource > div:first-child strong, .router-resource-value > strong { color: #253138; font-size: 10px; font-weight: 600; text-align: right; }
+.router-resource-track { height: 4px; overflow: hidden; margin-top: 8px; border-radius: 4px; background: #e6e9ec; }
+.router-resource-track i { display: block; height: 100%; border-radius: inherit; background: #13a575; }
+.router-resource-value { min-height: 35px; padding: 7px 14px; border-top: 1px solid #edf0f2; }
+.router-connection-panel { padding-bottom: 6px; }
+.router-script-link { margin: 10px 14px 4px; border: 0; padding: 4px 0; color: #bc6b0c; background: transparent; font-size: 10px; text-align: left; }
+.router-monitor-reports { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.router-monitor-tab-panel { padding: 18px; }
+.router-monitor-tab-panel h2 { margin: 0 0 6px; color: #273138; font-size: 15px; }
+.router-monitor-tab-panel > p { margin: 0 0 15px; color: #768088; font-size: 11px; }
+.router-user-counts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.router-user-counts article { display: flex; flex-direction: column; gap: 6px; border: 1px solid #e5e9ec; border-radius: 10px; padding: 14px; }
+.router-user-counts span { color: #727d84; font-size: 10px; }
+.router-user-counts strong { color: #168451; font-size: 24px; }
+.router-event-list { display: flex; flex-direction: column; }
+.router-event-list > div { display: flex; align-items: center; gap: 10px; border-top: 1px solid #edf0f2; padding: 11px 0; }
+.router-event-list > div > span:nth-child(2) { display: flex; flex: 1; flex-direction: column; gap: 4px; }
+.router-event-list strong { color: #313b41; font-size: 10px; }
+.router-event-list small, .router-event-list time { color: #768088; font-size: 9px; }
+.router-event-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #13a575; }
+.router-diagnosis-list { display: grid; gap: 0; margin: 0 0 15px; padding: 0; list-style: none; }
+.router-diagnosis-list li { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #edf0f2; padding: 11px 0; color: #606c73; font-size: 10px; }
+.router-diagnosis-list li strong { color: #37434a; font-weight: 550; text-align: right; }
+.router-diagnosis-list .is-good { color: #168451; }
+.router-diagnosis-list .is-warning { color: #bc6b0c; }
+.router-monitor-last-updated { display: flex; align-items: center; justify-content: flex-end; gap: 12px; color: #7b858b; font-size: 9px; }
+.router-monitor-last-updated button { display: inline-flex; align-items: center; gap: 5px; border: 0; padding: 3px; color: #5c6a71; background: transparent; font-size: 9px; }
+.router-monitor-loading, .router-detail-script-status { margin: 0; color: #66747c; font-size: 10px; }
+.router-unmonitored-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; border: 1px solid #f1dcc0; border-radius: 10px; padding: 12px 14px; color: #8b5e20; background: #fffaf3; font-size: 10px; }
+.router-unmonitored-notice > span { flex: 1; color: #746959; }
+.router-unmonitored-notice .router-link-button { min-height: 32px; padding: 0 12px; font-size: 10px; }
+.router-script-modal-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: 20px; background: rgba(17, 25, 31, .48); }
+.router-script-modal { width: min(640px, 100%); max-height: min(90vh, 760px); overflow-y: auto; padding: 20px; box-shadow: 0 24px 80px #10182040; }
+.router-script-modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 17px; }
+.router-script-modal-heading span { color: #c46d08; font-size: 9px; letter-spacing: .09em; }
+.router-script-modal-heading h2 { margin: 6px 0; color: #253138; font-size: 17px; }
+.router-script-modal-heading p { margin: 0; color: #727d84; font-size: 10px; line-height: 1.5; }
+.router-script-modal-heading > button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border: 1px solid #e2e7ea; border-radius: 8px; color: #59656c; background: #fff; }
+.router-script-label { display: flex; flex-direction: column; gap: 6px; color: #5a676f; font-size: 10px; }
+.router-script-label textarea { width: 100%; resize: vertical; border: 1px solid #dce2e6; border-radius: 8px; padding: 10px; color: #dce5eb; background: #121c23; font: 10px/1.6 Consolas, 'Courier New', monospace; }
+.router-script-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+@media (max-width: 800px) {
+  .router-monitor-layout { grid-template-columns: minmax(0, 1fr); }
+  .router-monitor-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+}
+@media (max-width: 560px) {
+  .router-detail-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .router-detail-stats article:nth-child(3) { border-left: 0; border-top: 1px solid #e4e7e9; }
+  .router-detail-stats article:nth-child(4) { border-top: 1px solid #e4e7e9; }
+  .router-detail-title { flex-wrap: wrap; }
+  .router-detail-title h1 { font-size: 19px; }
+  .router-monitor-toolbar { align-items: flex-start; flex-direction: column; }
+  .router-monitor-tabs { width: 100%; }
+  .router-monitor-side, .router-monitor-reports { grid-template-columns: minmax(0, 1fr); }
+  .router-remove-button { margin-left: 0; }
+  .router-script-modal { padding: 15px; }
 }

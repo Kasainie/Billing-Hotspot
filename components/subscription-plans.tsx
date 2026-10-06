@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { getHotspotReturnUrl } from '@/lib/hotspot-return-url'
 
 type HotspotPlan = {
   id: string
@@ -37,24 +38,7 @@ export function SubscriptionPlans() {
     const tenantQuery = tenant ? `?${new URLSearchParams({ tenant })}` : ''
     setTenantQuery(tenantQuery)
     const returnTarget = new URLSearchParams(window.location.search).get('return')
-    if (returnTarget) {
-      try {
-        const candidate = new URL(returnTarget)
-        const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(candidate.hostname)
-        const octets = ipv4?.slice(1).map(Number)
-        const privateAddress = candidate.hostname === 'localhost' ||
-          candidate.hostname.endsWith('.lan') ||
-          Boolean(octets && octets.every((octet) => octet <= 255) && (
-            octets[0] === 10 ||
-            (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
-            (octets[0] === 192 && octets[1] === 168) ||
-            (octets[0] === 169 && octets[1] === 254)
-          ))
-        if (candidate.protocol === 'http:' && privateAddress) setCaptiveLoginUrl(candidate.toString())
-      } catch {
-        setCaptiveLoginUrl('')
-      }
-    }
+    setCaptiveLoginUrl(returnTarget ? getHotspotReturnUrl(returnTarget) || '' : '')
     fetch(`/api/hotspot/packages${tenantQuery}`, { cache: 'no-store' })
       .then(async (response) => {
         const result = await response.json() as HotspotPlan[] | ApiError

@@ -30,9 +30,11 @@ test('service configuration is downloaded and imported as a RouterOS file', () =
     scriptUrl: 'https://billing.example.com/provision/token123/configure',
     configuredUrl: 'https://billing.example.com/provision/token123/configured',
   })
-  assert.match(command, /^:do \{ \/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configure" dst-path=billing-services\.rsc;/)
-  assert.match(command, /\/import billing-services\.rsc;/)
-  assert.match(command, /\/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configured" keep-result=no \} on-error=\{:put "LKTECH service configuration failed; confirmation was not sent"\}$/)
+  assert.match(command, /^:local lktechStage "download"; :do \{ \/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configure" dst-path=billing-services\.rsc;/)
+  assert.match(command, /:set lktechStage "import"; :onerror lktechImportError in=\{ \/import billing-services\.rsc verbose=yes \} do=\{:put \("LKTECH import error: " \. \$lktechImportError\); :error "RouterOS service import failed"\};/)
+  assert.match(command, /:set lktechStage "confirmation"; \/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configured" keep-result=no/)
+  assert.match(command, /\/import billing-services\.rsc verbose=yes/)
+  assert.match(command, /on-error=\{:put \("LKTECH service configuration failed during " \. \$lktechStage \. "; confirmation was not sent"\)\}$/)
 })
 
 test('detected LKTech bridge is preferred over the legacy Centipid bridge', () => {
@@ -46,6 +48,20 @@ test('all RouterOS bundle files resolve to valid content', () => {
     const script = getHotspotBundleScript(fileName)
     assert.ok(script?.trim())
   }
+})
+
+test('standalone RouterOS files match the generated default-tenant bundle', () => {
+  for (const fileName of ['certificates.rsc', 'config.rsc', 'hotspot-files.rsc', 'hotspot.rsc']) {
+    const source = readFileSync(new URL(`../public/routeros/${fileName}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+    assert.equal(source, getHotspotBundleScript(fileName))
+  }
+})
+
+test('static LKTECH bootstrap requires a one-time provisioning URL', () => {
+  const bootstrap = readFileSync(new URL('../public/routeros/lktech.rsc', import.meta.url), 'utf8')
+  assert.match(bootstrap, /PASTE_SHORT_LIVED_TOKEN/)
+  assert.match(bootstrap, /\/tool fetch mode=https url=\$provisioningUrl dst-path=lktech-provisioning\.rsc/)
+  assert.match(bootstrap, /\/import lktech-provisioning\.rsc/)
 })
 
 test('hotspot file bundle downloads portal pages and assets to RouterOS hotspot directory', () => {
@@ -241,17 +257,65 @@ test('subscriber service script safely reuses matching bridge DHCP and configure
 
   assert.match(script, /billing-hotspot-dhcp/)
   assert.match(script, /billing-hotspot-profile/)
+  assert.match(script, /dns-name="login\.lktech\.life"/)
+  assert.match(script, /dns-server="172\.31\.0\.1"/)
+  assert.match(script, /ip dns set allow-remote-requests=yes/)
+  assert.doesNotMatch(script, /dns-server=1\.1\.1\.1,8\.8\.8\.8/)
   assert.match(script, /billing-hotspot-pool/)
   assert.match(script, /billing-pppoe-pool/)
   assert.match(script, /hotspot walled-garden add dst-host="billing\.lktech\.life" action=allow/)
   assert.match(script, /billing-pppoe-profile/)
   assert.match(script, /pppoe-server server add service-name="billing-pppoe" interface="lktech"/)
   assert.match(script, /Existing DHCP network must match 172\.31\.0\.0\/24 with gateway 172\.31\.0\.1/)
-  assert.match(script, /Existing DHCP pool must stay within 172\.31\.0\.0\/24/)
+  assert.match(script, /Every existing DHCP pool range must stay within 172\.31\.0\.0\/24/)
   assert.match(script, /interface="lktech" and disabled=no/)
   assert.doesNotMatch(script, /A DHCP server already exists/)
   assert.match(script, /Refusing to move ether2; it already belongs to another bridge/)
   assert.match(script, /Refusing to bridge active DHCP uplink ether2/)
+})
+
+test('subscriber service selection removes unchecked bridge ports and protects WAN ports', () => {
+  const script = buildSubscriberServiceScript({
+    bridgeName: 'bridge',
+    ports: ['ether2', 'ether3', 'ether4'],
+    managedPorts: ['ether2', 'ether3', 'ether4', 'ether5'],
+    wanPorts: ['wan1'],
+    services: ['Hotspot'],
+    hotspotSubnet: '192.168.88.0/24',
+  })
+
+  assert.match(script, /interface="ether5" and bridge="bridge"\]\] > 0\) do=\{\/interface bridge port remove/)
+  assert.doesNotMatch(script, /interface="ether2" and bridge="bridge"\]\] > 0\) do=\{\/interface bridge port remove/)
+  assert.match(script, /Uplink wan1 is already on bridge; remove it from the subscriber bridge/)
+  assert.doesNotMatch(script, /interface="wan1" and bridge="bridge"\]\] > 0\) do=\{\/interface bridge port remove/)
+  assert.doesNotMatch(script, /interface="ether5" and bridge!/)
+})
+
+test('subscriber service configuration rejects selected or managed WAN ports', () => {
+  assert.throws(() => buildSubscriberServiceScript({
+    bridgeName: 'bridge',
+    ports: ['wan1'],
+    managedPorts: ['ether2', 'wan1'],
+    wanPorts: ['wan1'],
+    services: ['Hotspot'],
+    hotspotSubnet: '192.168.88.0/24',
+  }), /interface name is invalid/)
+})
+
+test('subscriber service script uses RouterOS-safe line lengths', () => {
+  const script = buildSubscriberServiceScript({
+    bridgeName: 'lktech',
+    ports: ['ether2', 'ether3'],
+    services: ['Hotspot', 'PPPoE'],
+    hotspotSubnet: '172.31.0.0/24',
+    pppoeSubnet: '172.31.1.0/24',
+  })
+
+  assert.match(script, /^:do \{\n/)
+  assert.match(script, /\n\}$/)
+  assert.ok(Math.max(...script.split('\n').map((line) => line.length)) < 4096)
+  assert.ok(script.includes(':local existingBridgeDhcp'))
+  assert.ok(script.includes(':if ([:len $existingBridgeDhcp]'))
 })
 
 test('existing 192.168.88.0/24 DHCP can be reused without creating a second server', () => {
@@ -263,10 +327,19 @@ test('existing 192.168.88.0/24 DHCP can be reused without creating a second serv
   })
 
   assert.match(script, /Existing DHCP network must match 192\.168\.88\.0\/24 with gateway 192\.168\.88\.1/)
-  assert.match(script, /Existing DHCP pool must stay within 192\.168\.88\.0\/24/)
+  assert.match(script, /:foreach existingBridgePoolRange in=\[:toarray \$existingBridgePoolRanges\] do=\{/)
+  assert.match(script, /Every existing DHCP pool range must stay within 192\.168\.88\.0\/24/)
+  assert.doesNotMatch(script, /existing DHCP pool has multiple ranges/)
   assert.ok(script.includes(':if ([:len [/ip dhcp-server find where interface="bridge" and disabled=no]] = 0)'))
   assert.match(script, /address="192\.168\.88\.1\/24" interface="bridge"/)
   assert.match(script, /hotspot-address="192\.168\.88\.1"/)
+  assert.match(script, /dns-name="login\.lktech\.life"/)
+  assert.match(script, /ip dns set allow-remote-requests=yes/)
+  assert.match(script, /dns-server=\$hotspotGateway/)
+  assert.match(script, /common-name="login\.lktech\.life" and trusted=yes/)
+  assert.match(script, /ssl-certificate=\$hotspotCertificateName login-by=https,http-chap/)
+  assert.match(script, /Android automatic captive-portal discovery remains unavailable/)
+  assert.doesNotMatch(script, /https-redirect/)
 })
 
 test('Hotspot anti-sharing protection adds a scoped TTL rule and removes it when disabled', () => {

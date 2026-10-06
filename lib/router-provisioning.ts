@@ -1,3 +1,5 @@
+import { buildRouterMonitorScript } from './router-monitor-script.ts'
+
 function safeJsonParse(raw: string): unknown {
   const trimmed = raw.trim()
   if (!trimmed) return null
@@ -76,12 +78,14 @@ export function buildProvisioningScript({
   radiusSecret,
   completeUrl,
   tenantSlug,
+  monitoring,
 }: {
   routerName: string
   radiusServerAddress: string
   radiusSecret: string
   completeUrl: string
   tenantSlug?: string
+  monitoring?: { routerId: string; monitorToken: string; telemetryUrl: string }
 }) {
   const safeName = routerName.replace(/\s+/g, ' ').trim()
   const radiusServices = 'ppp,hotspot'
@@ -131,6 +135,7 @@ export function buildProvisioningScript({
       ':delay 2s',
       `/import ${fileName}`,
     ]),
+    ...(monitoring ? buildRouterMonitorScript(monitoring).split('\n') : []),
     `/tool fetch url="${completeUrl}" keep-result=no`,
   ]
 
@@ -140,8 +145,8 @@ export function buildProvisioningScript({
 const hotspotBundleScripts: Record<string, string> = {
   'certificates.rsc': [
     '# certificates.rsc',
-    '# The billing portal uses HTTP-CHAP and does not require a router TLS certificate.',
-    '# HTTPS login must not be enabled until a matching certificate is installed.',
+    '# Android captive-portal discovery requires a trusted certificate matching login.lktech.life.',
+    '# Import that certificate, then rerun hotspot.rsc to enable HTTPS login and portal discovery.',
     '',
   ].join('\n'),
   'config.rsc': [
@@ -153,12 +158,32 @@ const hotspotBundleScripts: Record<string, string> = {
   'hotspot-files.rsc': '',
   'hotspot.rsc': [
     '# hotspot.rsc',
+    ':do {',
     ':local hotspotDirectory "hotspot"',
     ':if ([:len [/file find where name="flash"]] > 0) do={:set hotspotDirectory "flash/hotspot"}',
-    ':if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={',
-    '  /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m',
+    ':local hotspotCertificates [/certificate find where common-name="login.lktech.life" and trusted=yes]',
+    ':if ([:len $hotspotCertificates] = 1) do={',
+    '  :local hotspotCertificateName [/certificate get [:pick $hotspotCertificates 0] name]',
+    '  :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={',
+    '    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m',
+    '  } else={',
+    '    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m',
+    '  }',
+    '  :put "Trusted portal certificate configured; renew DHCP leases to advertise captive-portal discovery"',
     '} else={',
-    '  /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m',
+    '  :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={',
+    '    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m',
+    '  } else={',
+    '    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m',
+    '  }',
+    '  :put "No trusted login.lktech.life certificate found; Android automatic captive-portal discovery remains unavailable"',
+    '}',
+    ':local hotspotGateway [/ip hotspot profile get [find where name="billing-hotspot-profile"] hotspot-address]',
+    ':if ([:len $hotspotGateway] > 0) do={',
+    '  /ip dns set allow-remote-requests=yes',
+    '  :local hotspotDhcpNetworks [/ip dhcp-server network find where gateway=$hotspotGateway]',
+    '  :if ([:len $hotspotDhcpNetworks] > 0) do={/ip dhcp-server network set $hotspotDhcpNetworks dns-server=$hotspotGateway} else={:put "Set the Hotspot DHCP network DNS server to the router Hotspot address"}',
+    '}',
     '}',
     '',
   ].join('\n'),
@@ -213,6 +238,8 @@ export function parseServiceSubnet(value: string) {
 export function buildSubscriberServiceScript({
   bridgeName,
   ports,
+  managedPorts = ports,
+  wanPorts = [],
   services,
   hotspotAntiSharing = false,
   hotspotSubnet,
@@ -220,12 +247,20 @@ export function buildSubscriberServiceScript({
 }: {
   bridgeName: string
   ports: string[]
+  managedPorts?: string[]
+  wanPorts?: string[]
   services: string[]
   hotspotAntiSharing?: boolean
   hotspotSubnet?: string
   pppoeSubnet?: string
 }) {
-  if (!/^[a-zA-Z0-9_.-]{1,48}$/.test(bridgeName) || ports.some((port) => !/^[a-zA-Z0-9_.-]{1,48}$/.test(port))) {
+  const selectedPorts = new Set(ports)
+  const protectedWanPorts = new Set(wanPorts)
+  if (!/^[a-zA-Z0-9_.-]{1,48}$/.test(bridgeName) ||
+      [...managedPorts, ...ports, ...wanPorts].some((port) => !/^[a-zA-Z0-9_.-]{1,48}$/.test(port)) ||
+      selectedPorts.size !== ports.length ||
+      managedPorts.some((port) => protectedWanPorts.has(port)) ||
+      ports.some((port) => !managedPorts.includes(port) || protectedWanPorts.has(port))) {
     throw new Error('Bridge or interface name is invalid.')
   }
 
@@ -239,7 +274,9 @@ export function buildSubscriberServiceScript({
     throw new Error('Hotspot and PPPoE must use different /24 networks.')
   }
 
-  const commands: string[] = []
+  const commands: string[] = wanPorts.map((port) =>
+    `:if ([:len [/interface bridge port find where interface="${port}" and bridge="${bridgeName}"]] > 0) do={:error "Uplink ${port} is already on ${bridgeName}; remove it from the subscriber bridge before applying services"}`,
+  )
   if (usesHotspot) {
     const poolPrefix = hotspotNetwork!.gateway.replace(/\.1$/, '.')
     commands.push(
@@ -253,12 +290,16 @@ export function buildSubscriberServiceScript({
       '  :local existingBridgePoolIds [/ip pool find where name=$existingBridgePoolName]',
       '  :if ([:len $existingBridgePoolIds] != 1) do={:error "The existing DHCP address pool could not be verified; reconcile it before enabling Hotspot"}',
       '  :local existingBridgePoolRanges [/ip pool get [:pick $existingBridgePoolIds 0] ranges]',
-      '  :if ([:find $existingBridgePoolRanges ","] != nil) do={:error "The existing DHCP pool has multiple ranges; reconcile it before enabling Hotspot"}',
-      '  :local existingBridgePoolSeparator [:find $existingBridgePoolRanges "-"]',
-      '  :if ([:typeof $existingBridgePoolSeparator] = "nil") do={:error "The existing DHCP pool range could not be verified; reconcile it before enabling Hotspot"}',
-      '  :local existingBridgePoolStart [:pick $existingBridgePoolRanges 0 $existingBridgePoolSeparator]',
-      '  :local existingBridgePoolEnd [:pick $existingBridgePoolRanges ($existingBridgePoolSeparator + 1) [:len $existingBridgePoolRanges]]',
-      `  :if (([:pick $existingBridgePoolStart 0 ${poolPrefix.length}] != "${poolPrefix}") or ([:pick $existingBridgePoolEnd 0 ${poolPrefix.length}] != "${poolPrefix}")) do={:error "Existing DHCP pool must stay within ${hotspotNetwork!.cidr}; choose the matching Hotspot subnet or reconcile DHCP first"}`,
+      '  :foreach existingBridgePoolRange in=[:toarray $existingBridgePoolRanges] do={',
+      '    :local existingBridgePoolSeparator [:find $existingBridgePoolRange "-"]',
+      '    :if ([:typeof $existingBridgePoolSeparator] = "nil") do={',
+      `      :if ([:pick $existingBridgePoolRange 0 ${poolPrefix.length}] != "${poolPrefix}") do={:error "Every existing DHCP pool range must stay within ${hotspotNetwork!.cidr}; choose the matching Hotspot subnet or reconcile DHCP first"}`,
+      '    } else={',
+      '      :local existingBridgePoolStart [:pick $existingBridgePoolRange 0 $existingBridgePoolSeparator]',
+      '      :local existingBridgePoolEnd [:pick $existingBridgePoolRange ($existingBridgePoolSeparator + 1) [:len $existingBridgePoolRange]]',
+      `      :if (([:pick $existingBridgePoolStart 0 ${poolPrefix.length}] != "${poolPrefix}") or ([:pick $existingBridgePoolEnd 0 ${poolPrefix.length}] != "${poolPrefix}")) do={:error "Every existing DHCP pool range must stay within ${hotspotNetwork!.cidr}; choose the matching Hotspot subnet or reconcile DHCP first"}`,
+      '    }',
+      '  }',
       '}',
       `:if ([:len [/ip hotspot find where interface="${bridgeName}" and name!="billing-hotspot"]] > 0) do={:error "A Hotspot server already exists on ${bridgeName}; reconcile it before enabling the managed Hotspot server"}`,
       `:if ([:len [/ip address find where interface="${bridgeName}" and address!="${hotspotNetwork!.gateway}/24"]] > 0) do={:error "${bridgeName} already has another IP address; reconcile it before enabling Hotspot"}`,
@@ -272,23 +313,44 @@ export function buildSubscriberServiceScript({
   }
 
   commands.push(`:if ([:len [/interface bridge find where name="${bridgeName}"]] = 0) do={/interface bridge add name="${bridgeName}"}`)
-  for (const port of ports) {
-    commands.push(
-      `:if ([:len [/interface bridge port find where interface="${port}" and bridge!="${bridgeName}"]] > 0) do={:error "Refusing to move ${port}; it already belongs to another bridge"}`,
-      `:if ([:len [/ip dhcp-client find where interface="${port}" and status="bound"]] > 0) do={:error "Refusing to bridge active DHCP uplink ${port}"}`,
-      `:if ([:len [/interface bridge port find where interface="${port}"]] = 0) do={/interface bridge port add bridge="${bridgeName}" interface="${port}"}`,
-    )
+  for (const port of managedPorts) {
+    if (selectedPorts.has(port)) {
+      commands.push(
+        `:if ([:len [/interface bridge port find where interface="${port}" and bridge!="${bridgeName}"]] > 0) do={:error "Refusing to move ${port}; it already belongs to another bridge"}`,
+        `:if ([:len [/ip dhcp-client find where interface="${port}" and status="bound"]] > 0) do={:error "Refusing to bridge active DHCP uplink ${port}"}`,
+        `:if ([:len [/interface bridge port find where interface="${port}"]] = 0) do={/interface bridge port add bridge="${bridgeName}" interface="${port}"}`,
+      )
+    } else {
+      commands.push(
+        `:if ([:len [/interface bridge port find where interface="${port}" and bridge="${bridgeName}"]] > 0) do={/interface bridge port remove [find where interface="${port}" and bridge="${bridgeName}"]}`,
+      )
+    }
   }
 
   if (hotspotNetwork) {
     commands.push(
       `:if ([:len [/ip address find where interface="${bridgeName}" and address="${hotspotNetwork.gateway}/24"]] = 0) do={/ip address add address="${hotspotNetwork.gateway}/24" interface="${bridgeName}" comment="billing-system-managed-hotspot"}`,
       `:if ([:len [/ip pool find where name="billing-hotspot-pool"]] = 0) do={/ip pool add name="billing-hotspot-pool" ranges="${hotspotNetwork.range}"} else={/ip pool set [find where name="billing-hotspot-pool"] ranges="${hotspotNetwork.range}"}`,
-      `:if ([:len [/ip dhcp-server network find where address="${hotspotNetwork.cidr}"]] = 0) do={/ip dhcp-server network add address="${hotspotNetwork.cidr}" gateway="${hotspotNetwork.gateway}" dns-server=1.1.1.1,8.8.8.8}`,
+      `:if ([:len [/ip dhcp-server network find where address="${hotspotNetwork.cidr}"]] = 0) do={/ip dhcp-server network add address="${hotspotNetwork.cidr}" gateway="${hotspotNetwork.gateway}" dns-server="${hotspotNetwork.gateway}"} else={/ip dhcp-server network set [find where address="${hotspotNetwork.cidr}"] gateway="${hotspotNetwork.gateway}" dns-server="${hotspotNetwork.gateway}"}`,
+      '/ip dns set allow-remote-requests=yes',
       `:if ([:len [/ip dhcp-server find where interface="${bridgeName}" and disabled=no]] = 0) do={:if ([:len [/ip dhcp-server find where name="billing-hotspot-dhcp"]] = 0) do={/ip dhcp-server add name="billing-hotspot-dhcp" interface="${bridgeName}" address-pool="billing-hotspot-pool" lease-time=1h disabled=no} else={/ip dhcp-server set [find where name="billing-hotspot-dhcp"] interface="${bridgeName}" address-pool="billing-hotspot-pool" lease-time=1h disabled=no}}`,
       ':local hotspotDirectory "hotspot"',
       ':if ([:len [/file find where name="flash"]] > 0) do={:set hotspotDirectory "flash/hotspot"}',
-      `:if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m}`,
+      ':local hotspotCertificates [/certificate find where common-name="login.lktech.life" and trusted=yes]',
+      ':if ([:len $hotspotCertificates] = 1) do={',
+      '  :local hotspotCertificateName [/certificate get [:pick $hotspotCertificates 0] name]',
+      `  :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m}`,
+      '  :put "Trusted portal certificate configured; renew DHCP leases to advertise captive-portal discovery"',
+      '} else={',
+      `  :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m}`,
+      '  :put "No trusted login.lktech.life certificate found; Android automatic captive-portal discovery remains unavailable"',
+      '}',
+      ':local hotspotGateway [/ip hotspot profile get [find where name="billing-hotspot-profile"] hotspot-address]',
+      ':if ([:len $hotspotGateway] > 0) do={',
+      '  /ip dns set allow-remote-requests=yes',
+      '  :local hotspotDhcpNetworks [/ip dhcp-server network find where gateway=$hotspotGateway]',
+      '  :if ([:len $hotspotDhcpNetworks] > 0) do={/ip dhcp-server network set $hotspotDhcpNetworks dns-server=$hotspotGateway} else={:put "Set the Hotspot DHCP network DNS server to the router Hotspot address"}',
+      '}',
       `:if ([:len [/ip hotspot find where name="billing-hotspot"]] = 0) do={/ip hotspot add name="billing-hotspot" interface="${bridgeName}" address-pool=none profile="billing-hotspot-profile" disabled=no} else={/ip hotspot set [find where name="billing-hotspot"] interface="${bridgeName}" address-pool=none profile="billing-hotspot-profile" disabled=no}`,
       `:if ([:len [/ip firewall nat find where comment="billing-system-managed-hotspot-nat"]] = 0) do={/ip firewall nat add chain=srcnat action=masquerade src-address="${hotspotNetwork.cidr}" comment="billing-system-managed-hotspot-nat"}`,
       ':if ([:len [/ip hotspot walled-garden find where dst-host="billing.lktech.life" and action="allow"]] = 0) do={/ip hotspot walled-garden add dst-host="billing.lktech.life" action=allow comment="billing-system-managed-portal"}',
@@ -312,7 +374,7 @@ export function buildSubscriberServiceScript({
     )
   }
 
-  return commands.join('; ')
+  return `:do {\n${commands.join('\n')}\n}`
 }
 
 export function buildFetchCommand({ scriptUrl, completeUrl }: { scriptUrl: string; completeUrl?: string }) {
@@ -324,5 +386,5 @@ export function buildFetchCommand({ scriptUrl, completeUrl }: { scriptUrl: strin
 export function buildServiceConfigFetchCommand({ scriptUrl, configuredUrl }: { scriptUrl: string; configuredUrl: string }) {
   const scriptMode = /^https:/i.test(scriptUrl) ? 'https' : 'http'
   const configuredMode = /^https:/i.test(configuredUrl) ? 'https' : 'http'
-  return `:do { /tool fetch mode=${scriptMode} url="${scriptUrl}" dst-path=billing-services.rsc; :delay 2s; /import billing-services.rsc; /tool fetch mode=${configuredMode} url="${configuredUrl}" keep-result=no } on-error={:put "LKTECH service configuration failed; confirmation was not sent"}`
+  return `:local lktechStage "download"; :do { /tool fetch mode=${scriptMode} url="${scriptUrl}" dst-path=billing-services.rsc; :delay 2s; :set lktechStage "import"; :onerror lktechImportError in={ /import billing-services.rsc verbose=yes } do={:put ("LKTECH import error: " . $lktechImportError); :error "RouterOS service import failed"}; :set lktechStage "confirmation"; /tool fetch mode=${configuredMode} url="${configuredUrl}" keep-result=no } on-error={:put ("LKTECH service configuration failed during " . $lktechStage . "; confirmation was not sent")}`
 }

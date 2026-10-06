@@ -1,12 +1,13 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { isIPv4 } from 'node:net'
 import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
 import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
-import { routerProvisioningTokens, sites } from '@/lib/db/schema'
+import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { hashRouterMonitorToken } from '@/lib/router-monitoring'
 
 type ProvisionInput = {
   routerName?: unknown
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
   const radiusSecret = process.env.RADIUS_SHARED_SECRET || ''
 
   if (!/^[a-zA-Z0-9 _-]{1,48}$/.test(routerName)) return NextResponse.json({ error: 'Router name is invalid' }, { status: 400 })
-  if (siteName && !/^[a-zA-Z0-9 _-]{1,64}$/.test(siteName)) return NextResponse.json({ error: 'Network site name is invalid' }, { status: 400 })
+  if (!/^[a-zA-Z0-9 _-]{1,64}$/.test(siteName)) return NextResponse.json({ error: 'Network site name is invalid' }, { status: 400 })
   if (!isIPv4(radiusServerAddress) || !/^[a-zA-Z0-9-]{16,64}$/.test(radiusSecret)) {
     return NextResponse.json({ error: 'Router provisioning is not configured. Ask your network administrator.' }, { status: 503 })
   }
@@ -84,18 +85,62 @@ export async function POST(request: NextRequest) {
   }
 
   const token = randomBytes(32).toString('base64url')
+  const monitorToken = randomBytes(32).toString('base64url')
   const completeUrl = new URL(`/provision/${token}/complete`, baseUrl).toString()
-  const configScript = buildProvisioningScript({ routerName, radiusServerAddress, radiusSecret, completeUrl, tenantSlug: session.tenantSlug })
+  const telemetryUrl = new URL('/api/routers/telemetry', baseUrl).toString()
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 15 * 60 * 1000)
 
   try {
     const record = await db.transaction(async (tx) => {
+      let siteId: string | null = null
       if (siteName) {
         const [existingSite] = await tx.select({ id: sites.id }).from(sites)
           .where(and(eq(sites.tenantId, session.tenantId), eq(sites.name, siteName))).limit(1)
-        if (!existingSite) await tx.insert(sites).values({ tenantId: session.tenantId, name: siteName, location: siteName })
+        if (existingSite) siteId = existingSite.id
+        else {
+          const [createdSite] = await tx.insert(sites).values({
+            tenantId: session.tenantId,
+            name: siteName,
+            location: siteName,
+          }).returning({ id: sites.id })
+          siteId = createdSite.id
+        }
       }
+      if (!siteId) throw new Error('A network site is required to register router monitoring.')
+
+      const [existingMonitor] = await tx.select({ id: routerMonitors.id, tokenHash: routerMonitors.tokenHash }).from(routerMonitors)
+        .where(and(eq(routerMonitors.tenantId, session.tenantId), eq(routerMonitors.routerName, routerName))).limit(1)
+      const monitorId = existingMonitor?.id || randomUUID()
+      if (existingMonitor) {
+        await tx.update(routerMonitors).set({
+          siteId,
+          previousTokenHash: existingMonitor.tokenHash,
+          previousTokenExpiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+          tokenHash: hashRouterMonitorToken(monitorToken),
+          enabled: true,
+          lastSeenAt: null,
+          lastSourceIp: null,
+        }).where(and(eq(routerMonitors.id, monitorId), eq(routerMonitors.tenantId, session.tenantId)))
+      } else {
+        await tx.insert(routerMonitors).values({
+          id: monitorId,
+          tenantId: session.tenantId,
+          siteId,
+          routerName,
+          tokenHash: hashRouterMonitorToken(monitorToken),
+        })
+      }
+
+      const configScript = buildProvisioningScript({
+        routerName,
+        radiusServerAddress,
+        radiusSecret,
+        completeUrl,
+        tenantSlug: session.tenantSlug,
+        monitoring: { routerId: monitorId, monitorToken, telemetryUrl },
+      })
+
       await tx.delete(routerProvisioningTokens).where(and(eq(routerProvisioningTokens.tenantId, session.tenantId), or(
         lt(routerProvisioningTokens.expiresAt, now),
         and(eq(routerProvisioningTokens.status, 'applied'), lt(routerProvisioningTokens.createdAt, new Date(now.getTime() - 24 * 60 * 60 * 1000))),

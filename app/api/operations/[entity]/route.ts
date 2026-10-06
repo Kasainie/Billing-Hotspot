@@ -132,11 +132,14 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
         packageName: packages.name,
         username: vouchers.username,
         status: vouchers.status,
+        validitySeconds: vouchers.validitySeconds,
+        activatedAt: vouchers.activatedAt,
+        expiresAt: vouchers.expiresAt,
         createdAt: vouchers.createdAt,
       }).from(vouchers).innerJoin(packages, and(eq(packages.id, vouchers.packageId), eq(packages.tenantId, access.tenantId)))
         .where(eq(vouchers.tenantId, access.tenantId)).orderBy(desc(vouchers.createdAt)).limit(500),
       db.select({ status: vouchers.status, count: count() }).from(vouchers).where(eq(vouchers.tenantId, access.tenantId)).groupBy(vouchers.status),
-      db.select({ id: packages.id, name: packages.name, rateLimit: packages.rateLimit, monthlyPrice: packages.monthlyPrice })
+      db.select({ id: packages.id, name: packages.name, rateLimit: packages.rateLimit, monthlyPrice: packages.monthlyPrice, durationSeconds: packages.durationSeconds })
         .from(packages).where(and(eq(packages.tenantId, access.tenantId), eq(packages.active, true))),
       db.select({ packageName: packages.name, count: count() }).from(vouchers)
         .innerJoin(packages, and(eq(packages.id, vouchers.packageId), eq(packages.tenantId, access.tenantId)))
@@ -327,6 +330,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         tenantId: access.tenantId,
         packageId: plan.id,
         username,
+        validitySeconds: plan.durationSeconds,
       }))).returning()
       await tx.insert(radcheck).values(generated.map(({ username, password }) => ({
         tenantId: access.tenantId,
@@ -341,7 +345,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         attribute: 'Mikrotik-Rate-Limit',
         op: '=',
         value: plan.rateLimit,
-      })))
+      })).concat(generated.map(({ username }) => ({
+        tenantId: access.tenantId,
+        username,
+        attribute: 'Session-Timeout',
+        op: '=',
+        value: String(plan.durationSeconds),
+      }))))
       return voucherRows
     })
     return NextResponse.json({
@@ -350,6 +360,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         username: generated[index].username,
         password: generated[index].password,
         packageName: plan.name,
+        validitySeconds: plan.durationSeconds,
       })),
     }, { status: 201 })
   } catch (error) {
