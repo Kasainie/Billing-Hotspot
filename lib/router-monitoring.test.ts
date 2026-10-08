@@ -2,9 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildProvisioningScript } from './router-provisioning.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { calculateRouterHealth, getLiveRouterUptimeSeconds, parseRouterTimestamp, parseRouterUptime } from './router-monitoring.ts'
+import { calculateRouterHealth, getLiveRouterUptimeSeconds, isRouterOnline, parseRouterTimestamp, parseRouterUptime, ROUTER_ONLINE_TIMEOUT_MS } from './router-monitoring.ts'
 
-test('guided provisioning installs monitoring as part of the router configuration', () => {
+test('the provisioning builder can include the optional legacy monitoring script', () => {
   const script = buildProvisioningScript({
     routerName: 'Office MikroTik',
     radiusServerAddress: '192.0.2.10',
@@ -17,19 +17,19 @@ test('guided provisioning installs monitoring as part of the router configuratio
     },
   })
 
-  assert.match(script, /name="lktech-monitor" interval=1s/)
+  assert.match(script, /name="lktech-monitor" interval=1m/)
   assert.match(script, /\/api\/routers\/telemetry/)
   assert.ok(script.indexOf('name="lktech-monitor"') > script.indexOf('/import hotspot.rsc'))
 })
 
-test('router monitor setup installs an authenticated RouterOS heartbeat every second', () => {
+test('router monitor setup installs an authenticated RouterOS heartbeat every minute', () => {
   const script = buildRouterMonitorScript({
     routerId: 'a5746f73-7b79-4c0e-a52c-9c057e3074f8',
     monitorToken: 'a'.repeat(43),
     telemetryUrl: 'https://billing.example.com/api/routers/telemetry',
   })
 
-  assert.match(script, /interval=1s/)
+  assert.match(script, /interval=1m/)
   assert.match(script, /\/system script run lktech-monitor/)
   assert.match(script, /x-router-monitor-id/)
   assert.match(script, /x-router-monitor-token/)
@@ -75,6 +75,16 @@ test('router uptime advances from the latest heartbeat and stays fixed when offl
   assert.equal(getLiveRouterUptimeSeconds(3120, lastSeenAt, now, true), 3143)
   assert.equal(getLiveRouterUptimeSeconds(3120, lastSeenAt, now, false), 3120)
   assert.equal(getLiveRouterUptimeSeconds(null, lastSeenAt, now, true), null)
+})
+
+test('router goes offline after missed monitoring intervals', () => {
+  const lastSeenAt = '2026-10-06T10:00:00.000Z'
+  const heartbeatTime = Date.parse(lastSeenAt)
+  assert.equal(isRouterOnline(lastSeenAt, heartbeatTime), true)
+  assert.equal(ROUTER_ONLINE_TIMEOUT_MS, 90_000)
+  assert.equal(isRouterOnline(lastSeenAt, heartbeatTime + ROUTER_ONLINE_TIMEOUT_MS), true)
+  assert.equal(isRouterOnline(lastSeenAt, heartbeatTime + ROUTER_ONLINE_TIMEOUT_MS + 1), false)
+  assert.equal(isRouterOnline(null, heartbeatTime), false)
 })
 
 test('router health is unavailable offline and responds to resource pressure', () => {

@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto'
 
+export const ROUTER_ONLINE_TIMEOUT_MS = 90_000
+
 export function hashRouterMonitorToken(token: string) {
   return createHash('sha256').update(token).digest('hex')
 }
@@ -8,6 +10,13 @@ export function parseRouterTimestamp(value: Date | string | null) {
   if (value === null) return null
   const timestamp = value instanceof Date ? value : new Date(value)
   return Number.isFinite(timestamp.getTime()) ? timestamp : null
+}
+
+export function isRouterOnline(lastSeenAt: Date | string | null, now: number) {
+  const heartbeatTime = parseRouterTimestamp(lastSeenAt)?.getTime()
+  return heartbeatTime !== undefined &&
+    heartbeatTime <= now &&
+    now - heartbeatTime <= ROUTER_ONLINE_TIMEOUT_MS
 }
 
 export function getLiveRouterUptimeSeconds(

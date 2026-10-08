@@ -12,6 +12,8 @@ export type RouterMonitorRecord = {
   location: string
   status: 'online' | 'offline' | 'not_configured'
   lastSeenAt: string | null
+  connectorEnabled: boolean
+  connectorLastSeenAt: string | null
   cpuLoad: number | null
   freeMemoryBytes: number | null
   totalMemoryBytes: number | null
@@ -25,6 +27,32 @@ export type RouterMonitorRecord = {
   routerOsVersion: string | null
   boardName: string | null
   health: number | null
+}
+
+type RouterRemoteSession = {
+  sessionType: 'hotspot' | 'pppoe'
+  routerSessionId: string
+  username: string
+  macAddress: string | null
+  ipAddress: string | null
+  callerId: string | null
+  uptimeSeconds: number | null
+  observedAt: string
+}
+
+type RouterSessionsResponse = {
+  connected: boolean
+  connectorEnabled: boolean
+  connectorLastSeenAt: string | null
+  sessions: RouterRemoteSession[]
+  error?: string
+}
+
+export type RouterConnectorEnrollment = {
+  routerId: string
+  routerName: string
+  appUrl: string
+  token: string
 }
 
 type MetricSample = {
@@ -126,12 +154,14 @@ export function RouterMonitorDetail({
   router,
   onBack,
   onReprovision,
+  onEnableConnector,
   onRemove,
 }: {
   router: RouterMonitorRecord
   onBack: () => void
   onReprovision: () => void
-  onRemove: () => void
+  onEnableConnector: () => Promise<RouterConnectorEnrollment>
+  onRemove: () => Promise<void>
 }) {
   const [range, setRange] = useState<(typeof ranges)[number]['id']>('1h')
   const [tab, setTab] = useState<MonitorTab>('System')
@@ -141,6 +171,20 @@ export function RouterMonitorDetail({
   const [error, setError] = useState('')
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
   const [liveClock, setLiveClock] = useState(() => Date.now())
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [remoteSessions, setRemoteSessions] = useState<RouterRemoteSession[]>([])
+  const [connectorConnected, setConnectorConnected] = useState(false)
+  const [connectorLastSeenAt, setConnectorLastSeenAt] = useState<string | null>(router.connectorLastSeenAt)
+  const [loadingRemoteSessions, setLoadingRemoteSessions] = useState(false)
+  const [remoteSessionError, setRemoteSessionError] = useState('')
+  const [remoteSessionMessage, setRemoteSessionMessage] = useState('')
+  const [disconnectingSession, setDisconnectingSession] = useState('')
+  const [enablingConnector, setEnablingConnector] = useState(false)
+  const [connectorEnrollment, setConnectorEnrollment] = useState<RouterConnectorEnrollment | null>(null)
+  const [connectorEnrollmentError, setConnectorEnrollmentError] = useState('')
+  const [copiedConnectorToken, setCopiedConnectorToken] = useState(false)
   const loadInFlight = useRef(false)
 
   useEffect(() => {
@@ -174,6 +218,24 @@ export function RouterMonitorDetail({
     }
   }, [range, router.id, router.monitored])
 
+  const loadRouterSessions = useCallback(async () => {
+    if (!router.monitored) return
+    setLoadingRemoteSessions(true)
+    setRemoteSessionError('')
+    try {
+      const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/sessions`, { cache: 'no-store' })
+      const result = await response.json() as RouterSessionsResponse
+      if (!response.ok) throw new Error(result.error || 'Unable to load active router sessions.')
+      setRemoteSessions(result.sessions)
+      setConnectorConnected(result.connected)
+      setConnectorLastSeenAt(result.connectorLastSeenAt)
+    } catch (reason) {
+      setRemoteSessionError(reason instanceof Error ? reason.message : 'Unable to load active router sessions.')
+    } finally {
+      setLoadingRemoteSessions(false)
+    }
+  }, [router.id, router.monitored])
+
   useEffect(() => {
     void loadMetrics()
     const interval = window.setInterval(() => {
@@ -189,6 +251,15 @@ export function RouterMonitorDetail({
     }
   }, [loadMetrics])
 
+  useEffect(() => {
+    if (tab !== 'Users') return
+    void loadRouterSessions()
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadRouterSessions()
+    }, 10_000)
+    return () => window.clearInterval(interval)
+  }, [loadRouterSessions, tab])
+
   const latest = samples.at(-1)
   const liveUptimeSeconds = getLiveRouterUptimeSeconds(
     router.uptimeSeconds,
@@ -196,6 +267,69 @@ export function RouterMonitorDetail({
     liveClock,
     router.status === 'online',
   )
+  const deleteRouter = async () => {
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      await onRemove()
+    } catch (reason) {
+      setDeleteError(reason instanceof Error ? reason.message : 'Unable to delete router monitoring.')
+      setDeleting(false)
+    }
+  }
+  const enableConnector = async () => {
+    setEnablingConnector(true)
+    setConnectorEnrollmentError('')
+    setCopiedConnectorToken(false)
+    try {
+      setConnectorEnrollment(await onEnableConnector())
+      setTab('Users')
+    } catch (reason) {
+      setConnectorEnrollmentError(reason instanceof Error ? reason.message : 'Unable to enable the router API connector.')
+    } finally {
+      setEnablingConnector(false)
+    }
+  }
+  const disconnectSession = async (remoteSession: RouterRemoteSession) => {
+    if (!window.confirm(`Disconnect ${remoteSession.username} from ${remoteSession.sessionType === 'hotspot' ? 'Hotspot' : 'PPPoE'}?`)) return
+    setDisconnectingSession(`${remoteSession.sessionType}:${remoteSession.routerSessionId}`)
+    setRemoteSessionError('')
+    setRemoteSessionMessage('')
+    try {
+      const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionType: remoteSession.sessionType,
+          routerSessionId: remoteSession.routerSessionId,
+        }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to queue the session disconnect.')
+      setRemoteSessionMessage(`Disconnect queued for ${remoteSession.username}.`)
+    } catch (reason) {
+      setRemoteSessionError(reason instanceof Error ? reason.message : 'Unable to queue the session disconnect.')
+    } finally {
+      setDisconnectingSession('')
+    }
+  }
+  const copyConnectorSetup = async () => {
+    if (!connectorEnrollment) return
+    const config = [
+      `APP_URL=${connectorEnrollment.appUrl}`,
+      `ROUTER_ID=${connectorEnrollment.routerId}`,
+      `ROUTER_CONNECTOR_TOKEN=${connectorEnrollment.token}`,
+      'ROUTER_REST_URL=https://<router-private-host-or-vpn-name>/rest',
+      'ROUTER_USERNAME=',
+      'ROUTER_PASSWORD=',
+    ].join('\n')
+    try {
+      await navigator.clipboard.writeText(config)
+      setCopiedConnectorToken(true)
+    } catch {
+      setConnectorEnrollmentError('Could not copy setup values. Select the values and copy them manually.')
+    }
+  }
   const bandwidthRates = useMemo(() => samples.slice(1).flatMap((sample, index) => {
     const previous = samples[index]
     const elapsedSeconds = (new Date(sample.sampledAt).getTime() - new Date(previous.sampledAt).getTime()) / 1000
@@ -249,13 +383,19 @@ export function RouterMonitorDetail({
         </div>
         <div className="router-detail-actions">
           <button type="button" className="outline-button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={14} className={refreshing ? 'is-spinning' : undefined} /> Diagnose</button>
-          <button type="button" className="outline-button" onClick={onReprovision}><RefreshCw size={14} /> Reprovision</button>
-          <button type="button" className="outline-button router-remove-button" onClick={onRemove}>Remove monitor</button>
+          <button type="button" className="outline-button" onClick={onReprovision}><RefreshCw size={14} /> Legacy script</button>
+          <button type="button" className="outline-button router-remove-button" onClick={() => { setConfirmDelete(true); setDeleteError('') }}>Delete router</button>
         </div>
       </div>
 
+      {confirmDelete && <section className="router-delete-confirmation" role="alertdialog" aria-labelledby="router-delete-title" aria-describedby="router-delete-description">
+        <div><strong id="router-delete-title">Delete monitoring for {router.routerName}?</strong><p id="router-delete-description">This deletes the router monitor and its monitoring history. The network site and its other records will remain.</p></div>
+        {deleteError && <p className="router-discovery-status error" role="alert">{deleteError}</p>}
+        <div className="router-delete-actions"><button type="button" className="outline-button" disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</button><button type="button" className="router-delete-confirm-button" disabled={deleting} onClick={() => void deleteRouter()}>{deleting ? 'Deleting…' : 'Confirm delete'}</button></div>
+      </section>}
+
       {error && <p className="dashboard-notice" role="alert">{error}</p>}
-      {!router.monitored && <div className="router-unmonitored-notice"><strong>Monitoring has not been installed on this site yet.</strong><span>Generate the RouterOS monitor script, paste it into the router terminal, and live metrics will appear here.</span><button className="router-link-button" type="button" onClick={onReprovision}>Enable monitoring</button></div>}
+      {!router.monitored && <div className="router-unmonitored-notice"><strong>Router monitoring is not enabled yet.</strong><span>Install the monitor once from the MikroTik terminal. The router will then report automatically every minute; no VPS or extra computer is needed.</span><button className="router-link-button" type="button" onClick={onReprovision}>Set up automatic monitoring</button></div>}
 
       <div className="router-detail-stats">
         <article><span>ACTIVE USERS</span><strong>{router.activeHotspotUsers === null || router.activePppoeUsers === null ? '—' : (router.activeHotspotUsers + router.activePppoeUsers).toLocaleString()}</strong><small>{router.activeHotspotUsers ?? '—'} Hotspot · {router.activePppoeUsers ?? '—'} PPPoE</small></article>
@@ -298,9 +438,9 @@ export function RouterMonitorDetail({
             <section className="router-monitor-health panel router-connection-panel">
               <div className="router-monitor-side-heading"><strong>Connection &amp; monitoring</strong></div>
               <ResourceValue icon={Clock3} label="Last heartbeat" value={router.lastSeenAt ? formatSampleTime(router.lastSeenAt) : 'Never received'} />
-              <ResourceValue icon={RefreshCw} label="Reporting interval" value="1 second" />
+              <ResourceValue icon={RefreshCw} label="Monitoring cadence" value={router.connectorEnabled ? 'Metrics 1 min · status 5 sec' : router.monitored ? 'Router reports every minute' : 'Not configured'} />
               <ResourceValue icon={RouterIcon} label="Device model" value={router.boardName || 'Unavailable'} />
-              <button className="router-script-link" type="button" onClick={onReprovision}>Copy monitoring install script</button>
+              <button className="outline-button" type="button" onClick={onReprovision}>Install / reinstall RouterOS monitor</button>
             </section>
           </aside>
         </div>
@@ -311,16 +451,67 @@ export function RouterMonitorDetail({
         <LineChart title="Memory usage" subtitle={`Reported samples · ${ranges.find((item) => item.id === range)?.label}`} icon={MemoryStick} values={memoryValues} color="#16a675" startTime={samples[0]?.sampledAt} endTime={samples.at(-1)?.sampledAt} />
         <LineChart title="Storage usage" subtitle={`Reported samples · ${ranges.find((item) => item.id === range)?.label}`} icon={HardDrive} values={diskValues} color="#688bb8" startTime={samples[0]?.sampledAt} endTime={samples.at(-1)?.sampledAt} />
       </div>}
-      {tab === 'Users' && <section className="panel router-monitor-tab-panel"><h2>Connected users</h2><p>These active-user counts are reported directly by this MikroTik router.</p><div className="router-user-counts"><article><span>Hotspot</span><strong>{router.activeHotspotUsers ?? '—'}</strong></article><article><span>PPPoE</span><strong>{router.activePppoeUsers ?? '—'}</strong></article></div></section>}
+      {tab === 'Users' && <section className="panel router-monitor-tab-panel">
+        <h2>Connected users</h2>
+        <p>Basic router metrics are reported directly by the RouterOS monitor. An optional API connector is required only for live user sessions and remote disconnects.</p>
+        <div className="router-user-counts">
+          <article><span>Hotspot</span><strong>{connectorConnected ? remoteSessions.filter((item) => item.sessionType === 'hotspot').length : router.activeHotspotUsers ?? '—'}</strong></article>
+          <article><span>PPPoE</span><strong>{connectorConnected ? remoteSessions.filter((item) => item.sessionType === 'pppoe').length : router.activePppoeUsers ?? '—'}</strong></article>
+        </div>
+        <div className="router-connector-controls">
+          <p role="status">{connectorConnected
+              ? `API connector online · last report ${connectorLastSeenAt ? formatSampleTime(connectorLastSeenAt) : 'just now'}`
+              : router.connectorEnabled
+                ? `API connector offline · last report ${connectorLastSeenAt ? formatSampleTime(connectorLastSeenAt) : 'never'}`
+                : 'Optional: a connector host is only needed for live session details and remote disconnects.'}</p>
+            {!connectorEnrollment && <button type="button" className="outline-button" onClick={() => void enableConnector()} disabled={enablingConnector}>
+              {enablingConnector ? 'Preparing connector…' : router.connectorEnabled ? 'Rotate connector token' : 'Set up optional session connector'}
+            </button>}
+            {connectorEnrollment && <div className="router-connector-setup">
+              <strong>Install the network connector</strong>
+              <p><strong>Do not paste these lines into the MikroTik terminal.</strong> They are environment settings for the always-on Windows/Linux computer running the connector. Nothing needs to be pasted into RouterOS. Monitoring starts when the connector is running and can reach the router over LAN or VPN.</p>
+              <pre>{`APP_URL=${connectorEnrollment.appUrl}\nROUTER_ID=${connectorEnrollment.routerId}\nROUTER_CONNECTOR_TOKEN=${connectorEnrollment.token}\nROUTER_REST_URL=https://<router-private-host-or-vpn-name>/rest\nROUTER_USERNAME=\nROUTER_PASSWORD=`}</pre>
+              <button type="button" className="outline-button" onClick={() => void copyConnectorSetup()}>{copiedConnectorToken ? 'Copied setup values' : 'Copy setup values'}</button>
+              <p>On the connector Windows PC, open PowerShell in the connector project folder and run:</p>
+              <pre>{`Copy-Item connector\\.env.example connector\\.env\nnotepad connector\\.env\nnode --env-file=connector\\.env connector\\agent.mjs`}</pre>
+              <p>Paste the settings into Notepad’s <code>connector\\.env</code>, replace the REST URL placeholder with the real private router hostname/IP and <code>/rest</code>, and enter the dedicated RouterOS REST username and password there. Save the file, close Notepad, then run the Node command. Do not type the settings at a MikroTik prompt.</p>
+              <p>Protect this file: it contains reusable credentials. If this setup token or router password was shared, rotate the connector token and change the RouterOS password before running it.</p>
+            </div>}
+            {connectorEnrollmentError && <p className="dashboard-notice" role="alert">{connectorEnrollmentError}</p>}
+            {remoteSessionMessage && <p role="status">{remoteSessionMessage}</p>}
+            {remoteSessionError && <p className="dashboard-notice" role="alert">{remoteSessionError}</p>}
+            <div className="table-scroll">
+              <table>
+                <thead><tr><th>TYPE</th><th>USERNAME</th><th>DEVICE / CALLER</th><th>IP ADDRESS</th><th>UPTIME</th><th /></tr></thead>
+                <tbody>
+                  {!connectorConnected && <tr><td colSpan={6}>Waiting for the network connector to report sessions.</td></tr>}
+                  {connectorConnected && loadingRemoteSessions && !remoteSessions.length && <tr><td colSpan={6}>Loading sessions…</td></tr>}
+                  {connectorConnected && !loadingRemoteSessions && !remoteSessions.length && <tr><td colSpan={6}>No active Hotspot or PPPoE sessions.</td></tr>}
+                  {remoteSessions.map((remoteSession) => {
+                    const sessionKey = `${remoteSession.sessionType}:${remoteSession.routerSessionId}`
+                    return <tr key={sessionKey}>
+                      <td>{remoteSession.sessionType === 'hotspot' ? 'Hotspot' : 'PPPoE'}</td>
+                      <td>{remoteSession.username}</td>
+                      <td className="mono">{remoteSession.macAddress || remoteSession.callerId || '—'}</td>
+                      <td className="mono">{remoteSession.ipAddress || '—'}</td>
+                      <td>{remoteSession.uptimeSeconds === null ? '—' : formatDuration(remoteSession.uptimeSeconds)}</td>
+                      <td><button type="button" className="router-row-action" disabled={!connectorConnected || disconnectingSession === sessionKey} onClick={() => void disconnectSession(remoteSession)}>{disconnectingSession === sessionKey ? 'Queuing…' : 'Disconnect'}</button></td>
+                    </tr>
+                  })}
+                </tbody>
+              </table>
+            </div>
+        </div>
+      </section>}
       {tab === 'Events' && <HeartbeatEvents samples={samples} loading={loading} />}
       {tab === 'Diagnosis' && <section className="panel router-monitor-tab-panel"><h2>Router diagnosis</h2><p>Checks are based on the latest signed router heartbeat.</p><ul className="router-diagnosis-list">
-        <li><span>Monitoring agent</span><strong className={router.status === 'online' ? 'is-good' : 'is-warning'}>{router.status === 'online' ? 'Receiving heartbeats' : 'No heartbeat in the last 3 minutes'}</strong></li>
+        <li><span>Monitoring agent</span><strong className={router.status === 'online' ? 'is-good' : 'is-warning'}>{router.status === 'online' ? 'Receiving heartbeats' : 'No report in the last 90 seconds'}</strong></li>
         <li><span>CPU load</span><strong className={router.cpuLoad !== null && router.cpuLoad < 85 ? 'is-good' : 'is-warning'}>{router.cpuLoad === null ? 'No data' : `${router.cpuLoad}%`}</strong></li>
         <li><span>Memory capacity</span><strong className={router.memoryUsedPercent !== null && router.memoryUsedPercent < 90 ? 'is-good' : 'is-warning'}>{router.memoryUsedPercent === null ? 'No data' : `${Math.round(router.memoryUsedPercent)}% used`}</strong></li>
         <li><span>Disk capacity</span><strong className={router.diskUsedPercent !== null && router.diskUsedPercent < 90 ? 'is-good' : 'is-warning'}>{router.diskUsedPercent === null ? 'No data' : `${Math.round(router.diskUsedPercent)}% used`}</strong></li>
         <li><span>Latest report</span><strong>{router.lastSeenAt ? formatSampleTime(router.lastSeenAt) : 'Never received'}</strong></li>
       </ul><button className="outline-button" type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={14} /> Run checks again</button></section>}
-      <div className="router-monitor-last-updated">{loading ? 'Loading telemetry…' : lastRefreshedAt ? `Dashboard refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()} · router reports every second` : 'Waiting for telemetry'}<button type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={12} className={refreshing ? 'is-spinning' : undefined} /> Refresh</button></div>
+      <div className="router-monitor-last-updated">{loading ? 'Loading telemetry…' : lastRefreshedAt ? `Dashboard refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()} · router reports every minute` : 'Waiting for telemetry'}<button type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={12} className={refreshing ? 'is-spinning' : undefined} /> Refresh</button></div>
     </section>
   )
 }

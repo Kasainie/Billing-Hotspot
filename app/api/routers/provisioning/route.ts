@@ -87,7 +87,6 @@ export async function POST(request: NextRequest) {
   const token = randomBytes(32).toString('base64url')
   const monitorToken = randomBytes(32).toString('base64url')
   const completeUrl = new URL(`/provision/${token}/complete`, baseUrl).toString()
-  const telemetryUrl = new URL('/api/routers/telemetry', baseUrl).toString()
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 15 * 60 * 1000)
 
@@ -138,7 +137,6 @@ export async function POST(request: NextRequest) {
         radiusSecret,
         completeUrl,
         tenantSlug: session.tenantSlug,
-        monitoring: { routerId: monitorId, monitorToken, telemetryUrl },
       })
 
       await tx.delete(routerProvisioningTokens).where(and(eq(routerProvisioningTokens.tenantId, session.tenantId), or(

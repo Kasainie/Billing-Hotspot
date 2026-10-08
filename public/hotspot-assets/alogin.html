@@ -14,7 +14,7 @@
       <p class="portal-kicker"><span class="online-dot"></span> CONNECTION ACTIVE</p>
       <h1>You are connected.</h1>
       <p class="portal-copy">Your LKTech Wi-Fi is ready.</p>
-      <a class="portal-button" href="$(link-redirect)">Continue browsing <span aria-hidden="true">&#8594;</span></a>
+      <a class="portal-button" href="$(link-login)">Return to hotspot sign-in <span aria-hidden="true">&#8594;</span></a>
     </section>
   </main>
   <script>
@@ -26,7 +26,7 @@
     if (!navigator.sendBeacon || !navigator.sendBeacon(bindUrl, new Blob([bindBody], { type: 'text/plain' }))) {
       fetch(bindUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: bindBody, keepalive: true }).catch(function () {});
     }
-    window.setTimeout(function () { window.location.replace('$(link-redirect)'); }, 150);
+    window.setTimeout(function () { window.location.replace('$(link-login)'); }, 150);
   </script>
 </body>
 </html>

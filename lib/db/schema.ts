@@ -297,10 +297,45 @@ export const routerMonitors = pgTable('router_monitors', {
   enabled: boolean('enabled').notNull().default(true),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   lastSourceIp: text('last_source_ip'),
+  connectorTokenHash: text('connector_token_hash'),
+  connectorLastSeenAt: timestamp('connector_last_seen_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex('router_monitors_tenant_name_unique_idx').on(table.tenantId, table.routerName),
   uniqueIndex('router_monitors_token_hash_unique_idx').on(table.tokenHash),
+])
+
+export const routerRemoteSessions = pgTable('router_remote_sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  routerId: uuid('router_id').notNull().references(() => routerMonitors.id, { onDelete: 'cascade' }),
+  sessionType: text('session_type').notNull(),
+  routerSessionId: text('router_session_id').notNull(),
+  username: text('username').notNull(),
+  macAddress: text('mac_address'),
+  ipAddress: text('ip_address'),
+  callerId: text('caller_id'),
+  uptimeSeconds: integer('uptime_seconds'),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('router_remote_sessions_identity_unique_idx').on(table.routerId, table.sessionType, table.routerSessionId),
+  index('router_remote_sessions_observed_idx').on(table.routerId, table.observedAt),
+])
+
+export const routerConnectorCommands = pgTable('router_connector_commands', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  routerId: uuid('router_id').notNull().references(() => routerMonitors.id, { onDelete: 'cascade' }),
+  requestedBy: uuid('requested_by').references(() => tenantUsers.id, { onDelete: 'set null' }),
+  sessionType: text('session_type').notNull(),
+  routerSessionId: text('router_session_id').notNull(),
+  username: text('username').notNull(),
+  status: text('status').notNull().default('queued'),
+  claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+  claimToken: uuid('claim_token'),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (table) => [
+  index('router_connector_commands_queue_idx').on(table.routerId, table.status, table.createdAt),
 ])
 
 export const routerMetricSamples = pgTable('router_metric_samples', {
@@ -407,7 +442,7 @@ export const hotspotPurchases = pgTable('hotspot_purchases', {
   uniqueIndex('hotspot_purchases_receipt_unique_idx').on(table.receipt),
 ])
 
-export const schema = { tenants, tenantUsers, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerMetricSamples }
+export const schema = { tenants, tenantUsers, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerMetricSamples }
 export type Site = typeof sites.$inferSelect
 export type Customer = typeof customers.$inferSelect
 export type Payment = typeof payments.$inferSelect

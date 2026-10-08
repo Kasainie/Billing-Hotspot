@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { isIP } from 'node:net'
 import { db } from '@/lib/db'
 import { routerMetricSamples, routerMonitors } from '@/lib/db/schema'
-import { hashRouterMonitorToken, parseRouterUptime } from '@/lib/router-monitoring'
+import { hashRouterMonitorToken, parseRouterTimestamp, parseRouterUptime } from '@/lib/router-monitoring'
 
 type TelemetryInput = {
   cpuLoad?: unknown
@@ -122,7 +122,8 @@ export async function POST(request: NextRequest) {
       })
         .where(eq(routerMonitors.id, monitor.id))
 
-      if (!monitor.lastSeenAt || monitor.lastSeenAt.getTime() < sampledAt.getTime() - 24 * 60 * 60 * 1000) {
+      const monitorLastSeenAt = parseRouterTimestamp(monitor.lastSeenAt)
+      if (!monitorLastSeenAt || monitorLastSeenAt.getTime() < sampledAt.getTime() - 24 * 60 * 60 * 1000) {
         await tx.delete(routerMetricSamples).where(and(
           eq(routerMetricSamples.routerId, monitor.id),
           lt(routerMetricSamples.sampledAt, new Date(sampledAt.getTime() - 35 * 24 * 60 * 60 * 1000)),

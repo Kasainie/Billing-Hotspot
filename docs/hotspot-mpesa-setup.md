@@ -1,6 +1,6 @@
 # Hotspot M-Pesa Checkout
 
-The captive portal uses Safaricom Daraja STK Push. A purchase is only provisioned after the callback is checked with Safaricom's STK query endpoint. M-Pesa PINs are entered in Safaricom's phone prompt, never on the portal.
+The MikroTik captive portal provides free-offer activation and existing-account sign-in without navigating customers away from the router login page. Paid M-Pesa checkout and receipt recovery are not linked from the captive portal. The separate billing checkout uses Safaricom Daraja STK Push; purchases are provisioned only after the callback is checked with Safaricom's STK query endpoint. M-Pesa PINs are entered in Safaricom's phone prompt, never on the portal.
 
 ## Database
 
@@ -113,4 +113,4 @@ Apply migration `20261006120000_add_voucher_expiry.sql` before using voucher exp
 
 Enable the FreeRADIUS `expiration` module in the `authorize` section after SQL so expired vouchers are rejected. It also caps `Session-Timeout` to the remaining time after reconnects. Voucher screens display activation and expiry timestamps in East Africa Time; exports include plan validity and note that it begins at first connection. Existing vouchers without a stored duration remain untracked.
 
-Router monitor scripts send a heartbeat every second, and the router dashboard and live uptime display refresh every second while visible. This creates up to 86,400 telemetry samples per router per day; monitor database capacity and network load, especially with multiple routers. Existing routers keep their current scheduler interval until you open that router's monitoring detail, choose **Reprovision**, and run the newly generated script in RouterOS.
+Router monitor scripts report metrics every minute. Router status remains online for up to 90 seconds after its last report, allowing for a missed interval or brief network interruption. The dashboard refreshes while visible, and telemetry history is retained for up to 35 days. To update a previously installed monitor to the current cadence, open the router's monitoring detail, choose **Install / reinstall RouterOS monitor**, and run the newly generated script in the MikroTik terminal; it replaces the previous monitor scheduler.

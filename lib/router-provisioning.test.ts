@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { toFreeRadiusExpiration, toHotspotProduct, toHotspotRadiusReplies } from './hotspot-products.ts'
+import { prepareHotspotPortalHtml } from './hotspot-portal-html.ts'
 import { hotspotPortalTemplates } from './hotspot-templates.ts'
 import { normalizeKenyanPhone } from './daraja.ts'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
@@ -108,16 +109,14 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
   const logoutPage = readFileSync(new URL('../public/hotspot-assets/logout.html', import.meta.url), 'utf8')
 
   assert.match(loginPage, /Connect to<br><span>what matters\.<\/span>/)
-  assert.match(loginPage, /Work, learn, stream, and stay close to the people who matter/)
+  assert.match(loginPage, /Choose a free offer or sign in to get online/)
   assert.match(loginPage, /action="\$\(link-login-only\)"/)
   assert.match(loginPage, /onsubmit="return doLogin\(this\)"/)
-  assert.match(loginPage, /id="all-subscription-plans" href="https:\/\/billing\.lktech\.life\/hotspot"/)
-  assert.match(loginPage, /all-subscription-plans'\)\.href = billingBaseUrl \+ '\/hotspot'/)
-  assert.match(loginPage, /window\.location\.replace\(billingBaseUrl \+ '\/hotspot'/)
-  assert.match(loginPage, /routerLoginUrl\.searchParams\.set\('lktech_login', '1'\)/)
+  assert.doesNotMatch(loginPage, /all-subscription-plans|billing\.lktech\.life\/hotspot"/)
+  assert.doesNotMatch(loginPage, /window\.location\.replace\(billingBaseUrl \+ '\/hotspot'/)
+  assert.doesNotMatch(loginPage, /hotspot\/checkout|hotspot\/reconnect|receipt-section|mpesa-phone/)
   assert.match(loginPage, /var portalTenantSlug = ''/)
   assert.doesNotMatch(loginPage, /\$\(if chap-id\)|\$\(endif\)/)
-  assert.match(loginPage, /document\.querySelector\('\.purchase-form'\)\.action = billingBaseUrl \+ '\/hotspot\/checkout'/)
   assert.match(loginPage, /billingBaseUrl = window\.location\.hostname === 'localhost' \|\| window\.location\.hostname === '127\.0\.0\.1'/)
   assert.match(loginPage, /fetch\(billingBaseUrl \+ '\/api\/hotspot\/portal-template'/)
   assert.match(loginPage, /portalSettings\.companyName/)
@@ -144,12 +143,13 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
   }
   assert.match(loginPage, /portalSettings\.welcomeHeadline/)
   assert.match(loginPage, /portalSettings\.supportMessage/)
-  assert.match(loginPage, /name="receipt"/)
   assert.match(loginPage, /fetch\(billingBaseUrl \+ '\/api\/hotspot\/packages'/)
   assert.match(loginPage, /fetch\(billingBaseUrl \+ '\/api\/hotspot\/free'/)
+  assert.match(loginPage, /Number\(item\.price\) === 0/)
+  assert.match(loginPage, /event\.preventDefault\(\)/)
   assert.match(loginPage, /fetch\(billingBaseUrl \+ '\/api\/hotspot\/roam\?mac='/)
   assert.match(loginPage, /id="client-mac" type="hidden" name="mac"/)
-  assert.match(loginPage, /id="portal-theme" rel="stylesheet" href=""/)
+  assert.match(loginPage, /id="portal-theme" rel="stylesheet"/)
   assert.match(loginPage, /portal-theme'\)\.href = billingBaseUrl \+ '\/api\/hotspot\/portal-theme'/)
   assert.match(loginPage, /class="portal-graphic" aria-hidden="true"/)
   assert.match(loginPage, /class="graphic-cable cable-east"/)
@@ -160,16 +160,26 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
   assert.match(loginPage, /Open this page through your MikroTik hotspot to claim a free package/)
   assert.doesNotMatch(loginPage, /data-package="(?:4-hours|12-hours|daily|monthly|6-hours|weekly)"/)
   assert.doesNotMatch(loginPage, /\$\(if error\)|\$\(error\)/)
-  assert.match(loginPage, /name="dst" value="\$\(link-orig\)"/)
+  assert.match(loginPage, /name="dst" value="\$\(link-login\)"/)
+  assert.doesNotMatch(loginPage, /name="dst" value="\$\(link-orig\)"/)
   assert.match(loginPage, /hexMD5\('\$\(chap-id\)' \+ form\.elements\.password\.value \+ '\$\(chap-challenge\)'\)/)
   assert.match(loginPage, /name="username"/)
   assert.match(loginPage, /name="password"/)
-  assert.match(connectedPage, /href="\$\(link-redirect\)"/)
-  assert.match(connectedPage, /window\.location\.replace\('\$\(link-redirect\)'\)/)
+  assert.match(connectedPage, /href="\$\(link-login\)"/)
+  assert.match(connectedPage, /window\.location\.replace\('\$\(link-login\)'\)/)
+  assert.doesNotMatch(connectedPage, /link-redirect/)
   assert.match(statusPage, /\$\(link-logout\)/)
   assert.match(errorPage, /\$\(error\)/)
   assert.match(logoutPage, /\$\(link-login\)/)
   assert.match(connectedPage, /navigator\.sendBeacon\(bindUrl/)
+})
+
+test('captive portal uses absolute stylesheet and CHAP script URLs', () => {
+  const loginPage = readFileSync(new URL('../public/hotspot-assets/login.html', import.meta.url), 'utf8')
+  const prepared = prepareHotspotPortalHtml(loginPage, 'marinet', 'https://billing.example.com')
+  assert.match(prepared, /href="https:\/\/billing\.example\.com\/hotspot-assets\/style\.css"/)
+  assert.match(prepared, /src="https:\/\/billing\.example\.com\/hotspot-assets\/md5\.js"/)
+  assert.match(prepared, /var portalTenantSlug = "marinet";/)
 })
 
 test('billing packages are converted to captive offers and Kenyan numbers are normalized', () => {
@@ -234,7 +244,7 @@ test('hotspot package policy is returned using MikroTik RADIUS attributes', () =
 })
 
 test('package expiry is formatted for the FreeRADIUS expiration module', () => {
-  assert.equal(toFreeRadiusExpiration(new Date('2026-10-01T17:12:47.000Z')), 'Thu 01 Oct 2026 17:12:47 GMT')
+  assert.equal(toFreeRadiusExpiration(new Date('2026-10-01T17:12:47.000Z')), 'Thu 01 Oct 2026 17:12:47 UTC')
 })
 
 test('portal design catalog has a stylesheet for every non-default template', () => {

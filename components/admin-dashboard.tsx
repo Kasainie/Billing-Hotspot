@@ -51,7 +51,7 @@ import { PaymentSettings } from '@/components/payment-settings'
 import { PaymentReconciliation } from '@/components/payment-reconciliation'
 import { OperationsWorkspace } from '@/components/operations-workspace'
 import { LiveHotspotSessions } from '@/components/live-hotspot-sessions'
-import { RouterMonitorDetail, type RouterMonitorRecord } from '@/components/router-monitor-detail'
+import { RouterMonitorDetail, type RouterConnectorEnrollment, type RouterMonitorRecord } from '@/components/router-monitor-detail'
 
 const navigationSections: { label?: string; items: { label: string; icon: LucideIcon; count?: string; children?: { label: string; view: string; icon?: LucideIcon }[] }[] }[] = [
   { items: [{ label: 'Overview', icon: LayoutDashboard }] },
@@ -1099,16 +1099,11 @@ function RouterManagement() {
   }
 
   const removeRouterMonitor = async (router: RouterMonitorRecord) => {
-    if (!window.confirm(`Remove monitoring for ${router.routerName}? Its monitoring history will also be deleted.`)) return
-    try {
-      const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/monitoring`, { method: 'DELETE' })
-      const result = response.status === 204 ? null : await response.json() as { error?: string }
-      if (!response.ok) throw new Error(result?.error || 'Unable to remove router monitoring.')
-      setSelectedRouterId('')
-      await load()
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to remove router monitoring.')
-    }
+    const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/monitoring`, { method: 'DELETE' })
+    const result = response.status === 204 ? null : await response.json() as { error?: string }
+    if (!response.ok) throw new Error(result?.error || 'Unable to delete router monitoring.')
+    setSelectedRouterId('')
+    await load()
   }
 
   const copyMonitorScript = async () => {
@@ -1135,12 +1130,31 @@ function RouterManagement() {
         router={selectedRouter}
         onBack={() => setSelectedRouterId('')}
         onReprovision={() => void generateMonitorScript(selectedRouter)}
-        onRemove={() => void removeRouterMonitor(selectedRouter)}
+        onEnableConnector={async () => {
+          const response = selectedRouter.monitored
+            ? await fetch(`/api/routers/${encodeURIComponent(selectedRouter.id)}/connector`, { method: 'POST' })
+            : await fetch('/api/routers/monitoring', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                siteId: selectedRouter.siteId,
+                routerName: selectedRouter.routerName,
+                mode: 'connector',
+              }),
+            })
+          const result = await response.json() as RouterConnectorEnrollment & { error?: string }
+          if (!response.ok) throw new Error(result.error || 'Unable to enable the router API connector.')
+          setRouters((current) => current.map((router) => router.id === selectedRouter.id
+            ? { ...router, monitored: true, connectorEnabled: true, connectorLastSeenAt: null }
+            : router))
+          return result
+        }}
+        onRemove={() => removeRouterMonitor(selectedRouter)}
       />
       {scriptBusy && <p className="router-detail-script-status" role="status">Preparing a new one-time monitor script…</p>}
       {installScript && <div className="router-script-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setInstallScript(null) }}>
         <section className="router-script-modal panel" role="dialog" aria-modal="true" aria-labelledby="router-script-title">
-          <div className="router-script-modal-heading"><div><span>SECURE ROUTER MONITORING</span><h2 id="router-script-title">Install on {installScript.routerName}</h2><p>Paste this one-time script into the MikroTik terminal. It replaces the previous LKTECH monitor token.</p></div><button type="button" aria-label="Close" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}><X size={17} /></button></div>
+          <div className="router-script-modal-heading"><div><span>SECURE ROUTER MONITORING</span><h2 id="router-script-title">Install on {installScript.routerName}</h2><p>Copy this script into the MikroTik terminal once. It creates a startup scheduler and reports metrics automatically every minute; no separate computer or VPS is needed. The script contains a private monitor token, so do not share it.</p></div><button type="button" aria-label="Close" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}><X size={17} /></button></div>
           <label className="router-script-label">RouterOS install script<textarea readOnly value={installScript.script} rows={10} onFocus={(event) => event.currentTarget.select()} /></label>
           {copiedError && <p className="router-discovery-status error" role="alert">{copiedError}</p>}
           <div className="router-script-modal-actions"><button type="button" className="outline-button" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}>Close</button><button type="button" className="router-link-button" onClick={() => void copyMonitorScript()}><Copy size={14} /> {scriptCopied ? 'Copied' : 'Copy script'}</button></div>
@@ -1164,7 +1178,7 @@ function RouterManagement() {
 
       <div className="router-metrics">
         <article><span>ROUTERS</span><strong>{loading ? '—' : summary.total.toLocaleString()}</strong><small>{summary.notConfigured.toLocaleString()} waiting for monitor install</small></article>
-        <article><span>ONLINE</span><strong>{loading ? '—' : summary.online.toLocaleString()}</strong><small>heartbeat received in last 3 minutes</small></article>
+        <article><span>ONLINE</span><strong>{loading ? '—' : summary.online.toLocaleString()}</strong><small>report received in last 90 seconds</small></article>
         <article><span>OFFLINE</span><strong>{loading ? '—' : summary.offline.toLocaleString()}</strong><small>no recent heartbeat</small></article>
         <article><span>LIVE SESSIONS</span><strong>{activeSessions === null ? '—' : activeSessions.toLocaleString()}</strong><small>open RADIUS sessions workspace-wide</small></article>
       </div>
@@ -1195,7 +1209,7 @@ function RouterManagement() {
                   <td>{router.lastSeenAt ? new Date(router.lastSeenAt).toLocaleString() : 'Never reported'}</td>
                   <td>{router.monitored
                     ? <div className="router-row-actions"><button type="button" className="router-row-action" onClick={() => setSelectedRouterId(router.id)}>Monitor</button><button type="button" className="router-row-action" aria-label={`Reprovision monitoring for ${router.routerName}`} disabled={scriptBusy} onClick={() => void generateMonitorScript(router)}><RefreshCw size={13} /></button></div>
-                    : <button type="button" className="router-row-action enable-monitor-action" disabled={scriptBusy} onClick={() => void generateMonitorScript(router)}>{scriptBusy ? 'Preparing…' : 'Enable monitor'}</button>}</td>
+                    : <button type="button" className="router-row-action enable-monitor-action" disabled={scriptBusy} onClick={() => void generateMonitorScript(router)}>{scriptBusy ? 'Preparing…' : 'Set up automatic monitoring'}</button>}</td>
                 </tr>
               ))}
               {!loading && filteredRouters.length === 0 && <tr><td colSpan={6}>{routers.length ? 'No routers match your search.' : 'No network sites are registered. Link a MikroTik router to get started.'}</td></tr>}
@@ -1203,7 +1217,7 @@ function RouterManagement() {
             </tbody>
           </table>
         </div>
-        <div className="router-table-footer">Routers report securely every second; this page refreshes every second while visible. Existing routers need the updated monitor script to use this interval.</div>
+        <div className="router-table-footer">Install the RouterOS monitor once from the router terminal; it then reports metrics automatically every minute without a separate computer or server.</div>
       </div>
       <div className="router-management-footer"><button type="button" className="router-refresh-button" onClick={() => void load()} disabled={refreshing}><RefreshCw size={13} className={refreshing ? 'is-spinning' : undefined} />{refreshing ? 'Refreshing…' : 'Refresh routers'}</button></div>
     </section>

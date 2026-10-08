@@ -1,0 +1,17 @@
+services:
+  router-connector:
+    build: .
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - /etc/router-connector:/etc/router-connector:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

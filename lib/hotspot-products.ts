@@ -72,5 +72,5 @@ export function toHotspotRadiusReplies(username: string, policy: Pick<BillingPac
 }
 
 export function toFreeRadiusExpiration(expiresAt: Date) {
-  return expiresAt.toUTCString().replace(',', '')
+  return expiresAt.toUTCString().replace(',', '').replace(' GMT', ' UTC')
 }

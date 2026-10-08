@@ -11,15 +11,22 @@ export async function POST(request: NextRequest) {
   const session = await getTenantSession(request)
   if (!session) return NextResponse.json({ error: 'Sign in to enable router monitoring.' }, { status: 401 })
 
-  let input: { siteId?: unknown; routerName?: unknown }
+  let input: { siteId?: unknown; routerName?: unknown; mode?: unknown }
   try {
-    input = await request.json() as { siteId?: unknown; routerName?: unknown }
+    input = await request.json() as { siteId?: unknown; routerName?: unknown; mode?: unknown }
   } catch {
     return NextResponse.json({ error: 'Router monitoring request must be valid JSON.' }, { status: 400 })
+  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return NextResponse.json({ error: 'Router monitoring request is invalid.' }, { status: 400 })
   }
 
   const siteId = typeof input.siteId === 'string' ? input.siteId : ''
   const routerName = typeof input.routerName === 'string' ? input.routerName.trim() : ''
+  const connectorMode = input.mode === 'connector'
+  if (input.mode !== undefined && input.mode !== 'connector' && input.mode !== 'script') {
+    return NextResponse.json({ error: 'Choose a supported router monitoring method.' }, { status: 400 })
+  }
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(siteId) ||
       !/^[a-zA-Z0-9 _-]{1,48}$/.test(routerName)) {
     return NextResponse.json({ error: 'Choose a valid network site and router name.' }, { status: 400 })
@@ -35,6 +42,7 @@ export async function POST(request: NextRequest) {
   }
 
   const token = randomBytes(32).toString('base64url')
+  const connectorToken = connectorMode ? randomBytes(32).toString('base64url') : null
   const telemetryUrl = new URL('/api/routers/telemetry', baseUrl)
 
   try {
@@ -60,6 +68,10 @@ export async function POST(request: NextRequest) {
           previousTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
           tokenHash: hashRouterMonitorToken(token),
           enabled: true,
+          ...(connectorToken ? {
+            connectorTokenHash: hashRouterMonitorToken(connectorToken),
+            connectorLastSeenAt: null,
+          } : {}),
         }).where(and(eq(routerMonitors.id, id), eq(routerMonitors.tenantId, session.tenantId)))
       } else {
         await tx.insert(routerMonitors).values({
@@ -68,12 +80,21 @@ export async function POST(request: NextRequest) {
           siteId,
           routerName,
           tokenHash: hashRouterMonitorToken(token),
+          ...(connectorToken ? { connectorTokenHash: hashRouterMonitorToken(connectorToken) } : {}),
         })
       }
       return id
     })
 
     if (!monitorId) return NextResponse.json({ error: 'Network site not found in this workspace.' }, { status: 404 })
+    if (connectorMode && connectorToken) {
+      return NextResponse.json({
+        routerId: monitorId,
+        routerName,
+        appUrl: baseUrl.origin,
+        token: connectorToken,
+      }, { headers: { 'cache-control': 'no-store' } })
+    }
     const script = buildRouterMonitorScript({
       routerId: monitorId,
       monitorToken: token,

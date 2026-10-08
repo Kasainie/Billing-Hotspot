@@ -110,10 +110,10 @@ body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-prim
 .satellite-bottom { bottom: 14%; left: 18%; width: 5px; height: 5px; background: var(--portal-graphic-secondary); }
 .satellite-right { right: 15%; bottom: 16%; width: 6px; height: 6px; background: var(--portal-graphic-secondary); }
 .hotspot-home .portal-error { margin: 0 0 10px; }
-.package-section, .account-section, .receipt-section { margin-top: 10px; border: 1px solid #80aac044; border-radius: 8px; background: var(--portal-panel-wash); padding: 13px; box-shadow: 0 8px 22px #00132230; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.package-section, .account-section { margin-top: 10px; border: 1px solid #80aac044; border-radius: 8px; background: var(--portal-panel-wash); padding: 13px; box-shadow: 0 8px 22px #00132230; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .section-eyebrow { margin: 0 0 4px; color: #8fc9d6; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
-.section-heading h2, .account-section h2, .receipt-section h2 { margin: 0; color: #f1f7fa; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; font-size: 16px; font-weight: 700; line-height: 1.3; }
+.section-heading h2, .account-section h2 { margin: 0; color: #f1f7fa; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; font-size: 16px; font-weight: 700; line-height: 1.3; }
 .currency-label { border: 1px solid #6d9bb340; border-radius: 4px; padding: 4px 7px; color: #b4d2de; font-size: 12px; font-weight: 700; }
 .package-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
 .package-loading { grid-column: 1 / -1; margin: 0; border: 1px solid #75a2b344; border-radius: 6px; background: var(--portal-card-wash); padding: 13px 10px; color: #c3d8e1; font-size: 13px; line-height: 1.5; text-align: center; }
@@ -132,31 +132,25 @@ body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-prim
 .package-detail-label { color: #d3e0e7; font-size: 12px; font-weight: 700; letter-spacing: .02em; line-height: 1.2; }
 .package-speed { color: var(--portal-speed-accent); font-size: 14px; font-variant-numeric: tabular-nums; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 .package-duration { color: var(--portal-time-accent); font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.3; overflow-wrap: anywhere; }
-.subscription-plans-link { display: block; margin: 9px 0 0; color: #8fe4f0; font-size: 12px; font-weight: 650; text-align: center; text-decoration: underline; text-underline-offset: 3px; }
-.subscription-plans-link:hover { color: #fff; }
 .purchase-form { display: grid; gap: 6px; margin-top: 11px; }
-.purchase-form > label, .account-fields label, .receipt-fields label { display: grid; gap: 5px; margin: 0; color: #d4e2e8; font-size: 13px; font-weight: 600; }
+.account-fields label { display: grid; gap: 5px; margin: 0; color: #d4e2e8; font-size: 13px; font-weight: 600; }
 .hotspot-home input { width: 100%; min-width: 0; min-height: 42px; border: 1px solid #648198; border-radius: 5px; outline: 0; background: #e8eef3; padding: 8px 10px; color: #1b2e3b; font: inherit; font-size: 14px; }
 .hotspot-home input::placeholder { color: #71818e; }
 .hotspot-home input:focus { border-color: #54bad2; box-shadow: 0 0 0 2px #54bad242; }
-.purchase-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
-.purchase-button, .account-button, .receipt-button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 5px; background: #16b86b; padding: 8px 12px; color: #fff; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; }
+.purchase-button, .account-button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 5px; background: #16b86b; padding: 8px 12px; color: #fff; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; }
 .purchase-button:disabled { cursor: not-allowed; opacity: .55; }
 .purchase-button:hover:not(:disabled) { background: #10a85f; }
-.payment-hint { margin: 0; color: #a9c0cb; font-size: 12px; line-height: 1.5; }
+.portal-hint { margin: 0; color: #a9c0cb; font-size: 12px; line-height: 1.5; }
 .purchase-status { margin: 0; color: #b8d5e1; font-size: 12px; line-height: 1.5; }
 .purchase-status.is-error, .package-loading.is-error { color: #ffc0b5; }
 .voucher-link { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 8px; margin: 9px 0; border: 1px solid #75a2b33d; border-radius: 6px; background: var(--portal-voucher-wash); color: #e2edf1; font-size: 13px; font-weight: 600; text-decoration: none; -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 .voucher-link:hover { border-color: #ff994f; color: #fff; }
 .account-section { margin-top: 0; padding: 15px; }
-.account-section h2, .receipt-section h2 { font-size: 16px; }
-.account-section > p:not(.section-eyebrow), .receipt-section > div:first-child > p:last-child { margin: 6px 0 12px; color: #b7cbd5; font-size: 13px; line-height: 1.5; }
+.account-section h2 { font-size: 16px; }
+.account-section > p:not(.section-eyebrow) { margin: 6px 0 12px; color: #b7cbd5; font-size: 13px; line-height: 1.5; }
 .account-fields { display: grid; gap: 7px; }
 .account-button { width: 100%; margin-top: 9px; }
-.account-button:hover, .receipt-button:hover { filter: brightness(.94); }
-.receipt-section { padding: 14px; }
-.receipt-fields { display: grid; gap: 7px; }
-.receipt-button { width: 100%; margin-top: 9px; background: #347ff0; }
+.account-button:hover { filter: brightness(.94); }
 .portal-footer { display: flex; justify-content: space-between; gap: 8px; margin: 13px 1px 0; border-top: 1px solid #83aabc55; padding: 10px 1px 0; color: #a8c1cc; font-size: 12px; line-height: 1.4; }
 
 @media (max-width: 380px) {
@@ -169,7 +163,6 @@ body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-prim
   .package-price-value { font-size: 21px; }
   .package-speed { font-size: 13px; }
   .package-duration { font-size: 12px; }
-  .purchase-button { padding-right: 8px; padding-left: 8px; font-size: 13px; }
   .portal-footer { flex-direction: column; text-align: center; }
 }
 

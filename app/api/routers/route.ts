@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
-import { calculateRouterHealth, parseRouterTimestamp } from '@/lib/router-monitoring'
+import { calculateRouterHealth, isRouterOnline, parseRouterTimestamp } from '@/lib/router-monitoring'
 
 type RouterRow = {
   id: string
@@ -12,6 +12,8 @@ type RouterRow = {
   routerName: string
   location: string
   lastSeenAt: Date | string | null
+  connectorLastSeenAt: Date | string | null
+  connectorEnabled: boolean
   cpuLoad: number | null
   freeMemoryBytes: number | null
   totalMemoryBytes: number | null
@@ -37,6 +39,8 @@ export async function GET(request: NextRequest) {
         monitor.router_name as "routerName",
         site.location,
         monitor.last_seen_at as "lastSeenAt",
+        monitor.connector_last_seen_at as "connectorLastSeenAt",
+        (monitor.connector_token_hash is not null) as "connectorEnabled",
         latest.cpu_load as "cpuLoad",
         latest.free_memory_bytes::float8 as "freeMemoryBytes",
         latest.total_memory_bytes::float8 as "totalMemoryBytes",
@@ -71,10 +75,11 @@ export async function GET(request: NextRequest) {
     const monitoredSiteIds = new Set(result.rows.map((row) => row.siteId))
     const routers = result.rows.map((row) => {
       const lastSeenAt = parseRouterTimestamp(row.lastSeenAt)
+      const connectorLastSeenAt = parseRouterTimestamp(row.connectorLastSeenAt)
       if (row.lastSeenAt !== null && !lastSeenAt) {
         console.error(`Invalid last-seen timestamp for router monitor ${row.id}`)
       }
-      const online = lastSeenAt !== null && now - lastSeenAt.getTime() <= 3 * 60 * 1000
+      const online = isRouterOnline(lastSeenAt, now)
       const memoryUsedPercent = row.totalMemoryBytes && row.freeMemoryBytes !== null
         ? Math.max(0, Math.min(100, (1 - row.freeMemoryBytes / row.totalMemoryBytes) * 100))
         : null
@@ -85,6 +90,7 @@ export async function GET(request: NextRequest) {
       return {
         ...row,
         lastSeenAt: lastSeenAt?.toISOString() ?? null,
+        connectorLastSeenAt: connectorLastSeenAt?.toISOString() ?? null,
         status: online ? 'online' : 'offline',
         memoryUsedPercent,
         diskUsedPercent,
@@ -107,6 +113,8 @@ export async function GET(request: NextRequest) {
         routerName: site.name,
         location: site.location,
         lastSeenAt: null,
+        connectorLastSeenAt: null,
+        connectorEnabled: false,
         cpuLoad: null,
         freeMemoryBytes: null,
         totalMemoryBytes: null,

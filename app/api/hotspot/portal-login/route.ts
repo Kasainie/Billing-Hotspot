@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { NextRequest, NextResponse } from 'next/server'
 import { resolvePublicTenantId } from '@/lib/db/tenant'
+import { prepareHotspotPortalHtml } from '@/lib/hotspot-portal-html'
 
 export async function GET(request: NextRequest) {
   const tenantSlug = request.nextUrl.searchParams.get('tenant')?.trim().toLowerCase() || ''
@@ -13,9 +14,12 @@ export async function GET(request: NextRequest) {
     const tenantId = await resolvePublicTenantId(request)
     if (!tenantId) return new Response('Workspace not found.', { status: 404, headers: { 'cache-control': 'no-store' } })
     const template = await readFile(join(process.cwd(), 'public', 'hotspot-assets', 'login.html'), 'utf8')
-    const marker = "var portalTenantSlug = '';"
-    if (!template.includes(marker)) throw new Error('Captive portal tenant marker is missing.')
-    const html = template.replace(marker, `var portalTenantSlug = ${JSON.stringify(tenantSlug)};`)
+    const assetBaseUrl = process.env.PROVISIONING_BASE_URL || (
+      ['localhost', '127.0.0.1', '::1'].includes(request.nextUrl.hostname)
+        ? request.nextUrl.origin
+        : 'https://billing.lktech.life'
+    )
+    const html = prepareHotspotPortalHtml(template, tenantSlug, assetBaseUrl)
     return new Response(html, {
       headers: {
         'content-type': 'text/html; charset=utf-8',
