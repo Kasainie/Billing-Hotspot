@@ -56,7 +56,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
         setError(result.error || 'Unable to continue. Please try again.')
         return
       }
-      window.location.assign(isSignup ? '/get-started' : '/dashboard')
+      window.location.assign(isSignup ? '/get-started' : '/')
     } catch {
       setError('Unable to reach the server. Check your connection and try again.')
     } finally {

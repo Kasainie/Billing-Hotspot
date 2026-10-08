@@ -6,7 +6,7 @@ export default function NotFound() {
       <p>404</p>
       <h1>Page not found</h1>
       <p>The page you requested does not exist.</p>
-      <Link href="/dashboard">Return to dashboard</Link>
+      <Link href="/">Return to dashboard</Link>
     </main>
   )
 }
