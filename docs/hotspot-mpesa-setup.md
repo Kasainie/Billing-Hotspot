@@ -41,13 +41,13 @@ The integration currently uses the PayBill STK transaction type (`CustomerPayBil
 
 ## Router
 
-New Hotspot configuration scripts add `billing.lktech.life` to the MikroTik Hotspot walled garden. For routers already configured, add this once from RouterOS:
+The captive portal hostname is `login.lktech.life`. New Hotspot configuration scripts set it as the MikroTik Hotspot profile's `dns-name`; `billing.lktech.life` is used only for backend APIs, assets, and provisioning. Keep billing in the walled garden so the login page can load its backend data. For routers already configured, add this once from RouterOS:
 
 ```routeros
 :if ([:len [/ip hotspot walled-garden find where dst-host="billing.lktech.life" and action="allow"]] = 0) do={/ip hotspot walled-garden add dst-host="billing.lktech.life" action=allow comment="billing-system-managed-portal"}
 ```
 
-The managed Hotspot profile sets `dns-name="login.lktech.life"` so RouterOS can resolve the captive login host locally. To update an existing router immediately, run:
+The managed Hotspot profile sets `dns-name="login.lktech.life"` so RouterOS can resolve the captive login host locally. If an existing router sends customers to `billing.lktech.life`, reapply the refreshed `hotspot.rsc` configuration, then reconnect clients or renew their DHCP leases. To update the profile immediately, run:
 
 ```routeros
 /ip hotspot profile set [find where name="billing-hotspot-profile"] dns-name="login.lktech.life"

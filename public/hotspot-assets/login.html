@@ -67,7 +67,7 @@
     </div>
   </main>
   <script>
-    var billingBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    var backendBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? window.location.origin
       : 'https://billing.lktech.life';
     var portalCompanyName = 'LKTECH';
@@ -95,9 +95,9 @@
     var tenantSlug = new URLSearchParams(window.location.search).get('tenant') || portalTenantSlug;
     var tenantQuery = tenantSlug ? '?tenant=' + encodeURIComponent(tenantSlug) : '';
     document.querySelectorAll('.tenant-slug-field').forEach(function (field) { field.value = tenantSlug; });
-    document.documentElement.style.setProperty('--portal-wallpaper', 'url("' + billingBaseUrl + '/hotspot-assets/themes/savannah-background.png")');
-    document.getElementById('portal-theme').href = billingBaseUrl + '/api/hotspot/portal-theme' + tenantQuery;
-    fetch(billingBaseUrl + '/api/hotspot/portal-template' + tenantQuery, { cache: 'no-store' })
+    document.documentElement.style.setProperty('--portal-wallpaper', 'url("' + backendBaseUrl + '/hotspot-assets/themes/savannah-background.png")');
+    document.getElementById('portal-theme').href = backendBaseUrl + '/api/hotspot/portal-theme' + tenantQuery;
+    fetch(backendBaseUrl + '/api/hotspot/portal-template' + tenantQuery, { cache: 'no-store' })
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (portalSettings) {
         if (!portalSettings) return;
@@ -158,7 +158,7 @@
       notice.textContent = message;
       packageGrid.replaceChildren(notice);
     }
-    fetch(billingBaseUrl + '/api/hotspot/packages' + tenantQuery, { cache: 'no-store' })
+    fetch(backendBaseUrl + '/api/hotspot/packages' + tenantQuery, { cache: 'no-store' })
       .then(function (response) {
         if (!response.ok) throw new Error('Packages are temporarily unavailable. Please try again later.');
         return response.json();
@@ -248,7 +248,7 @@
       purchaseButton.textContent = 'Connecting...';
       purchaseStatus.textContent = 'Preparing your free connection...';
       purchaseStatus.classList.remove('is-error');
-      fetch(billingBaseUrl + '/api/hotspot/free' + tenantQuery, {
+      fetch(backendBaseUrl + '/api/hotspot/free' + tenantQuery, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ packageId: selectedPackage, mac: routerMac })
@@ -281,7 +281,7 @@
     }
     function autoReconnect() {
       if (!/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/i.test(routerMac)) return;
-      fetch(billingBaseUrl + '/api/hotspot/roam?mac=' + encodeURIComponent(routerMac) + (tenantSlug ? '&tenant=' + encodeURIComponent(tenantSlug) : ''), { cache: 'no-store' })
+      fetch(backendBaseUrl + '/api/hotspot/roam?mac=' + encodeURIComponent(routerMac) + (tenantSlug ? '&tenant=' + encodeURIComponent(tenantSlug) : ''), { cache: 'no-store' })
         .then(function (response) { return response.ok ? response.json() : null; })
         .then(function (result) {
           if (!result || !result.active || !result.username || !result.password) return;

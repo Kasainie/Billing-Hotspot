@@ -18,10 +18,10 @@
     </section>
   </main>
   <script>
-    var billingBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    var backendBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? window.location.origin
       : 'https://billing.lktech.life';
-    var bindUrl = billingBaseUrl + '/api/hotspot/roam';
+    var bindUrl = backendBaseUrl + '/api/hotspot/roam';
     var bindBody = JSON.stringify({ username: '$(username)', mac: '$(mac)' });
     if (!navigator.sendBeacon || !navigator.sendBeacon(bindUrl, new Blob([bindBody], { type: 'text/plain' }))) {
       fetch(bindUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: bindBody, keepalive: true }).catch(function () {});
