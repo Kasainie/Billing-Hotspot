@@ -155,7 +155,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    const response = NextResponse.redirect(new URL('/', new URL(configured.redirectUri).origin))
+    const response = NextResponse.redirect(new URL('/dashboard', new URL(configured.redirectUri).origin))
     response.cookies.set('billing_session', token, sessionCookieOptions())
     clearOAuthCookies(response)
     return response
