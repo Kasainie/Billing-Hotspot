@@ -15,7 +15,7 @@ test('production WinBox command fetches and imports one self-contained provision
   const scriptUrl = 'https://billing.example.com/provision/token123'
   const fetchCommand = buildFetchCommand({ scriptUrl, completeUrl: 'https://billing.example.com/provision/token123/complete' })
 
-  assert.equal(fetchCommand, '/tool fetch mode=https url="https://billing.example.com/provision/token123" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc')
+  assert.equal(fetchCommand, ':if ([:len [/file find where name="lktech.rsc"]] > 0) do={/file remove [find where name="lktech.rsc"]}; /tool fetch mode=https url="https://billing.example.com/provision/token123" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc')
   assert.doesNotMatch(fetchCommand, /\/tool fetch .*?url="https:\/\/billing\.example\.com\/provision\/token123\/complete"/i)
   assert.doesNotMatch(fetchCommand, /\/hotspot\//i)
   assert.doesNotMatch(fetchCommand, /router-setup\.rsc/i)
@@ -24,7 +24,7 @@ test('production WinBox command fetches and imports one self-contained provision
 test('local HTTP fetch uses the localhost router bundle format for dev testing', () => {
   const scriptUrl = 'http://127.0.0.1:3000/provision/token123'
   const fetchCommand = buildFetchCommand({ scriptUrl })
-  assert.equal(fetchCommand, '/tool fetch mode=http url="http://127.0.0.1:3000/provision/token123" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc')
+  assert.equal(fetchCommand, ':if ([:len [/file find where name="lktech.rsc"]] > 0) do={/file remove [find where name="lktech.rsc"]}; /tool fetch mode=http url="http://127.0.0.1:3000/provision/token123" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc')
 })
 
 test('service configuration is downloaded and imported as a RouterOS file', () => {
@@ -32,10 +32,12 @@ test('service configuration is downloaded and imported as a RouterOS file', () =
     scriptUrl: 'https://billing.example.com/provision/token123/configure',
     configuredUrl: 'https://billing.example.com/provision/token123/configured',
   })
-  assert.match(command, /^:local lktechStage "download"; :do \{ \/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configure" dst-path=billing-services\.rsc;/)
+  assert.match(command, /^:local lktechStage "download"; :do \{ :if \(\[:len \[\/file find where name="billing-services\.rsc"\]\] > 0\) do=\{\/file remove \[find where name="billing-services\.rsc"\]\}; \/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configure" dst-path=billing-services\.rsc;/)
+  assert.match(command, /name="billing-services\.rsc".*\/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configure"/)
   assert.match(command, /:set lktechStage "import"; :onerror lktechImportError in=\{ \/import billing-services\.rsc verbose=yes \} do=\{:put \("LKTECH import error: " \. \$lktechImportError\); :error "RouterOS service import failed"\};/)
   assert.match(command, /:set lktechStage "confirmation"; \/tool fetch mode=https url="https:\/\/billing\.example\.com\/provision\/token123\/configured" keep-result=no/)
   assert.match(command, /\/import billing-services\.rsc verbose=yes/)
+  assert.match(command, /file remove \[find where name="billing-services\.rsc"\]/)
   assert.match(command, /on-error=\{:put \("LKTECH service configuration failed during " \. \$lktechStage \. "; confirmation was not sent"\)\}$/)
 })
 
@@ -95,6 +97,7 @@ test('MikroTik Hotspot and PPPoE accounting report every minute', () => {
 test('static LKTECH bootstrap requires a one-time provisioning URL', () => {
   const bootstrap = readFileSync(new URL('../public/routeros/lktech.rsc', import.meta.url), 'utf8')
   assert.match(bootstrap, /PASTE_SHORT_LIVED_TOKEN/)
+  assert.match(bootstrap, /file remove \[find where name="lktech-provisioning\.rsc"\]/)
   assert.match(bootstrap, /\/tool fetch mode=https url=\$provisioningUrl dst-path=lktech-provisioning\.rsc/)
   assert.match(bootstrap, /\/import lktech-provisioning\.rsc/)
 })
@@ -103,6 +106,8 @@ test('hotspot file bundle downloads portal pages and assets to RouterOS hotspot 
   const script = getHotspotBundleScript('hotspot-files.rsc', 'https://billing.example.com')
   assert.match(script!, /dst-path="flash\/hotspot\/md5\.js"/)
   assert.match(script!, /dst-path="hotspot\/md5\.js"/)
+  assert.match(script!, /file remove \[find where name="flash\/hotspot\/login\.html"\]/)
+  assert.match(script!, /file remove \[find where name="hotspot\/login\.html"\]/)
   assert.match(script!, /flash\/hotspot/)
   assert.doesNotMatch(script!, /"\$[A-Za-z]/)
   assert.ok(script!.includes('/api/hotspot/portal-login'), 'tenant-aware captive login page is included in the portal installer')
@@ -456,6 +461,7 @@ test('provisioning script collects RouterOS interfaces and sends a flat inventor
   assert.doesNotMatch(script, /RouterOS 6|complete\/interface|complete\/wan|complete\/bridge/)
   for (const fileName of ['certificates.rsc', 'config.rsc', 'hotspot-files.rsc', 'hotspot.rsc']) {
     assert.match(script, new RegExp(`/hotspot/${fileName}.*dst-path=${fileName}`))
+    assert.match(script, new RegExp(`file remove \\[find where name="${fileName}"\\][\\s\\S]*\\/hotspot\\/${fileName}`))
     assert.match(script, new RegExp(`/import ${fileName}`))
   }
   assert.match(script, /\/tool fetch url="https:\/\/billing\.example\.com\/provision\/token123\/complete" keep-result=no/)

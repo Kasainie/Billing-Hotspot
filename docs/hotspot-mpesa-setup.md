@@ -104,10 +104,11 @@ The public DNS records for `login.lktech.life` currently point to Vercel, not th
 Refresh the captive portal files on an existing router:
 
 ```routeros
+:if ([:len [/file find where name="hotspot-files.rsc"]] > 0) do={/file remove [find where name="hotspot-files.rsc"]}
 /tool fetch url="https://billing.lktech.life/hotspot/hotspot-files.rsc" dst-path=hotspot-files.rsc; :delay 2s; /import hotspot-files.rsc
 ```
 
-For a non-default workspace, include its slug in the bundle URL, for example `https://billing.lktech.life/hotspot/hotspot-files.rsc?tenant=acme-network`. The provisioning flow does this automatically. The router-delivered login page now opens `/hotspot`, the subscription experience where customers can choose hotspot Wi-Fi or home PPPoE plans. Hotspot purchases retain the workspace, client MAC, and router sign-in return URL; after checkout customers can return to enter their Wi-Fi credentials. Refresh the portal files on existing routers after each portal update. PPPoE signups also require the [PPPoE account migration and setup](./pppoe-mpesa-setup.md).
+For a non-default workspace, include its slug in the bundle URL, for example `https://billing.lktech.life/hotspot/hotspot-files.rsc?tenant=acme-network`. The bundle replaces only its managed portal files (`login.html`, `status.html`, `logout.html`, `error.html`, `alogin.html`, `api.json`, `style.css`, and `md5.js`) before downloading the current versions; unrelated files in the Hotspot folder are left untouched. The provisioning flow does this automatically. The router-delivered login page now opens `/hotspot`, the subscription experience where customers can choose hotspot Wi-Fi or home PPPoE plans. Hotspot purchases retain the workspace, client MAC, and router sign-in return URL; after checkout customers can return to enter their Wi-Fi credentials. Refresh the portal files on existing routers after each portal update. PPPoE signups also require the [PPPoE account migration and setup](./pppoe-mpesa-setup.md).
 
 Standalone RouterOS scripts are available in [`public/routeros`](../public/routeros). The `lktech.rsc` bootstrap requires the one-time provisioning URL from the generated WinBox command; replace its placeholder before running it. It fetches the router-specific script without storing a token in this repository. The support scripts `certificates.rsc`, `config.rsc`, `hotspot-files.rsc`, and `hotspot.rsc` are tenant-neutral and mirror the default-workspace bundle. For another workspace, use the tenant-aware URL above or the guided provisioning flow.
 

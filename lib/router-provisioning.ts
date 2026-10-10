@@ -2,6 +2,10 @@ import { buildRouterMonitorScript } from './router-monitor-script.ts'
 
 export const DEFAULT_ROUTER_BRIDGE_NAME = 'lktech'
 
+function replaceRouterOsFileCommand(fileName: string) {
+  return `:if ([:len [/file find where name="${fileName}"]] > 0) do={/file remove [find where name="${fileName}"]}`
+}
+
 function safeJsonParse(raw: string): unknown {
   const trimmed = raw.trim()
   if (!trimmed) return null
@@ -141,6 +145,7 @@ export function buildProvisioningScript({
     '}',
     `/tool fetch url="${completeUrl}" http-method=post http-data=$inventoryData http-header-field="content-type:text/plain" keep-result=no`,
     ...hotspotBundleFiles.flatMap((fileName) => [
+      replaceRouterOsFileCommand(fileName),
       `/tool fetch url="${baseUrl}/hotspot/${fileName}${fileName === 'hotspot-files.rsc' ? tenantQuery : ''}" dst-path=${fileName} keep-result=yes`,
       ':delay 2s',
       `/import ${fileName}`,
@@ -211,8 +216,12 @@ export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https:/
         ? new URL('/api/hotspot/portal-login', assetBaseUrl)
         : new URL(assetName, assetBase)
       if (assetName === 'login.html' && validTenantSlug) assetUrl.searchParams.set('tenant', validTenantSlug)
-      return `/tool fetch url="${assetUrl.toString()}" dst-path="${directory}/${assetName}" keep-result=yes`
-    })
+      const destination = `${directory}/${assetName}`
+      return [
+        replaceRouterOsFileCommand(destination),
+        `/tool fetch url="${assetUrl.toString()}" dst-path="${destination}" keep-result=yes`,
+      ]
+    }).flat()
     return [
       '# hotspot-files.rsc',
       ':if ([:len [/file find where name="flash"]] > 0) do={',
@@ -427,11 +436,11 @@ export function buildSubscriberServiceScript({
 export function buildFetchCommand({ scriptUrl, completeUrl }: { scriptUrl: string; completeUrl?: string }) {
   void completeUrl
   const protocol = /^https:/i.test(scriptUrl) ? 'https' : 'http'
-  return `/tool fetch mode=${protocol} url="${scriptUrl}" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc`
+  return `${replaceRouterOsFileCommand('lktech.rsc')}; /tool fetch mode=${protocol} url="${scriptUrl}" dst-path=lktech.rsc; :delay 2s; /import lktech.rsc`
 }
 
 export function buildServiceConfigFetchCommand({ scriptUrl, configuredUrl }: { scriptUrl: string; configuredUrl: string }) {
   const scriptMode = /^https:/i.test(scriptUrl) ? 'https' : 'http'
   const configuredMode = /^https:/i.test(configuredUrl) ? 'https' : 'http'
-  return `:local lktechStage "download"; :do { /tool fetch mode=${scriptMode} url="${scriptUrl}" dst-path=billing-services.rsc; :delay 2s; :set lktechStage "import"; :onerror lktechImportError in={ /import billing-services.rsc verbose=yes } do={:put ("LKTECH import error: " . $lktechImportError); :error "RouterOS service import failed"}; :set lktechStage "confirmation"; /tool fetch mode=${configuredMode} url="${configuredUrl}" keep-result=no } on-error={:put ("LKTECH service configuration failed during " . $lktechStage . "; confirmation was not sent")}`
+  return `:local lktechStage "download"; :do { ${replaceRouterOsFileCommand('billing-services.rsc')}; /tool fetch mode=${scriptMode} url="${scriptUrl}" dst-path=billing-services.rsc; :delay 2s; :set lktechStage "import"; :onerror lktechImportError in={ /import billing-services.rsc verbose=yes } do={:put ("LKTECH import error: " . $lktechImportError); :error "RouterOS service import failed"}; :set lktechStage "confirmation"; /tool fetch mode=${configuredMode} url="${configuredUrl}" keep-result=no } on-error={:put ("LKTECH service configuration failed during " . $lktechStage . "; confirmation was not sent")}`
 }
