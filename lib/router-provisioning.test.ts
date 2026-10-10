@@ -9,7 +9,7 @@ import { hotspotPortalTemplates } from './hotspot-templates.ts'
 import { normalizeKenyanPhone } from './daraja.ts'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
 
 test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -512,6 +512,21 @@ test('Hotspot service configuration rejects a subnet that overlaps a detected WA
 test('subscriber bridge cannot also host the active WAN DHCP client', () => {
   assert.equal(findWanBridgeConflict('bridgeLocal', ['bridgeLocal']), 'bridgeLocal')
   assert.equal(findWanBridgeConflict('bridgeLocal', ['ether1']), null)
+})
+
+test('subscriber bridge cannot keep an address in the active WAN network', () => {
+  const networks = [
+    { interface: 'ether1', network: '192.168.88.0' },
+    { interface: 'bridgeLocal', network: '192.168.88.0' },
+  ]
+  assert.deepEqual(
+    findWanBridgeSubnetConflict('bridgeLocal', ['ether1'], networks),
+    { bridge: networks[1], wanInterface: 'ether1' },
+  )
+  assert.equal(findWanBridgeSubnetConflict('bridgeLocal', ['ether1'], [
+    { interface: 'ether1', network: '192.168.88.0' },
+    { interface: 'bridgeLocal', network: '172.31.0.0' },
+  ]), null)
 })
 
 test('localhost HTTP is accepted in development for local router provisioning', () => {

@@ -4,7 +4,7 @@ import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanSubnetConflict, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
 import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
@@ -277,8 +277,15 @@ export async function PUT(request: NextRequest) {
     }, { status: 400 })
   }
 
+  const detectedNetworks = record.routerData?.interfaceNetworks || []
+  const conflictingWanBridgeSubnet = findWanBridgeSubnetConflict(bridgeName, wanPorts, detectedNetworks)
+  if (conflictingWanBridgeSubnet) {
+    return NextResponse.json({
+      error: `The ${bridgeName} bridge still has an IP address in the WAN network ${conflictingWanBridgeSubnet.bridge.network}, also used by ${conflictingWanBridgeSubnet.wanInterface}. Reconcile that bridge address before configuring subscriber services; do not reuse the WAN gateway address.`,
+    }, { status: 400 })
+  }
+
   if (services.includes('Hotspot')) {
-    const detectedNetworks = record.routerData?.interfaceNetworks || []
     const conflictingWan = findWanSubnetConflict(hotspotSubnet || '', wanPorts, detectedNetworks)
     if (conflictingWan) {
       return NextResponse.json({

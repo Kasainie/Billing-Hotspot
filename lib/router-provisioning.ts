@@ -260,6 +260,26 @@ export function findWanBridgeConflict(bridgeName: string, wanInterfaces: string[
   return wanInterfaces.includes(bridgeName) ? bridgeName : null
 }
 
+export function findWanBridgeSubnetConflict(
+  bridgeName: string,
+  wanInterfaces: string[],
+  interfaceNetworks: Array<{ interface: string; network: string }>,
+) {
+  const wanPorts = new Set(wanInterfaces)
+  const wanNetworks = new Set(interfaceNetworks
+    .filter(({ interface: name }) => wanPorts.has(name))
+    .map(({ network }) => network))
+  const bridgeNetwork = interfaceNetworks.find(({ interface: name, network }) =>
+    name === bridgeName && wanNetworks.has(network),
+  )
+  if (!bridgeNetwork) return null
+
+  const wanInterface = interfaceNetworks.find(({ interface: name, network }) =>
+    wanPorts.has(name) && network === bridgeNetwork.network,
+  )?.interface
+  return wanInterface ? { bridge: bridgeNetwork, wanInterface } : null
+}
+
 export function buildSubscriberServiceScript({
   bridgeName,
   ports,
