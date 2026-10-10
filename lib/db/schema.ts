@@ -280,6 +280,7 @@ export const routerProvisioningTokens = pgTable('router_provisioning_tokens', {
     interfaces: Array<{ name: string; running: boolean; disabled: boolean }>
     bridgePorts: Array<{ interface: string; bridge: string }>
     wanInterfaces: string[]
+    interfaceNetworks?: Array<{ interface: string; network: string }>
     bridgeName: string | null
     serviceConfiguration?: {
       bridgeName: string

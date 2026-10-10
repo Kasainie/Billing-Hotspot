@@ -24,6 +24,7 @@ function parseRouterInventoryRecords(raw: string): Record<string, unknown> {
     interfaces: [] as Array<{ name: string; running: string; disabled: string }>,
     bridgePorts: [] as Array<{ interface: string; bridge: string }>,
     wanInterfaces: [] as string[],
+    interfaceNetworks: [] as Array<{ interface: string; network: string }>,
     bridges: [] as string[],
   }
 
@@ -37,6 +38,8 @@ function parseRouterInventoryRecords(raw: string): Record<string, unknown> {
       inventory.bridgePorts.push({ interface: fields[0], bridge: fields[1] })
     } else if (kind === 'W' && fields.length === 1) {
       inventory.wanInterfaces.push(fields[0])
+    } else if (kind === 'N' && fields.length === 2) {
+      inventory.interfaceNetworks.push({ interface: fields[0], network: fields[1] })
     } else if (kind === 'B' && fields.length === 1) {
       inventory.bridges.push(fields[0])
     }
@@ -124,6 +127,11 @@ export function buildProvisioningScript({
     ':foreach dhcpClientId in=[/ip dhcp-client find where status="bound"] do={',
     '  :local wanInterface [/ip dhcp-client get $dhcpClientId interface]',
     '  :set inventoryData ($inventoryData . "W|" . $wanInterface . ";")',
+    '}',
+    ':foreach addressId in=[/ip address find] do={',
+    '  :local addressInterface [/ip address get $addressId interface]',
+    '  :local addressNetwork [/ip address get $addressId network]',
+    '  :set inventoryData ($inventoryData . "N|" . $addressInterface . "|" . $addressNetwork . ";")',
     '}',
     ':foreach bridgeId in=[/interface bridge find] do={',
     '  :local bridgeName [/interface bridge get $bridgeId name]',
@@ -233,6 +241,19 @@ export function parseServiceSubnet(value: string) {
 
   const base = `${octets[0]}.${octets[1]}.${octets[2]}`
   return { cidr: value.trim(), gateway: `${base}.1`, range: `${base}.2-${base}.254` }
+}
+
+export function findWanSubnetConflict(
+  hotspotSubnet: string,
+  wanInterfaces: string[],
+  interfaceNetworks: Array<{ interface: string; network: string }>,
+) {
+  const subnet = parseServiceSubnet(hotspotSubnet)
+  if (!subnet) return null
+  const wanPorts = new Set(wanInterfaces)
+  return interfaceNetworks.find(({ interface: name, network }) =>
+    wanPorts.has(name) && network === subnet.cidr.split('/')[0],
+  ) || null
 }
 
 export function buildSubscriberServiceScript({

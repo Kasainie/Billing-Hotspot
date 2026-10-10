@@ -9,7 +9,7 @@ import { hotspotPortalTemplates } from './hotspot-templates.ts'
 import { normalizeKenyanPhone } from './daraja.ts'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
 
 test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -448,6 +448,8 @@ test('provisioning script collects RouterOS interfaces and sends a flat inventor
   assert.match(script, /:foreach interfaceId in=\[\/interface ethernet find\]/)
   assert.match(script, /:foreach bridgePortId in=\[\/interface bridge port find\]/)
   assert.match(script, /:foreach dhcpClientId in=\[\/ip dhcp-client find where status="bound"\]/)
+  assert.match(script, /:foreach addressId in=\[\/ip address find\]/)
+  assert.match(script, /"N\|" \. \$addressInterface \. "\|" \. \$addressNetwork/)
   assert.match(script, /:foreach bridgeId in=\[\/interface bridge find\]/)
   assert.match(script, /http-method=post http-data=\$inventoryData http-header-field="content-type:text\/plain"/)
   assert.doesNotMatch(script, /RouterOS 6|complete\/interface|complete\/wan|complete\/bridge/)
@@ -467,6 +469,7 @@ test('raw RouterOS JSON payloads are accepted by the completion endpoint parser'
       interfaces: [{ name: 'ether1', running: true, disabled: false }],
       bridgePorts: [{ interface: 'ether1', bridge: 'bridge1' }],
       wanInterfaces: ['ether1'],
+      interfaceNetworks: [{ interface: 'ether1', network: '192.168.88.0' }],
       bridges: ['bridge1'],
     }),
   })
@@ -476,13 +479,14 @@ test('raw RouterOS JSON payloads are accepted by the completion endpoint parser'
   const bridgePorts = inventory.bridgePorts as Array<Record<string, unknown>> | undefined
   assert.equal(interfaces?.[0]?.name, 'ether1')
   assert.equal(bridgePorts?.[0]?.bridge, 'bridge1')
+  assert.deepEqual(inventory.interfaceNetworks, [{ interface: 'ether1', network: '192.168.88.0' }])
 })
 
 test('raw RouterOS inventory records are parsed into interfaces, WAN, bridges, and bridge ports', async () => {
   const request = new Request('https://billing.example.com/provision/token123/complete', {
     method: 'POST',
     headers: { 'content-type': 'text/plain' },
-    body: 'I|ether1|true|false;I|ether2|true|false;P|ether2|lktech;W|ether1;B|lktech',
+    body: 'I|ether1|true|false;I|ether2|true|false;P|ether2|lktech;W|ether1;N|ether1|192.168.88.0;B|lktech',
   })
 
   const inventory = await readRouterInventoryPayload(request)
@@ -493,8 +497,16 @@ test('raw RouterOS inventory records are parsed into interfaces, WAN, bridges, a
     ],
     bridgePorts: [{ interface: 'ether2', bridge: 'lktech' }],
     wanInterfaces: ['ether1'],
+    interfaceNetworks: [{ interface: 'ether1', network: '192.168.88.0' }],
     bridges: ['lktech'],
   })
+})
+
+test('Hotspot service configuration rejects a subnet that overlaps a detected WAN network', () => {
+  const wanNetworks = [{ interface: 'ether1', network: '192.168.88.0' }]
+  assert.deepEqual(findWanSubnetConflict('192.168.88.0/24', ['ether1'], wanNetworks), wanNetworks[0])
+  assert.equal(findWanSubnetConflict('172.31.0.0/24', ['ether1'], wanNetworks), null)
+  assert.equal(findWanSubnetConflict('192.168.88.0/24', ['ether2'], wanNetworks), null)
 })
 
 test('localhost HTTP is accepted in development for local router provisioning', () => {

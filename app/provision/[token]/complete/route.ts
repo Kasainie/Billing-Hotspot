@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { isIPv4 } from 'node:net'
 import { and, eq, gt, isNotNull, ne } from 'drizzle-orm'
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
@@ -97,6 +98,17 @@ function parseBridgePortList(value: unknown) {
   }).slice(0, 64)
 }
 
+function parseInterfaceNetworks(value: unknown) {
+  return asArray(value).flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const record = item as Record<string, unknown>
+    const interfaceName = getStringValue(record, 'interface')
+    const network = getStringValue(record, 'network')
+    if (!interfaceName || !/^[a-zA-Z0-9_.-]{1,48}$/.test(interfaceName) || !network || !isIPv4(network)) return []
+    return [{ interface: interfaceName, network }]
+  }).slice(0, 64)
+}
+
 export async function POST(request: NextRequest, context: RouteContext<'/provision/[token]/complete'>) {
   const { token } = await context.params
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return new Response('Invalid provisioning token.', { status: 404 })
@@ -111,11 +123,13 @@ export async function POST(request: NextRequest, context: RouteContext<'/provisi
   const interfaces = parseInterfaceList(input.interfaces)
   const bridgePorts = parseBridgePortList(input.bridgePorts)
   const wanInterfaces = parseNameList(input.wanInterfaces, 'interface')
+  const interfaceNetworks = parseInterfaceNetworks(input.interfaceNetworks)
   const bridgeNames = parseNameList(input.bridges, 'name')
   const routerData = {
     interfaces,
     bridgePorts,
     wanInterfaces,
+    interfaceNetworks,
     bridgeName: selectRouterBridgeName(bridgeNames),
   }
 

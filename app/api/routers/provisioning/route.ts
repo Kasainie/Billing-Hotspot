@@ -4,7 +4,7 @@ import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanSubnetConflict, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
 import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
@@ -250,6 +250,36 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Router configuration is invalid' }, { status: 400 })
   }
 
+  let record: Pick<typeof routerProvisioningTokens.$inferSelect, 'id' | 'status' | 'expiresAt' | 'routerData'> | undefined
+  try {
+    const [provisioningRecord] = await db.select({
+      id: routerProvisioningTokens.id,
+      status: routerProvisioningTokens.status,
+      expiresAt: routerProvisioningTokens.expiresAt,
+      routerData: routerProvisioningTokens.routerData,
+    })
+      .from(routerProvisioningTokens)
+      .where(and(eq(routerProvisioningTokens.tokenHash, tokenHash(token)), eq(routerProvisioningTokens.tenantId, session.tenantId)))
+      .limit(1)
+    record = provisioningRecord
+  } catch (error) {
+    console.error('Failed to read router inventory before preparing service configuration', error)
+    return NextResponse.json({ error: getProvisioningDbErrorMessage(error) }, { status: 503 })
+  }
+  if (!record || record.status !== 'applied' || record.expiresAt.getTime() <= Date.now()) {
+    return NextResponse.json({ error: 'Provisioning link is not ready for configuration or has expired.' }, { status: 409 })
+  }
+
+  if (services.includes('Hotspot')) {
+    const detectedNetworks = record.routerData?.interfaceNetworks || []
+    const conflictingWan = findWanSubnetConflict(hotspotSubnet || '', wanPorts, detectedNetworks)
+    if (conflictingWan) {
+      return NextResponse.json({
+        error: `Hotspot subnet ${hotspotSubnet} conflicts with the detected WAN network on ${conflictingWan.interface}. Choose another subnet, such as 172.31.0.0/24, then prepare a new service configuration.`,
+      }, { status: 400 })
+    }
+  }
+
   let configScript: string
   try {
     configScript = buildSubscriberServiceScript({
@@ -277,19 +307,6 @@ export async function PUT(request: NextRequest) {
   }
 
   try {
-    const [record] = await db.select({
-      id: routerProvisioningTokens.id,
-      status: routerProvisioningTokens.status,
-      expiresAt: routerProvisioningTokens.expiresAt,
-      routerData: routerProvisioningTokens.routerData,
-    })
-      .from(routerProvisioningTokens)
-      .where(and(eq(routerProvisioningTokens.tokenHash, tokenHash(token)), eq(routerProvisioningTokens.tenantId, session.tenantId)))
-      .limit(1)
-    if (!record || record.status !== 'applied' || record.expiresAt.getTime() <= Date.now()) {
-      return NextResponse.json({ error: 'Provisioning link is not ready for configuration or has expired.' }, { status: 409 })
-    }
-
     const configurationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
     const preparedAt = new Date().toISOString()
     await db.update(routerProvisioningTokens)
