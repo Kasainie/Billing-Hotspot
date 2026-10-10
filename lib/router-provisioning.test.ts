@@ -316,7 +316,7 @@ test('subscriber service script safely reuses matching bridge DHCP and configure
   assert.match(script, /ip dns set allow-remote-requests=yes/)
   assert.doesNotMatch(script, /dns-server=1\.1\.1\.1,8\.8\.8\.8/)
   assert.match(script, /billing-hotspot-pool/)
-  assert.match(script, /network="172\.31\.0\.0"/)
+  assert.match(script, /network="172\.31\.0\.0" and address!="172\.31\.0\.1\/24"/)
   assert.doesNotMatch(script, /bridge already has another IP address/)
   assert.match(script, /billing-pppoe-pool/)
   assert.match(script, /hotspot walled-garden add dst-host="billing\.lktech\.life" action=allow/)

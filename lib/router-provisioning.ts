@@ -302,7 +302,7 @@ export function buildSubscriberServiceScript({
       '  }',
       '}',
       `:if ([:len [/ip hotspot find where interface="${bridgeName}" and name!="billing-hotspot"]] > 0) do={:error "A Hotspot server already exists on ${bridgeName}; reconcile it before enabling the managed Hotspot server"}`,
-      `:if ([:len [/ip address find where interface="${bridgeName}" and network="${hotspotNetwork!.cidr.split('/')[0]}"]] > 0) do={:error "Hotspot network ${hotspotNetwork!.cidr} already exists on ${bridgeName}; reconcile it before enabling Hotspot"}`,
+      `:if ([:len [/ip address find where interface="${bridgeName}" and network="${hotspotNetwork!.cidr.split('/')[0]}" and address!="${hotspotNetwork!.gateway}/24"]] > 0) do={:error "Hotspot network ${hotspotNetwork!.cidr} already has a conflicting address on ${bridgeName}; reconcile it before enabling Hotspot"}`,
       `:if ([:len [/ip address find where address="${hotspotNetwork!.gateway}/24" and interface!="${bridgeName}"]] > 0) do={:error "Hotspot gateway address is already used on another interface"}`,
     )
   }
