@@ -746,10 +746,6 @@ td { color: #5e6469; }
 .manual-port-entry input:focus { border-color: #f28a22; box-shadow: 0 0 0 3px #ff85001c; }
 .manual-port-add { min-height: 38px; border: 1px solid #ff8500; border-radius: 7px; background: #fff; padding: 0 12px; color: #b75f00; font-size: 11px; font-weight: 600; }
 .manual-port-add:hover { background: #fff7ed; }
-.bridge-name-field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; color: #575e63; font-size: 11px; font-weight: 600; }
-.bridge-name-field input { min-height: 38px; border: 1px solid #dfe3e6; border-radius: 7px; outline: 0; background: #fff; padding: 8px 10px; color: #343a3e; font-size: 12px; }
-.bridge-name-field input:focus { border-color: #f28a22; box-shadow: 0 0 0 3px #ff85001c; }
-.bridge-name-field input[aria-invalid="true"] { border-color: #ac4339; }
 .subnet-section { margin-top: 17px; }
 .subnet-toggle { display: flex; align-items: center; gap: 9px; min-height: 42px; border-radius: 7px; background: #f6f7f8; padding: 9px 11px; color: #454b50; font-size: 11px; cursor: pointer; }
 .subnet-input { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; color: #575e63; font-size: 11px; font-weight: 600; }

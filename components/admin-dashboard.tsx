@@ -45,7 +45,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { parseServiceSubnet } from '@/lib/router-provisioning'
+import { DEFAULT_ROUTER_BRIDGE_NAME, parseServiceSubnet } from '@/lib/router-provisioning'
 import { defaultHotspotPortalBranding, hotspotPortalTemplates, isHotspotPortalTemplateId, type HotspotPortalTemplateId } from '@/lib/hotspot-templates'
 import { PaymentSettings } from '@/components/payment-settings'
 import { PaymentReconciliation } from '@/components/payment-reconciliation'
@@ -656,8 +656,6 @@ type ProvisioningRecordDetails = {
 
 const defaultHotspotSubnet = '172.31.0.0/24'
 const defaultPppoeSubnet = '172.31.1.0/24'
-const defaultBridgeName = 'lktech'
-
 export function RouterProvisioning({
   onExit,
   onProvision,
@@ -691,7 +689,6 @@ export function RouterProvisioning({
   const [manualPortName, setManualPortName] = useState('')
   const [manualPortError, setManualPortError] = useState('')
   const [manualWanPort, setManualWanPort] = useState('')
-  const [bridgeNameOverride, setBridgeNameOverride] = useState('')
   const [selectedPorts, setSelectedPorts] = useState<string[]>([])
   const [useCustomSubnet, setUseCustomSubnet] = useState(false)
   const [hotspotSubnet, setHotspotSubnet] = useState(defaultHotspotSubnet)
@@ -710,8 +707,7 @@ export function RouterProvisioning({
   const requiresProvisioningKey = process.env.NODE_ENV !== 'development'
   const activeHotspotSubnet = useCustomSubnet ? hotspotSubnet : defaultHotspotSubnet
   const activePppoeSubnet = useCustomSubnet ? pppoeSubnet : defaultPppoeSubnet
-  const activeBridgeName = bridgeNameOverride.trim() || routerInventory?.bridgeName || defaultBridgeName
-  const validBridgeName = /^[a-zA-Z0-9_.-]{1,48}$/.test(activeBridgeName)
+  const activeBridgeName = routerInventory?.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
   const hotspotNetwork = parseServiceSubnet(activeHotspotSubnet)
   const pppoeNetwork = parseServiceSubnet(activePppoeSubnet)
   const duplicateServiceNetworks = Boolean(hotspotNetwork && pppoeNetwork && hotspotNetwork.cidr === pppoeNetwork.cidr)
@@ -749,7 +745,6 @@ export function RouterProvisioning({
     setConfigurationError('')
     try {
       const configuration = {
-        bridgeName: activeBridgeName,
         ports,
         managedPorts: [...validInterfaces].filter((port) => !wanInterfaces.has(port)),
         wanPorts: [...wanInterfaces],
@@ -863,7 +858,7 @@ export function RouterProvisioning({
       const inventory = result.routerData as RouterInventory
       setRouterInventory(inventory)
       if (!inventoryInitialized) {
-        const bridgeName = inventory.bridgeName || defaultBridgeName
+        const bridgeName = inventory.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
         setSelectedPorts(inventory.bridgePorts.filter((port) => port.bridge === bridgeName && !inventory.wanInterfaces.includes(port.interface)).map((port) => port.interface))
         setInventoryInitialized(true)
       }
@@ -893,7 +888,7 @@ export function RouterProvisioning({
           const inventory = result.routerData as RouterInventory
           setRouterInventory(inventory)
           if (!inventoryInitialized) {
-            const bridgeName = inventory.bridgeName || defaultBridgeName
+            const bridgeName = inventory.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
             const existingPorts = inventory.bridgePorts
               .filter((port) => port.bridge === bridgeName && !inventory.wanInterfaces.includes(port.interface))
               .map((port) => port.interface)
@@ -993,7 +988,7 @@ export function RouterProvisioning({
 
           <section className="router-setup-section">
             <div className="router-setup-title"><div><h2>Bridge ports</h2><p>Interfaces that join {activeBridgeName} for subscriber traffic.</p></div><button className="text-button" onClick={refreshRouterInventory}>Refresh</button></div>
-            <label className="bridge-name-field">Bridge name<input value={bridgeNameOverride || routerInventory?.bridgeName || defaultBridgeName} maxLength={48} aria-invalid={!validBridgeName} onChange={(event) => setBridgeNameOverride(event.target.value)} /></label>
+            <p className="router-setup-hint">Subscriber bridge is selected automatically: <strong>{activeBridgeName}</strong>.</p>
             <div className="uplink-warning"><AlertTriangle size={16} /><div><strong>Don't bridge the uplink port</strong><p>{wanPorts.length ? `${wanPorts.join(', ')} ${routerInventory?.wanInterfaces.length ? 'runs the router\'s DHCP client' : 'is marked as the uplink/WAN'}. Adding it to ${activeBridgeName} can cut off internet access; leave it unselected.` : 'No DHCP uplink was detected. Mark the WAN port below before selecting subscriber interfaces.'}</p></div></div>
             {availablePorts.length > 0 ? <div className="router-port-list">{availablePorts.map((portName) => {
               const isWan = wanPorts.includes(portName)
@@ -1029,7 +1024,7 @@ export function RouterProvisioning({
           </section>
 
           {configurationError && <p className="router-discovery-status error" role="alert">{configurationError}</p>}
-          <button className="wizard-next apply-router-config" disabled={preparingConfiguration || !validBridgeName || (!routerInventory && manualPorts.length === 0) || !selectedPorts.some((port) => !wanPorts.includes(port)) || services.length === 0 || (services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork) || duplicateServiceNetworks} onClick={createRouterConfiguration}>{preparingConfiguration ? 'Preparing configuration...' : 'Apply configuration'}<ArrowRight size={15} /></button>
+          <button className="wizard-next apply-router-config" disabled={preparingConfiguration || (!routerInventory && manualPorts.length === 0) || !selectedPorts.some((port) => !wanPorts.includes(port)) || services.length === 0 || (services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork) || duplicateServiceNetworks} onClick={createRouterConfiguration}>{preparingConfiguration ? 'Preparing configuration...' : 'Apply configuration'}<ArrowRight size={15} /></button>
         </>}
 
         {step === 3 && provisioningState === 'configured' ? <>

@@ -4,7 +4,7 @@ import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, DEFAULT_ROUTER_BRIDGE_NAME, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
 import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
@@ -230,7 +230,6 @@ export async function PUT(request: NextRequest) {
   const readNames = (value: unknown) => Array.isArray(value) && value.length <= 64 && value.every((item) => typeof item === 'string' && /^[a-zA-Z0-9_.-]{1,48}$/.test(item))
     ? value as string[]
     : null
-  const bridgeName = typeof configuration.bridgeName === 'string' ? configuration.bridgeName : ''
   const ports = readNames(configuration.ports)
   const managedPorts = readNames(configuration.managedPorts)
   const wanPorts = readNames(configuration.wanPorts)
@@ -240,7 +239,7 @@ export async function PUT(request: NextRequest) {
   const hotspotSubnet = typeof configuration.hotspotSubnet === 'string' ? configuration.hotspotSubnet : undefined
   const pppoeSubnet = typeof configuration.pppoeSubnet === 'string' ? configuration.pppoeSubnet : undefined
   const hotspotAntiSharing = configuration.hotspotAntiSharing === true
-  if (!/^[a-zA-Z0-9_.-]{1,48}$/.test(bridgeName) || !ports?.length || !managedPorts || !wanPorts ||
+  if (!ports?.length || !managedPorts || !wanPorts ||
       !services?.length || new Set(services).size !== services.length ||
       new Set(ports).size !== ports.length || new Set(managedPorts).size !== managedPorts.length ||
       new Set(wanPorts).size !== wanPorts.length ||
@@ -270,6 +269,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Provisioning link is not ready for configuration or has expired.' }, { status: 409 })
   }
 
+  const bridgeName = record.routerData?.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
   const conflictingWanBridge = findWanBridgeConflict(bridgeName, record.routerData?.wanInterfaces || [])
   if (conflictingWanBridge) {
     return NextResponse.json({

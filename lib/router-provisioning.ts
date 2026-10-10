@@ -1,5 +1,7 @@
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
 
+export const DEFAULT_ROUTER_BRIDGE_NAME = 'lktech'
+
 function safeJsonParse(raw: string): unknown {
   const trimmed = raw.trim()
   if (!trimmed) return null

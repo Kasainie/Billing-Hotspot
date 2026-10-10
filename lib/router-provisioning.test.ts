@@ -9,7 +9,7 @@ import { hotspotPortalTemplates } from './hotspot-templates.ts'
 import { normalizeKenyanPhone } from './daraja.ts'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, DEFAULT_ROUTER_BRIDGE_NAME, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
 
 test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -60,6 +60,7 @@ test('detected LKTech bridge is preferred over the legacy Centipid bridge', () =
   assert.equal(selectRouterBridgeName(['centripid-bridge', 'lktech']), 'lktech')
   assert.equal(selectRouterBridgeName(['lktech-bridge']), 'lktech-bridge')
   assert.equal(selectRouterBridgeName(['bridge1']), 'bridge1')
+  assert.equal(DEFAULT_ROUTER_BRIDGE_NAME, 'lktech')
 })
 
 test('all RouterOS bundle files resolve to valid content', () => {
