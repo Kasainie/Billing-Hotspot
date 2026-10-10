@@ -654,7 +654,7 @@ type ProvisioningRecordDetails = {
   routerData: RouterInventory | null
 }
 
-const defaultHotspotSubnet = '192.168.88.0/24'
+const defaultHotspotSubnet = '172.31.0.0/24'
 const defaultPppoeSubnet = '172.31.1.0/24'
 const defaultBridgeName = 'lktech'
 
@@ -1017,7 +1017,7 @@ export function RouterProvisioning({
           </section>
 
           <section className="router-setup-section subnet-section">
-            <div className="router-setup-title"><div><h2>Subnet</h2><p>Optional custom networks. Defaults to the MikroTik LAN 192.168.88.0/24 for Hotspot and 172.31.1.0/24 for PPPoE.</p></div></div>
+            <div className="router-setup-title"><div><h2>Subnet</h2><p>Optional custom networks. Defaults to 172.31.0.0/24 for Hotspot and 172.31.1.0/24 for PPPoE.</p></div></div>
             <label className="subnet-toggle"><input type="checkbox" checked={useCustomSubnet} onChange={(event) => setUseCustomSubnet(event.target.checked)} /><span>Use custom subnet</span></label>
             {useCustomSubnet && <>
               {services.includes('Hotspot') && <label className="subnet-input">Hotspot and DHCP network<input value={hotspotSubnet} onChange={(event) => setHotspotSubnet(event.target.value)} aria-invalid={!hotspotNetwork} placeholder={defaultHotspotSubnet} /></label>}
@@ -1025,7 +1025,7 @@ export function RouterProvisioning({
             </>}
             <p className="router-setup-hint">Hotspot creates a DHCP pool, RADIUS login profile, portal, and NAT rule. PPPoE creates a RADIUS-backed server and address pool. The script stops if an unmanaged server already uses the selected bridge.</p>
             {duplicateServiceNetworks && <p className="router-discovery-status error" role="alert">Hotspot and PPPoE must use different networks.</p>}
-            {((services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork)) && <p className="router-discovery-status error" role="alert">Enter a private network ending in `.0/24`, such as 192.168.88.0/24.</p>}
+            {((services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork)) && <p className="router-discovery-status error" role="alert">Enter a private network ending in `.0/24`, such as 172.31.0.0/24.</p>}
           </section>
 
           {configurationError && <p className="router-discovery-status error" role="alert">{configurationError}</p>}
