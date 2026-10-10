@@ -4,7 +4,7 @@ import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
 import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
@@ -150,13 +150,13 @@ export async function POST(request: NextRequest) {
         status: 'pending',
         expiresAt,
       }).returning({ id: routerProvisioningTokens.id })
-      return createdRecord
+      return { ...createdRecord, monitorId }
     })
 
     const scriptUrl = new URL(`/provision/${token}`, baseUrl).toString()
     const fetchCommand = buildFetchCommand({ scriptUrl })
 
-    return NextResponse.json({ id: record.id, fetchCommand, expiresAt: expiresAt.toISOString() }, { headers: { 'cache-control': 'no-store' } })
+    return NextResponse.json({ id: record.id, monitorId: record.monitorId, fetchCommand, expiresAt: expiresAt.toISOString() }, { headers: { 'cache-control': 'no-store' } })
   } catch (error) {
     console.error('Failed to create router provisioning token', error)
     return NextResponse.json({ error: getProvisioningDbErrorMessage(error) }, { status: 503 })
@@ -174,7 +174,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [record] = await db.select({ status: routerProvisioningTokens.status, expiresAt: routerProvisioningTokens.expiresAt, sourceIp: routerProvisioningTokens.sourceIp, routerData: routerProvisioningTokens.routerData })
+    const [record] = await db.select({
+      status: routerProvisioningTokens.status,
+      expiresAt: routerProvisioningTokens.expiresAt,
+      sourceIp: routerProvisioningTokens.sourceIp,
+      routerData: routerProvisioningTokens.routerData,
+      createdAt: routerProvisioningTokens.createdAt,
+      downloadedAt: routerProvisioningTokens.downloadedAt,
+      appliedAt: routerProvisioningTokens.appliedAt,
+      configuredAt: routerProvisioningTokens.configuredAt,
+    })
       .from(routerProvisioningTokens)
       .where(and(eq(routerProvisioningTokens.id, id), eq(routerProvisioningTokens.tenantId, session.tenantId)))
       .limit(1)
@@ -186,7 +195,15 @@ export async function GET(request: NextRequest) {
         eq(routerProvisioningTokens.tenantId, session.tenantId),
       ))
     }
-    return NextResponse.json({ status, sourceIp: record.sourceIp, routerData: record.routerData }, { headers: { 'cache-control': 'no-store' } })
+    return NextResponse.json({
+      status,
+      sourceIp: record.sourceIp,
+      routerData: record.routerData,
+      createdAt: record.createdAt,
+      downloadedAt: record.downloadedAt,
+      appliedAt: record.appliedAt,
+      configuredAt: record.configuredAt,
+    }, { headers: { 'cache-control': 'no-store' } })
   } catch (error) {
     console.error('Failed to read router provisioning status', error)
     return NextResponse.json({ error: 'Unable to read provisioning status' }, { status: 503 })
@@ -198,17 +215,55 @@ export async function PUT(request: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Sign in to configure a router for this workspace.' }, { status: 401 })
   if (!isAuthorized(request)) return authorizationError()
 
-  let input: { token?: unknown; configScript?: unknown }
+  let input: { token?: unknown; configuration?: unknown }
   try {
-    input = await request.json() as { token?: unknown; configScript?: unknown }
+    input = await request.json() as { token?: unknown; configuration?: unknown }
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
   const token = typeof input.token === 'string' ? input.token : ''
-  const configScript = typeof input.configScript === 'string' ? input.configScript : ''
-  if (!/^[A-Za-z0-9_-]{43}$/.test(token) || !configScript.trim() || configScript.length > 32768) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token) || !input.configuration || typeof input.configuration !== 'object' || Array.isArray(input.configuration)) {
     return NextResponse.json({ error: 'Router configuration is invalid' }, { status: 400 })
+  }
+  const configuration = input.configuration as Record<string, unknown>
+  const readNames = (value: unknown) => Array.isArray(value) && value.length <= 64 && value.every((item) => typeof item === 'string' && /^[a-zA-Z0-9_.-]{1,48}$/.test(item))
+    ? value as string[]
+    : null
+  const bridgeName = typeof configuration.bridgeName === 'string' ? configuration.bridgeName : ''
+  const ports = readNames(configuration.ports)
+  const managedPorts = readNames(configuration.managedPorts)
+  const wanPorts = readNames(configuration.wanPorts)
+  const services = Array.isArray(configuration.services) && configuration.services.length <= 2 && configuration.services.every((item) => item === 'Hotspot' || item === 'PPPoE')
+    ? configuration.services as string[]
+    : null
+  const hotspotSubnet = typeof configuration.hotspotSubnet === 'string' ? configuration.hotspotSubnet : undefined
+  const pppoeSubnet = typeof configuration.pppoeSubnet === 'string' ? configuration.pppoeSubnet : undefined
+  const hotspotAntiSharing = configuration.hotspotAntiSharing === true
+  if (!/^[a-zA-Z0-9_.-]{1,48}$/.test(bridgeName) || !ports?.length || !managedPorts || !wanPorts ||
+      !services?.length || new Set(services).size !== services.length ||
+      new Set(ports).size !== ports.length || new Set(managedPorts).size !== managedPorts.length ||
+      new Set(wanPorts).size !== wanPorts.length ||
+      (configuration.hotspotSubnet !== undefined && typeof configuration.hotspotSubnet !== 'string') ||
+      (configuration.pppoeSubnet !== undefined && typeof configuration.pppoeSubnet !== 'string') ||
+      typeof configuration.hotspotAntiSharing !== 'boolean') {
+    return NextResponse.json({ error: 'Router configuration is invalid' }, { status: 400 })
+  }
+
+  let configScript: string
+  try {
+    configScript = buildSubscriberServiceScript({
+      bridgeName,
+      ports,
+      managedPorts,
+      wanPorts,
+      services,
+      hotspotAntiSharing,
+      hotspotSubnet,
+      pppoeSubnet,
+    })
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Router configuration is invalid' }, { status: 400 })
   }
 
   let baseUrl: URL
@@ -222,7 +277,12 @@ export async function PUT(request: NextRequest) {
   }
 
   try {
-    const [record] = await db.select({ id: routerProvisioningTokens.id, status: routerProvisioningTokens.status, expiresAt: routerProvisioningTokens.expiresAt })
+    const [record] = await db.select({
+      id: routerProvisioningTokens.id,
+      status: routerProvisioningTokens.status,
+      expiresAt: routerProvisioningTokens.expiresAt,
+      routerData: routerProvisioningTokens.routerData,
+    })
       .from(routerProvisioningTokens)
       .where(and(eq(routerProvisioningTokens.tokenHash, tokenHash(token)), eq(routerProvisioningTokens.tenantId, session.tenantId)))
       .limit(1)
@@ -231,8 +291,26 @@ export async function PUT(request: NextRequest) {
     }
 
     const configurationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+    const preparedAt = new Date().toISOString()
     await db.update(routerProvisioningTokens)
-      .set({ configScript, expiresAt: configurationExpiresAt })
+      .set({
+        configScript,
+        expiresAt: configurationExpiresAt,
+        routerData: {
+          ...(record.routerData || { interfaces: [], bridgePorts: [], wanInterfaces: [], bridgeName: null }),
+          serviceConfiguration: {
+            bridgeName,
+            ports,
+            managedPorts,
+            wanPorts,
+            services,
+            hotspotSubnet: services.includes('Hotspot') ? hotspotSubnet || null : null,
+            pppoeSubnet: services.includes('PPPoE') ? pppoeSubnet || null : null,
+            hotspotAntiSharing: services.includes('Hotspot') && hotspotAntiSharing,
+            preparedAt,
+          },
+        },
+      })
       .where(and(eq(routerProvisioningTokens.id, record.id), eq(routerProvisioningTokens.tenantId, session.tenantId)))
 
     const scriptUrl = new URL(`/provision/${token}/configure`, baseUrl).toString()

@@ -24,6 +24,8 @@ export type BillingPackage = {
   burstTimeSeconds?: number | null
   fupEnabled?: boolean
   fupLimitBytes?: number | null
+  fupUploadRate?: string | null
+  fupDownloadRate?: string | null
   scheduleEnabled?: boolean
   scheduleSpec?: string | null
   nasRestrictions?: string[]
@@ -47,6 +49,8 @@ export function toHotspotProduct(plan: BillingPackage) {
     burstTimeSeconds: plan.burstTimeSeconds || null,
     fupEnabled: plan.fupEnabled || false,
     fupLimitBytes: plan.fupLimitBytes || null,
+    fupUploadRate: plan.fupUploadRate || null,
+    fupDownloadRate: plan.fupDownloadRate || null,
     scheduleEnabled: plan.scheduleEnabled || false,
     scheduleSpec: plan.scheduleSpec || null,
     nasRestrictions: plan.nasRestrictions || [],
@@ -64,9 +68,6 @@ export function toHotspotRadiusReplies(username: string, policy: Pick<BillingPac
   if (policy.rateLimit) {
     const rateLimitParts = [policy.rateLimit, policy.burstLimit, policy.burstThreshold, policy.burstTimeSeconds ? `${policy.burstTimeSeconds}/${policy.burstTimeSeconds}` : null].filter(Boolean)
     replies.push({ username, attribute: 'Mikrotik-Rate-Limit', op: '=', value: rateLimitParts.join(' ') })
-  }
-  if (policy.fupEnabled && policy.fupLimitBytes) {
-    replies.push({ username, attribute: 'Mikrotik-Total-Limit', op: '=', value: String(policy.fupLimitBytes) })
   }
   return replies
 }

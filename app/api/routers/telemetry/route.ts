@@ -19,6 +19,11 @@ type TelemetryInput = {
   uptime?: unknown
   routerOsVersion?: unknown
   boardName?: unknown
+  winboxEnabled?: unknown
+  winboxPort?: unknown
+  webEnabled?: unknown
+  webScheme?: unknown
+  webPort?: unknown
 }
 
 function nonNegativeInteger(value: unknown, maxValue = Number.MAX_SAFE_INTEGER) {
@@ -31,6 +36,12 @@ function optionalLabel(value: unknown) {
   if (typeof value !== 'string') return null
   const label = value.trim()
   return label && label.length <= 80 && /^[a-zA-Z0-9 ._()+-]+$/.test(label) ? label : null
+}
+
+function optionalPort(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 65535
+    ? value
+    : null
 }
 
 export async function POST(request: NextRequest) {
@@ -64,6 +75,11 @@ export async function POST(request: NextRequest) {
   const activeHotspotUsers = nonNegativeInteger(input.activeHotspotUsers, 1_000_000)
   const activePppoeUsers = nonNegativeInteger(input.activePppoeUsers, 1_000_000)
   const uptimeSeconds = typeof input.uptime === 'string' ? parseRouterUptime(input.uptime) : null
+  const winboxEnabled = typeof input.winboxEnabled === 'boolean' ? input.winboxEnabled : null
+  const winboxPort = optionalPort(input.winboxPort)
+  const webEnabled = typeof input.webEnabled === 'boolean' ? input.webEnabled : null
+  const webPort = optionalPort(input.webPort)
+  const webScheme = input.webScheme === 'http' || input.webScheme === 'https' ? input.webScheme : null
 
   const diskMetricsInvalid = (freeDiskBytes === null) !== (totalDiskBytes === null) ||
     (freeDiskBytes !== null && totalDiskBytes !== null &&
@@ -113,6 +129,11 @@ export async function POST(request: NextRequest) {
         uptimeSeconds,
         routerOsVersion: optionalLabel(input.routerOsVersion),
         boardName: optionalLabel(input.boardName),
+        winboxEnabled,
+        winboxPort: winboxEnabled ? winboxPort : null,
+        webEnabled,
+        webScheme: webEnabled && webScheme && webPort ? webScheme : null,
+        webPort: webEnabled ? webPort : null,
       })
       await tx.update(routerMonitors).set({
         lastSeenAt: sampledAt,

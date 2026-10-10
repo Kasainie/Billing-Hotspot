@@ -4,27 +4,40 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="30">
-  <meta name="theme-color" content="#f3f7f6">
+  <meta name="theme-color" content="#082b47">
   <title>LKTech connection</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="hotspot-home">
   <main class="portal-shell">
-    <section class="portal-panel">
-      <div class="portal-brand" aria-label="LKTech"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
-      <p class="portal-kicker"><span class="online-dot"></span> CONNECTION ACTIVE</p>
-      <h1>You are online.</h1>
-      <p class="portal-copy">Your LKTech connection is ready to use.</p>
-      <dl class="session-details">
-        <div><dt>Account</dt><dd>$(username)</dd></div>
-        <div><dt>Address</dt><dd>$(ip)</dd></div>
-        <div><dt>Connected</dt><dd>$(uptime)</dd></div>
-        <div><dt>Data received</dt><dd>$(bytes-in-nice)</dd></div>
-        <div><dt>Data sent</dt><dd>$(bytes-out-nice)</dd></div>
-      </dl>
-      <a class="portal-button secondary" href="$(link-logout)">Disconnect</a>
-      <p class="portal-footnote">Session details refresh every 30 seconds.</p>
-    </section>
+    <div class="portal-stack">
+      <header class="portal-header">
+        <div class="portal-brand" aria-label="LKTech"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
+        <span class="network-status"><span class="online-dot"></span> HOTSPOT LOGIN</span>
+      </header>
+      <section class="welcome-panel">
+        <p class="portal-kicker"><span class="online-dot"></span> CONNECTION ACTIVE</p>
+        <h1>You are online.</h1>
+        <p>Your LKTech connection is ready to use.</p>
+      </section>
+      <section class="portal-state-panel">
+        <dl class="session-details">
+          <div><dt>Account</dt><dd>$(username)</dd></div>
+          <div><dt>Address</dt><dd>$(ip)</dd></div>
+          <div><dt>Connected</dt><dd>$(uptime)</dd></div>
+          <div><dt>Data received</dt><dd>$(bytes-in-nice)</dd></div>
+          <div><dt>Data sent</dt><dd>$(bytes-out-nice)</dd></div>
+        </dl>
+        <a class="portal-button secondary" href="$(link-logout)">Disconnect</a>
+        <p class="portal-footnote">Session details refresh every 30 seconds.</p>
+      </section>
+    </div>
   </main>
+  <script>
+    var billingBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? window.location.origin
+      : 'https://billing.lktech.life';
+    document.documentElement.style.setProperty('--portal-wallpaper', 'url("' + billingBaseUrl + '/hotspot-assets/themes/savannah-background.png")');
+  </script>
 </body>
 </html>

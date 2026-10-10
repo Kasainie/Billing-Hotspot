@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { eq, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { calculateRouterHealth, isRouterOnline, parseRouterTimestamp } from '@/lib/router-monitoring'
 
 type RouterRow = {
   id: string
   siteId: string
+  siteName: string
   monitored: boolean
   routerName: string
   location: string
   lastSeenAt: Date | string | null
   connectorLastSeenAt: Date | string | null
   connectorEnabled: boolean
+  lastSourceIp: string | null
+  metricsUpdatedAt: Date | string | null
   cpuLoad: number | null
   freeMemoryBytes: number | null
   totalMemoryBytes: number | null
@@ -24,6 +26,11 @@ type RouterRow = {
   uptimeSeconds: number | null
   routerOsVersion: string | null
   boardName: string | null
+  winboxEnabled: boolean | null
+  winboxPort: number | null
+  webEnabled: boolean | null
+  webScheme: string | null
+  webPort: number | null
 }
 
 export async function GET(request: NextRequest) {
@@ -35,12 +42,15 @@ export async function GET(request: NextRequest) {
       select
         monitor.id,
         monitor.site_id as "siteId",
+        site.name as "siteName",
         true as monitored,
         monitor.router_name as "routerName",
         site.location,
         monitor.last_seen_at as "lastSeenAt",
         monitor.connector_last_seen_at as "connectorLastSeenAt",
         (monitor.connector_token_hash is not null) as "connectorEnabled",
+        monitor.last_source_ip as "lastSourceIp",
+        latest.sampled_at as "metricsUpdatedAt",
         latest.cpu_load as "cpuLoad",
         latest.free_memory_bytes::float8 as "freeMemoryBytes",
         latest.total_memory_bytes::float8 as "totalMemoryBytes",
@@ -50,7 +60,12 @@ export async function GET(request: NextRequest) {
         latest.active_pppoe_users as "activePppoeUsers",
         latest.uptime_seconds::float8 as "uptimeSeconds",
         latest.router_os_version as "routerOsVersion",
-        latest.board_name as "boardName"
+        latest.board_name as "boardName",
+        latest.winbox_enabled as "winboxEnabled",
+        latest.winbox_port as "winboxPort",
+        latest.web_enabled as "webEnabled",
+        latest.web_scheme as "webScheme",
+        latest.web_port as "webPort"
       from public.router_monitors as monitor
       inner join public.sites as site
         on site.id = monitor.site_id and site.tenant_id = monitor.tenant_id
@@ -65,14 +80,7 @@ export async function GET(request: NextRequest) {
         and monitor.enabled = true
       order by monitor.router_name
     `)
-    const sitesInWorkspace = await db.select({
-      id: sites.id,
-      name: sites.name,
-      location: sites.location,
-    }).from(sites).where(eq(sites.tenantId, session.tenantId))
-
     const now = Date.now()
-    const monitoredSiteIds = new Set(result.rows.map((row) => row.siteId))
     const routers = result.rows.map((row) => {
       const lastSeenAt = parseRouterTimestamp(row.lastSeenAt)
       const connectorLastSeenAt = parseRouterTimestamp(row.connectorLastSeenAt)
@@ -104,33 +112,7 @@ export async function GET(request: NextRequest) {
         }),
       }
     })
-    const unmonitoredSites = sitesInWorkspace
-      .filter((site) => !monitoredSiteIds.has(site.id))
-      .map((site) => ({
-        id: site.id,
-        siteId: site.id,
-        monitored: false,
-        routerName: site.name,
-        location: site.location,
-        lastSeenAt: null,
-        connectorLastSeenAt: null,
-        connectorEnabled: false,
-        cpuLoad: null,
-        freeMemoryBytes: null,
-        totalMemoryBytes: null,
-        freeDiskBytes: null,
-        totalDiskBytes: null,
-        activeHotspotUsers: null,
-        activePppoeUsers: null,
-        uptimeSeconds: null,
-        routerOsVersion: null,
-        boardName: null,
-        status: 'not_configured',
-        memoryUsedPercent: null,
-        diskUsedPercent: null,
-        health: null,
-      }))
-    const allRouters = [...routers, ...unmonitoredSites].sort((left, right) => left.routerName.localeCompare(right.routerName))
+    const allRouters = routers.sort((left, right) => left.routerName.localeCompare(right.routerName))
     const onlineCount = routers.filter((router) => router.status === 'online').length
 
     return NextResponse.json({
@@ -139,7 +121,6 @@ export async function GET(request: NextRequest) {
         total: allRouters.length,
         online: onlineCount,
         offline: routers.length - onlineCount,
-        notConfigured: unmonitoredSites.length,
         lastUpdatedAt: new Date().toISOString(),
       },
     }, { headers: { 'cache-control': 'no-store' } })

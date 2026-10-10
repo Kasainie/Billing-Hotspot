@@ -1,6 +1,6 @@
 # Hotspot M-Pesa Checkout
 
-The MikroTik captive portal provides free-offer activation and existing-account sign-in without navigating customers away from the router login page. Paid M-Pesa checkout and receipt recovery are not linked from the captive portal. The separate billing checkout uses Safaricom Daraja STK Push; purchases are provisioned only after the callback is checked with Safaricom's STK query endpoint. M-Pesa PINs are entered in Safaricom's phone prompt, never on the portal.
+The captive portal uses Safaricom Daraja STK Push. A purchase is only provisioned after the callback is checked with Safaricom's STK query endpoint. M-Pesa PINs are entered in Safaricom's phone prompt, never on the portal.
 
 ## Database
 
@@ -14,9 +14,15 @@ npx supabase db push
 
 The application database role must be able to insert into `hotspot_purchases`, `radcheck`, `radreply`, and `payments`. FreeRADIUS must read the new voucher rows from `radcheck` and `radreply`. For a multi-ISP deployment, apply every migration, including `20261004120000_make_multitenant.sql`.
 
+Apply `20261010120000_add_hotspot_fup_throttling.sql` before deploying package FUP settings. In **Network → Packages**, enable FUP, set the per-purchase data limit, and enter the throttled upload and download rates. MikroTik accounting on `radacct` tracks usage; once it reaches the limit, the subscriber's RADIUS rate limit is changed to those rates on their next login or reconnect. Usage starts at the purchase time (or voucher activation) and resets with the next purchase. This is a throttle, not a hard disconnect; RADIUS accounting must be enabled on each router.
+
 ## Multi-location Hotspot
 
 All owned MikroTik access points must use the same RADIUS server and shared database. Each router must also be registered as a RADIUS client. The portal remembers a device by the MAC address MikroTik supplies; using the same SSID at each location helps devices keep the same private MAC address.
+
+Generated Hotspot and PPPoE configurations report RADIUS accounting every minute. Re-run the router service configuration to apply the new interval to routers provisioned previously.
+
+Free, zero-cost hotspot packages activate automatically when a visitor selects them. The portal uses MikroTik's client MAC and submits the issued RADIUS credentials through the router's CHAP login. After deploying a portal update, refresh the hotspot files on each existing router for this behavior to take effect.
 
 Enable the FreeRADIUS `expiration` module in the `authorize` section after SQL. The application writes an absolute `Expiration` check item for each package, and this module rejects expired accounts and caps `Session-Timeout` to the remaining package time. Apply migration `20261001140000_hotspot_roaming_expiration.sql`, deploy the application, then refresh the hotspot portal files on each router. A user with an older paid package must sign in once at an owned hotspot so its device can be associated with that account.
 

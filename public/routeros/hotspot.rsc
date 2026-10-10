@@ -6,16 +6,16 @@
 :if ([:len $hotspotCertificates] = 1) do={
   :local hotspotCertificateName [/certificate get [:pick $hotspotCertificates 0] name]
   :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={
-    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m
+    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap use-radius=yes radius-accounting=yes radius-interim-update=1m
   } else={
-    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m
+    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap use-radius=yes radius-accounting=yes radius-interim-update=1m
   }
   :put "Trusted portal certificate configured; renew DHCP leases to advertise captive-portal discovery"
 } else={
   :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={
-    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m
+    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=1m
   } else={
-    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=5m
+    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap use-radius=yes radius-accounting=yes radius-interim-update=1m
   }
   :put "No trusted login.lktech.life certificate found; Android automatic captive-portal discovery remains unavailable"
 }

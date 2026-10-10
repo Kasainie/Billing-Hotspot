@@ -15,7 +15,7 @@ export async function GET(request: NextRequest, context: RouteContext<'/provisio
   try {
     const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     const [record] = await db.update(routerProvisioningTokens)
-      .set({ status: 'configured', configScript: null, sourceIp: forwardedFor })
+      .set({ status: 'configured', configuredAt: new Date(), configScript: null, sourceIp: forwardedFor })
       .where(and(
         eq(routerProvisioningTokens.tokenHash, hashToken(token)),
         eq(routerProvisioningTokens.status, 'applied'),

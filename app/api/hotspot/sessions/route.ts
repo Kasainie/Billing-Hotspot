@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantSession } from '@/lib/db/tenant'
 
-function tenantHotspotUserFilter(tenantId: string) {
+function tenantSessionUserFilter(tenantId: string) {
   return sql`(
     exists (
       select 1
@@ -26,11 +26,10 @@ function tenantHotspotUserFilter(tenantId: string) {
       select 1
       from public.customers as customer
       inner join public.packages as plan
-        on plan.tenant_id = customer.tenant_id
-        and plan.name = customer.plan
+        on plan.tenant_id = customer.tenant_id and plan.name = customer.plan
       where customer.tenant_id = ${tenantId}
         and customer.radius_username = accounting.username
-        and plan.type in ('Hotspot', 'Bundle', 'Trial')
+        and plan.type in ('Hotspot', 'Bundle', 'Trial', 'PPPoE')
     )
   )`
 }
@@ -40,15 +39,24 @@ export async function GET(request: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Sign in to view hotspot sessions.' }, { status: 401 })
 
   try {
-    const hotspotUserFilter = tenantHotspotUserFilter(session.tenantId)
+    const tenantUserFilter = tenantSessionUserFilter(session.tenantId)
     const [summary, sessionRows] = await Promise.all([
-      db.execute<{ activeSessions: number; connectedDevices: number }>(sql`
+      db.execute<{
+        activeSessions: number
+        connectedDevices: number
+        downloadBytes: string
+        uploadBytes: string
+        totalBytes: string
+      }>(sql`
         select
           count(*)::int as "activeSessions",
-          count(distinct coalesce(nullif(lower(btrim(accounting.callingstationid)), ''), accounting.acctuniqueid))::int as "connectedDevices"
+          count(distinct coalesce(nullif(lower(btrim(accounting.callingstationid)), ''), accounting.acctuniqueid))::int as "connectedDevices",
+          coalesce(sum(accounting.acctoutputoctets), 0)::text as "downloadBytes",
+          coalesce(sum(accounting.acctinputoctets), 0)::text as "uploadBytes",
+          coalesce(sum(coalesce(accounting.acctinputoctets, 0) + coalesce(accounting.acctoutputoctets, 0)), 0)::text as "totalBytes"
         from public.radacct as accounting
         where accounting.acctstoptime is null
-          and ${hotspotUserFilter}
+          and ${tenantUserFilter}
       `),
       db.execute<{
         id: string
@@ -56,16 +64,43 @@ export async function GET(request: NextRequest) {
         mac: string | null
         ipAddress: string | null
         startedAt: Date | null
+        phone: string | null
+        customerName: string | null
+        serviceType: 'PPPoE' | 'Hotspot'
+        router: string | null
+        downloadBytes: string
+        uploadBytes: string
       }>(sql`
         select
           accounting.acctuniqueid as id,
           accounting.username,
           accounting.callingstationid as mac,
           accounting.framedipaddress::text as "ipAddress",
-          accounting.acctstarttime as "startedAt"
+          accounting.acctstarttime as "startedAt",
+          customer.phone,
+          customer.name as "customerName",
+          case
+            when exists (
+              select 1
+              from public.customers as pppoe_customer
+              inner join public.packages as pppoe_plan
+                on pppoe_plan.tenant_id = pppoe_customer.tenant_id
+                and pppoe_plan.name = pppoe_customer.plan
+                and pppoe_plan.type = 'PPPoE'
+              where pppoe_customer.tenant_id = ${session.tenantId}
+                and pppoe_customer.radius_username = accounting.username
+            ) then 'PPPoE'
+            else 'Hotspot'
+          end as "serviceType",
+          accounting.nasipaddress::text as router,
+          coalesce(accounting.acctoutputoctets, 0)::text as "downloadBytes",
+          coalesce(accounting.acctinputoctets, 0)::text as "uploadBytes"
         from public.radacct as accounting
+        left join public.customers as customer
+          on customer.tenant_id = ${session.tenantId}
+          and customer.radius_username = accounting.username
         where accounting.acctstoptime is null
-          and ${hotspotUserFilter}
+          and ${tenantUserFilter}
         order by accounting.acctstarttime desc nulls last
         limit 100
       `),
@@ -74,6 +109,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       connectedDevices: summary.rows[0]?.connectedDevices ?? 0,
       activeSessions: summary.rows[0]?.activeSessions ?? 0,
+      downloadBytes: summary.rows[0]?.downloadBytes ?? '0',
+      uploadBytes: summary.rows[0]?.uploadBytes ?? '0',
+      totalBytes: summary.rows[0]?.totalBytes ?? '0',
       sessions: sessionRows.rows.map((row) => ({
         ...row,
         startedAt: row.startedAt?.toISOString() ?? null,

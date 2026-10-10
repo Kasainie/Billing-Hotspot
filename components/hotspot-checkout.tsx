@@ -161,7 +161,6 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
           <p className="checkout-eyebrow">{mode === 'purchase' ? 'SECURE M-PESA CHECKOUT' : 'ACCOUNT RECOVERY'}</p>
           <h1>{mode === 'purchase' ? 'Connect in a few steps.' : 'Find your hotspot login.'}</h1>
           <p className="checkout-copy">{mode === 'purchase' ? 'We’ll send an STK Push to your Safaricom phone. Approve it in the official M-Pesa prompt; never enter your M-Pesa PIN on this page.' : 'Use the phone number and M-Pesa receipt from your package payment.'}</p>
-          {mode === 'purchase' && <a className="checkout-plans-link checkout-alternate-link" href={`/subscribe${tenantQuery}`}>Looking for home internet? <strong>View all plans →</strong></a>}
           {mode === 'purchase' && selectedProduct && <div className="selected-package"><span>{selectedProduct.name}</span><strong>KSh {selectedProduct.price}</strong><small>{selectedProduct.speedLabel} · {selectedProduct.durationLabel}</small></div>}
           {mode === 'purchase' && catalogError && <p className="checkout-message is-error" role="alert">{catalogError}</p>}
           {mode === 'purchase' && !selectedProduct && !catalogError && <p className="checkout-message" role="status">Return to the hotspot page and choose an available package.</p>}

@@ -21,6 +21,14 @@ const packageTypes = ['Hotspot', 'PPPoE', 'Bundle', 'Trial', 'TV']
 const packageAvailabilities = ['live', 'hidden', 'off']
 const ratePart = '(?:\\d+(?:\\.\\d+)?[KMG]?)'
 const rateLimitPattern = new RegExp(`^${ratePart}\\/${ratePart}$`, 'i')
+const singleRatePattern = new RegExp(`^${ratePart}$`, 'i')
+
+function isPositiveRate(value: unknown) {
+  if (typeof value !== 'string' || !singleRatePattern.test(value)) return false
+  const normalized = value.toUpperCase()
+  const multiplier = normalized.endsWith('G') ? 1000 : normalized.endsWith('M') ? 1 : normalized.endsWith('K') ? 0.001 : 0.000001
+  return Number.parseFloat(normalized) * multiplier > 0
+}
 
 function rateInMbps(value: string) {
   const normalized = value.toUpperCase()
@@ -40,13 +48,16 @@ function validate(entity: Entity, input: Record<string, unknown>) {
   if (entity === 'packages') {
     if (!packageTypes.includes(String(input.type))) return 'Select a valid package type'
     if (!packageAvailabilities.includes(String(input.availability))) return 'Select a valid package availability'
-    if (!rateLimitPattern.test(String(input.rateLimit))) return 'Rate-limit must use upload/download format, for example 5M/10M'
+    if (!rateLimitPattern.test(String(input.rateLimit)) || !String(input.rateLimit).split('/').every(isPositiveRate)) return 'Rate-limit must use positive upload/download values, for example 2M/10M'
     if (!Number.isInteger(Number(input.monthlyPrice)) || Number(input.monthlyPrice) < 0) return 'Price cannot be negative'
     if (!Number.isInteger(Number(input.durationSeconds)) || Number(input.durationSeconds) < 60 || Number(input.durationSeconds) > 31536000) return 'Duration must be between 1 minute and 365 days'
     if (!Number.isInteger(Number(input.devicesPerAccount)) || Number(input.devicesPerAccount) < 1 || Number(input.devicesPerAccount) > 64) return 'Devices per account must be between 1 and 64'
     const burstValues = [input.burstLimit, input.burstThreshold, input.burstTimeSeconds]
     if (burstValues.some(Boolean) && (!rateLimitPattern.test(String(input.burstLimit || '')) || !rateLimitPattern.test(String(input.burstThreshold || '')) || !Number.isInteger(Number(input.burstTimeSeconds)) || Number(input.burstTimeSeconds) < 1 || Number(input.burstTimeSeconds) > 3600)) return 'Burst limit, threshold, and time must all be valid to enable burst'
-    if (input.fupEnabled && (!Number.isInteger(Number(input.fupLimitBytes)) || Number(input.fupLimitBytes) < 1)) return 'Enter a positive FUP data limit in bytes'
+    if (input.fupEnabled) {
+      if (!Number.isSafeInteger(Number(input.fupLimitBytes)) || Number(input.fupLimitBytes) < 1) return 'Enter a positive FUP data limit in bytes'
+      if (!isPositiveRate(input.fupUploadRate) || !isPositiveRate(input.fupDownloadRate)) return 'Enter positive FUP upload and download rates'
+    }
     if (input.scheduleEnabled && (typeof input.scheduleSpec !== 'string' || !/^(?:Al|(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)\d{4}-\d{4}(?:,(?:Al|(?:Mo|Tu|We|Th|Fr|Sa|Su)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)\d{4}-\d{4})*$/.test(input.scheduleSpec))) return 'Schedule must use RADIUS Login-Time format, for example Mo-Fr0800-1800'
     if (!Array.isArray(input.nasRestrictions) || input.nasRestrictions.some((nas) => typeof nas !== 'string' || !/^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/.test(nas))) return 'NAS restrictions must be IPv4 addresses'
   }
@@ -224,6 +235,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
       active: input.availability !== 'off',
       listed: input.availability === 'live',
       fupLimitBytes: input.fupEnabled ? Number(input.fupLimitBytes) : null,
+      fupUploadRate: input.fupEnabled ? String(input.fupUploadRate).toUpperCase() : null,
+      fupDownloadRate: input.fupEnabled ? String(input.fupDownloadRate).toUpperCase() : null,
       scheduleSpec: input.scheduleEnabled ? input.scheduleSpec : null,
       burstLimit: input.burstLimit || null,
       burstThreshold: input.burstThreshold || null,
@@ -284,7 +297,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
 
   const hasDatabase = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim())
   if (!hasDatabase) {
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ error: 'Record deletion requires a configured database.' }, { status: 503 })
   }
 
   try {
@@ -300,9 +313,25 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
       return NextResponse.json({ ok: true })
     }
 
-    await db.delete(table).where(and(eq(table.id as never, id) as never, eq((table as typeof packages).tenantId, tenantId) as never) as never)
+    const deleted = await db.transaction(async (tx) => {
+      if (entity === 'sites') {
+        await tx.update(customers).set({ siteId: null }).where(and(
+          eq(customers.siteId, id),
+          eq(customers.tenantId, tenantId),
+        ))
+      }
+      const rows = await tx.delete(table).where(and(
+        eq(table.id as never, id) as never,
+        eq((table as typeof packages).tenantId, tenantId) as never,
+      ) as never).returning()
+      return rows.length > 0
+    })
+    if (!deleted) return NextResponse.json({ error: 'Record not found in this workspace.' }, { status: 404 })
     return NextResponse.json({ ok: true })
-  } catch { return NextResponse.json({ error: 'Unable to delete record' }, { status: 500 }) }
+  } catch (error) {
+    console.error(`Failed to delete tenant ${entity} record`, error)
+    return NextResponse.json({ error: 'Unable to delete record.' }, { status: 500 })
+  }
 }
 
 export const dynamic = 'force-dynamic'

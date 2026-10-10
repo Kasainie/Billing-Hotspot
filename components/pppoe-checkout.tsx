@@ -132,7 +132,7 @@ export function PppoeCheckout() {
   return (
     <main className="checkout-shell">
       <section className="checkout-panel">
-        <a className="checkout-brand" href={`/subscribe${tenantQuery}`}><span className="checkout-mark">L</span><span>LKTECH <small className="checkout-brand-subtitle">HOME INTERNET</small></span></a>
+        <a className="checkout-brand" href={`/hotspot/login${tenantQuery}`}><span className="checkout-mark">L</span><span>LKTECH <small className="checkout-brand-subtitle">HOME INTERNET</small></span></a>
         {credentials ? <>
           <div className="checkout-success-mark" aria-hidden="true">✓</div>
           <p className="checkout-eyebrow success-eyebrow">PAYMENT CONFIRMED</p>
@@ -169,7 +169,6 @@ export function PppoeCheckout() {
           {message && <p className={`checkout-message ${status === 'failed' ? 'is-error' : ''}`} role="status">{message}</p>}
           {status === 'failed' && <button className="checkout-retry" type="button" onClick={() => { setStatus('idle'); setMessage('') }}>Try payment again</button>}
           <p className="checkout-hint">M-Pesa PINs are entered only in the Safaricom prompt. This page never asks for your PIN.</p>
-          <a className="checkout-plans-link" href={`/subscribe${tenantQuery}`}>← Browse all internet plans</a>
         </>}
       </section>
     </main>

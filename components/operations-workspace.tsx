@@ -205,8 +205,8 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
     }
   }
 
-  async function deleteRecord(id: string) {
-    if (!window.confirm('Delete this record? This cannot be undone.')) return
+  async function deleteRecord(id: string, confirmation = 'Delete this record? This cannot be undone.') {
+    if (!window.confirm(confirmation)) return
     setSaving(true)
     setError('')
     setNotice('')
@@ -214,7 +214,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
       const response = await fetch(`/api/operations/${entity}?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       const result = await response.json() as { error?: string }
       if (!response.ok) throw new Error(result.error || 'Unable to delete this record.')
-      setNotice('Record deleted.')
+      setNotice(entity === 'vouchers' ? 'Voucher deleted and its RADIUS login revoked.' : 'Record deleted.')
       await load()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to delete this record.')
@@ -388,7 +388,10 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
                 <td>{formatVoucherDate(voucher.createdAt)}</td>
                 <td>{voucher.activatedAt ? formatVoucherDate(voucher.activatedAt) : voucher.validitySeconds ? 'On first sign-in' : 'Not tracked'}</td>
                 <td className={state === 'expired' ? 'voucher-expiry-expired' : ''}>{voucher.expiresAt ? formatVoucherDate(voucher.expiresAt) : voucher.validitySeconds ? 'After first sign-in' : 'Not tracked'}</td>
-                <td>{voucher.status === 'active' && <button type="button" className="text-button danger-text" disabled={saving} onClick={() => void updateRecord(voucher.id, { status: 'disabled' })}>Disable</button>}</td>
+                <td><div className="subscriber-actions">
+                  {voucher.status === 'active' && <button type="button" className="text-button danger-text" disabled={saving} onClick={() => void updateRecord(voucher.id, { status: 'disabled' })}>Disable</button>}
+                  <button type="button" className="text-button danger-text" disabled={saving} aria-label={`Delete voucher ${voucher.username}`} onClick={() => void deleteRecord(voucher.id, `Delete voucher ${voucher.username}? This permanently removes it and revokes its RADIUS login. Any active session may remain online until it expires.`)}><Trash2 size={14} /> Delete</button>
+                </div></td>
               </tr>
             })}
             {!loading && filteredVouchers.length === 0 && <tr><td colSpan={7}>{filter || voucherStatusFilter !== 'all' ? 'No vouchers match these filters.' : 'No vouchers have been generated.'}</td></tr>}

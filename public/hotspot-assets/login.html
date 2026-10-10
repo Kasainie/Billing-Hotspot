@@ -1,18 +1,18 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#082b47">
-  <title>LKTech Hotspot</title>
+  <title>Mari-Net Hotspot</title>
   <link rel="stylesheet" href="style.css">
   <link id="portal-theme" rel="stylesheet">
 </head>
-<body class="hotspot-home">
+<body class="hotspot-home mari-net-portal">
   <form id="sendin" action="$(link-login-only)" method="post" style="display:none">
     <input id="sendin-username" type="hidden" name="username">
     <input id="sendin-password" type="hidden" name="password">
-    <input type="hidden" name="dst" value="$(link-login)">
+    <input type="hidden" name="dst" value="$(link-orig)">
     <input type="hidden" name="popup" value="true">
   </form>
   <script src="md5.js"></script>
@@ -24,277 +24,315 @@
       document.getElementById('sendin').submit();
       return false;
     }
+
+    function togglePassword(button) {
+      const field = button.closest('.password-field')?.querySelector('input');
+      if (!field) return;
+      const show = field.type === 'password';
+      field.type = show ? 'text' : 'password';
+      button.textContent = show ? 'Hide' : 'Show';
+      button.setAttribute('aria-pressed', String(show));
+    }
   </script>
+
   <main class="portal-shell">
     <div class="portal-stack">
-      <header class="portal-header">
-        <div class="portal-brand"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
-        <span class="network-status"><span class="online-dot"></span> HOTSPOT LOGIN</span>
-      </header>
-      <section class="welcome-panel">
-        <p class="portal-kicker">WELCOME TO LKTECH</p>
-        <h1>Connect to<br><span>what matters.</span></h1>
-        <p>Work, learn, stream, and stay close to the people who matter. Choose a free offer or sign in to get online.</p>
-        <div class="portal-graphic" aria-hidden="true"><span class="graphic-orbit orbit-outer"></span><span class="graphic-orbit orbit-middle"></span><span class="graphic-orbit orbit-inner"></span><span class="graphic-cable cable-east"></span><span class="graphic-cable cable-southwest"></span><span class="graphic-cable cable-southeast"></span><span class="graphic-beacon"></span><span class="graphic-satellite satellite-top"></span><span class="graphic-satellite satellite-bottom"></span><span class="graphic-satellite satellite-right"></span></div>
-      </section>
+      <div class="marinet-card">
+        <h1 class="marinet-brand">Mari-Net</h1>
+        <nav class="marinet-tabs" aria-label="Hotspot steps">
+          <span class="is-active">Select</span>
+          <span>Pay</span>
+          <span>Connect</span>
+        </nav>
+
+      </div>
+
       <section class="package-section" aria-labelledby="packages-title">
-        <div class="section-heading"><div><p class="section-eyebrow">INSTANT WI-FI ACCESS</p><h2 id="packages-title">Choose a free offer</h2></div><span class="currency-label">KES</span></div>
-        <div class="package-grid">
+        <div class="section-heading">
+          <div>
+            <p class="section-eyebrow">CHOOSE YOUR PLAN</p>
+            <h2 id="packages-title">Available packages</h2>
+          </div>
+          <span class="currency-label">KSh</span>
+        </div>
+        <div class="package-grid" id="package-grid" role="group" aria-label="Hotspot packages" tabindex="-1">
           <p class="package-loading" role="status">Loading available packages...</p>
         </div>
-        <form class="purchase-form" onsubmit="return submitPackage(event)">
-          <input id="selected-package" type="hidden" name="package" value="">
-          <input id="client-mac" type="hidden" name="mac" value="">
+        <form class="purchase-form marinet-phone-form" action="https://billing.lktech.life/hotspot/checkout" method="get">
+          <input type="hidden" name="return" value="$(link-login)">
           <input class="tenant-slug-field" type="hidden" name="tenant" value="">
-          <button class="purchase-button" type="submit" disabled>Choose a free offer</button>
-          <p class="purchase-status" role="status" aria-live="polite"></p>
-          <p class="portal-hint">Your device will connect through this MikroTik hotspot. No payment page is needed for a free offer.</p>
+          <input id="selected-package" type="hidden" name="package" value="">
+          <label for="purchase-phone">Phone number for M-Pesa</label>
+          <div class="purchase-row">
+            <input id="purchase-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+254795872528" required>
+            <button class="purchase-button" type="submit">Continue</button>
+          </div>
+          <p class="payment-hint">Select a package, then approve the secure M-Pesa prompt on your phone.</p>
+          <p class="purchase-status" id="package-status" role="status" aria-live="polite">Choose a package to continue.</p>
         </form>
       </section>
-      <a class="voucher-link" href="#account-login"><span aria-hidden="true">&#9670;</span> Already have a voucher? Sign in</a>
-      <section class="account-section" id="account-login" aria-labelledby="account-title">
-        <p class="section-eyebrow">WELCOME BACK</p>
-        <h2 id="account-title">Reconnect to your account</h2>
-        <p>Use the username and password from your package or voucher.</p>
-        <form name="accountLogin" action="$(link-login-only)" method="post" onsubmit="return doLogin(this)">
-          <input type="hidden" name="dst" value="$(link-login)">
-          <input type="hidden" name="popup" value="true">
-          <div class="account-fields"><label>Username<input name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Your username" required></label><label>Password<span class="password-field"><input name="password" type="password" autocomplete="current-password" placeholder="Your password" required><button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false" onclick="togglePassword(this)">Show</button></span></label></div>
-          <button class="account-button" type="submit">Reconnect to Wi-Fi <span aria-hidden="true">&#8594;</span></button>
-        </form>
-      </section>
-      <footer class="portal-footer"><span>LKTECH HOTSPOT</span><span>Need help? Contact your network operator.</span></footer>
+
+      <form class="portlet login-panel" name="voucherLogin" action="$(link-login-only)" method="post" onsubmit="return doLogin(this)">
+        <input type="hidden" name="dst" value="$(link-orig)">
+        <input type="hidden" name="popup" value="true">
+        <div class="panel-head">
+          <span class="panel-icon" aria-hidden="true">🏷</span>
+          <h3>Connect with Voucher</h3>
+        </div>
+        <label>
+          <span>Voucher username</span>
+          <input name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Enter voucher username" required>
+        </label>
+
+        <label>
+          <span>Voucher password</span>
+          <span class="password-field">
+            <input name="password" type="password" autocomplete="current-password" placeholder="Enter voucher password" required>
+            <button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false" onclick="togglePassword(this)">Show</button>
+          </span>
+        </label>
+
+        <button class="login-button" type="submit">Connect</button>
+      </form>
+
+      <form class="portlet action-panel" method="get" action="https://billing.lktech.life/hotspot/reconnect">
+        <div class="panel-head">
+          <span class="panel-icon" aria-hidden="true">⌁</span>
+          <h3>Reconnect with M-Pesa code</h3>
+        </div>
+        <div class="field-row">
+          <input name="code" type="text" placeholder="Enter M-Pesa code">
+          <button type="submit">Reconnect</button>
+        </div>
+      </form>
+
+      <form class="portlet login-panel" name="accountLogin" action="$(link-login-only)" method="post" onsubmit="return doLogin(this)">
+        <input type="hidden" name="dst" value="$(link-orig)">
+        <input type="hidden" name="popup" value="true">
+        <div class="panel-head">
+          <span class="panel-icon" aria-hidden="true">◌</span>
+          <h3>User Login</h3>
+        </div>
+
+        <label>
+          <span>Username</span>
+          <input name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Enter username" required>
+        </label>
+
+        <label>
+          <span>Password</span>
+          <span class="password-field">
+            <input name="password" type="password" autocomplete="current-password" placeholder="Enter password" required>
+            <button class="password-toggle" type="button" aria-label="Show password" aria-pressed="false" onclick="togglePassword(this)">Show</button>
+          </span>
+        </label>
+
+        <button class="login-button" type="submit">Login</button>
+      </form>
+
+      <div class="support-line">Support: +254795872528</div>
     </div>
   </main>
   <script>
-    var backendBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    var billingBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? window.location.origin
       : 'https://billing.lktech.life';
-    var portalCompanyName = 'LKTECH';
-    function getCustomerTimeGreeting(hour) {
-      if (typeof hour !== 'number') {
-        hour = Number(new Intl.DateTimeFormat('en-KE', {
-          timeZone: 'Africa/Nairobi',
-          hour: '2-digit',
-          hourCycle: 'h23'
-        }).format(new Date()));
-      }
-      if (hour < 5) return 'Good night';
-      if (hour < 12) return 'Good morning';
-      if (hour < 17) return 'Good afternoon';
-      if (hour < 21) return 'Good evening';
-      return 'Good night';
-    }
-    function updateCustomerGreeting() {
-      document.querySelector('.welcome-panel .portal-kicker').textContent =
-        getCustomerTimeGreeting() + ', welcome to ' + portalCompanyName;
-    }
-    updateCustomerGreeting();
-    window.setInterval(updateCustomerGreeting, 60000);
     var portalTenantSlug = '';
+    var portalClientMac = '$(mac)';
     var tenantSlug = new URLSearchParams(window.location.search).get('tenant') || portalTenantSlug;
     var tenantQuery = tenantSlug ? '?tenant=' + encodeURIComponent(tenantSlug) : '';
-    document.querySelectorAll('.tenant-slug-field').forEach(function (field) { field.value = tenantSlug; });
-    document.documentElement.style.setProperty('--portal-wallpaper', 'url("' + backendBaseUrl + '/hotspot-assets/themes/savannah-background.png")');
-    document.getElementById('portal-theme').href = backendBaseUrl + '/api/hotspot/portal-theme' + tenantQuery;
-    fetch(backendBaseUrl + '/api/hotspot/portal-template' + tenantQuery, { cache: 'no-store' })
-      .then(function (response) { return response.ok ? response.json() : null; })
-      .then(function (portalSettings) {
-        if (!portalSettings) return;
-        var companyName = typeof portalSettings.companyName === 'string' ? portalSettings.companyName : '';
-        var welcomeHeadline = typeof portalSettings.welcomeHeadline === 'string' ? portalSettings.welcomeHeadline : '';
-        var welcomeMessage = typeof portalSettings.welcomeMessage === 'string' ? portalSettings.welcomeMessage : '';
-        var supportMessage = typeof portalSettings.supportMessage === 'string' ? portalSettings.supportMessage : '';
-        if (companyName) {
-          portalCompanyName = companyName;
-          updateCustomerGreeting();
-          document.querySelector('.portal-brand > span:last-child').textContent = companyName;
-          document.querySelector('.portal-mark').textContent = companyName.charAt(0).toUpperCase();
-          document.querySelector('.portal-footer span:first-child').textContent = companyName + ' HOTSPOT';
-          document.title = companyName + ' Hotspot';
-        }
-        if (welcomeHeadline) {
-          var words = welcomeHeadline.trim().split(/\s+/);
-          var heading = document.querySelector('.welcome-panel h1');
-          if (words.length > 1) {
-            var accent = document.createElement('span');
-            accent.textContent = words.slice(Math.ceil(words.length / 2)).join(' ');
-            heading.replaceChildren(document.createTextNode(words.slice(0, Math.ceil(words.length / 2)).join(' ')), document.createElement('br'), accent);
-          } else {
-            heading.textContent = welcomeHeadline;
-          }
-        }
-        if (welcomeMessage) document.querySelector('.welcome-panel > p:last-of-type').textContent = welcomeMessage;
-        if (supportMessage) document.querySelector('.portal-footer span:last-child').textContent = supportMessage;
-      })
-      .catch(function () {});
-    var selectedPackage = '';
-    var selectedPackagePrice = null;
-    var routerMac = '$(mac)';
-    document.getElementById('client-mac').value = routerMac;
-    var packageGrid = document.querySelector('.package-grid');
-    var purchaseButton = document.querySelector('.purchase-button');
-    var purchaseStatus = document.querySelector('.purchase-status');
-    function selectPackage(card) {
-      selectedPackage = card.getAttribute('data-package') || '';
-      selectedPackagePrice = Number(card.getAttribute('data-price'));
-      document.getElementById('selected-package').value = selectedPackage;
-      document.querySelectorAll('.package-card').forEach(function (option) {
-        var selected = option === card;
-        option.classList.toggle('selected', selected);
-        option.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    document.querySelectorAll('.tenant-slug-field').forEach(function (field) {
+      field.value = tenantSlug;
+    });
+    var purchaseForm = document.querySelector('.marinet-phone-form');
+    var packageGrid = document.getElementById('package-grid');
+    var packageStatus = document.getElementById('package-status');
+    var selectedPackage = document.getElementById('selected-package');
+    purchaseForm.action = billingBaseUrl + '/hotspot/checkout';
+    document.querySelector('.action-panel[method="get"]').action = billingBaseUrl + '/hotspot/reconnect';
+    document.getElementById('portal-theme').href = billingBaseUrl + '/api/hotspot/portal-theme' + tenantQuery;
+
+    function selectPackage(product, button) {
+      packageGrid.querySelectorAll('.package-card').forEach(function (card) {
+        card.classList.remove('selected');
+        card.setAttribute('aria-pressed', 'false');
       });
-      var isFree = selectedPackagePrice === 0;
-      purchaseButton.disabled = false;
-      purchaseButton.textContent = isFree ? 'Connect free' : 'Free offer only';
-      purchaseStatus.textContent = '';
-      purchaseStatus.classList.remove('is-error');
+      button.classList.add('selected');
+      button.setAttribute('aria-pressed', 'true');
+      selectedPackage.value = product.id;
+      packageStatus.textContent = product.name + ' selected. Enter your phone number to continue to checkout.';
+      packageStatus.classList.remove('is-error');
     }
-    function showPackageMessage(message, isError) {
-      var notice = document.createElement('p');
-      notice.className = 'package-loading';
-      if (isError) notice.classList.add('is-error');
-      notice.setAttribute('role', 'status');
-      notice.textContent = message;
-      packageGrid.replaceChildren(notice);
-    }
-    fetch(backendBaseUrl + '/api/hotspot/packages' + tenantQuery, { cache: 'no-store' })
-      .then(function (response) {
-        if (!response.ok) throw new Error('Packages are temporarily unavailable. Please try again later.');
-        return response.json();
-      })
-      .then(function (packages) {
-        if (!Array.isArray(packages)) {
-          showPackageMessage('Free offers are temporarily unavailable. Please try again later.', true);
-          return;
-        }
-        packages = packages.filter(function (item) {
-          return item && Number(item.price) === 0;
-        });
-        if (packages.length === 0) {
-          showPackageMessage('No free offers are available right now. Sign in with a hotspot username and password.');
-          purchaseButton.disabled = true;
-          return;
-        }
-        packageGrid.replaceChildren();
-        packages.forEach(function (item) {
-          if (!item || typeof item.id !== 'string' || typeof item.name !== 'string' || !Number.isFinite(Number(item.price))) return;
-          var card = document.createElement('button');
-          card.type = 'button';
-          card.className = 'package-card';
-          card.setAttribute('data-package', item.id);
-          card.setAttribute('aria-pressed', 'false');
-          var name = document.createElement('span');
-          name.className = 'package-name';
-          name.textContent = item.name;
-          var price = document.createElement('span');
-          price.className = 'package-price';
-          var currency = document.createElement('span');
-          currency.className = 'package-currency';
-          currency.textContent = 'KSh';
-          var free = Number(item.price) === 0;
-          var priceValue = document.createElement('strong');
-          priceValue.className = 'package-price-value';
-          priceValue.textContent = free ? 'FREE' : Number(item.price).toLocaleString('en-KE');
-          price.append(currency, priceValue);
-          var details = document.createElement('span');
-          details.className = 'package-details';
-          var speedDetail = document.createElement('span');
-          speedDetail.className = 'package-detail';
-          var speedLabel = document.createElement('span');
-          speedLabel.className = 'package-detail-label';
-          speedLabel.textContent = 'SPEED';
-          var speed = document.createElement('strong');
-          speed.className = 'package-speed';
-          speed.textContent = item.speedLabel || '';
-          speedDetail.append(speedLabel, speed);
-          var timeDetail = document.createElement('span');
-          timeDetail.className = 'package-detail';
-          var timeLabel = document.createElement('span');
-          timeLabel.className = 'package-detail-label';
-          timeLabel.textContent = 'PLAN TIME';
-          var duration = document.createElement('span');
-          duration.className = 'package-duration';
-          duration.textContent = item.durationLabel || '';
-          timeDetail.append(timeLabel, duration);
-          details.append(speedDetail, timeDetail);
-          var packageArt = document.createElement('span');
-          packageArt.className = 'package-art';
-          packageArt.setAttribute('aria-hidden', 'true');
-          card.append(name, price, details, packageArt);
-          card.setAttribute('data-price', String(Number(item.price)));
-          card.addEventListener('click', function () { selectPackage(card); });
-          packageGrid.append(card);
-        });
-        if (!packageGrid.querySelector('.package-card')) showPackageMessage('No active packages are available right now. Please contact customer care.');
-      })
-      .catch(function () { showPackageMessage('Packages are temporarily unavailable. Please try again later.', true); });
-    function submitPackage(event) {
-      event.preventDefault();
-      if (!selectedPackage) return false;
-      if (selectedPackagePrice !== 0) {
-        purchaseStatus.textContent = 'Only free offers can be activated from the MikroTik portal.';
-        purchaseStatus.classList.add('is-error');
-        return false;
+
+    function activateFreePackage(product, button) {
+      if (button.disabled) return;
+      if (!/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/i.test(portalClientMac)) {
+        packageStatus.textContent = 'Your router could not identify this device. Reconnect to the Wi-Fi and reopen its sign-in page.';
+        packageStatus.classList.add('is-error');
+        return;
       }
-      if (!/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/i.test(routerMac)) {
-        purchaseStatus.textContent = 'Open this page through your MikroTik hotspot to claim a free package.';
-        purchaseStatus.classList.add('is-error');
-        purchaseButton.disabled = true;
-        purchaseButton.textContent = 'MikroTik connection required';
-        return false;
-      }
-      purchaseButton.disabled = true;
-      purchaseButton.textContent = 'Connecting...';
-      purchaseStatus.textContent = 'Preparing your free connection...';
-      purchaseStatus.classList.remove('is-error');
-      fetch(backendBaseUrl + '/api/hotspot/free' + tenantQuery, {
+
+      packageGrid.querySelectorAll('.package-card').forEach(function (card) {
+        card.disabled = true;
+      });
+      button.classList.add('selected');
+      button.setAttribute('aria-pressed', 'true');
+      packageStatus.textContent = 'Activating ' + product.name + ' and connecting your device...';
+      packageStatus.classList.remove('is-error');
+
+      fetch(billingBaseUrl + '/api/hotspot/free' + tenantQuery, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ packageId: selectedPackage, mac: routerMac })
-      }).then(function (response) {
-        return response.json().then(function (result) {
-          if (!response.ok) throw new Error(result.error || 'Could not activate the free package.');
-          return result;
-        });
-      }).then(function (result) {
-        var loginForm = document.forms.accountLogin;
-        loginForm.elements.username.value = result.username;
-        loginForm.elements.password.value = result.password;
-        if (document.getElementById('sendin') && typeof hexMD5 === 'function') doLogin(loginForm);
-        else loginForm.requestSubmit();
-      }).catch(function (error) {
-        purchaseStatus.textContent = error.message || 'Could not activate the free package.';
-        purchaseStatus.classList.add('is-error');
-        purchaseButton.disabled = false;
-        purchaseButton.textContent = 'Try free connection again';
-      });
-      return false;
-    }
-    function togglePassword(button) {
-      var password = button.parentNode.querySelector('input');
-      var showing = password.type === 'password';
-      password.type = showing ? 'text' : 'password';
-      button.textContent = showing ? 'Hide' : 'Show';
-      button.setAttribute('aria-label', showing ? 'Hide password' : 'Show password');
-      button.setAttribute('aria-pressed', showing ? 'true' : 'false');
-    }
-    function autoReconnect() {
-      if (!/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/i.test(routerMac)) return;
-      fetch(backendBaseUrl + '/api/hotspot/roam?mac=' + encodeURIComponent(routerMac) + (tenantSlug ? '&tenant=' + encodeURIComponent(tenantSlug) : ''), { cache: 'no-store' })
-        .then(function (response) { return response.ok ? response.json() : null; })
-        .then(function (result) {
-          if (!result || !result.active || !result.username || !result.password) return;
-          purchaseStatus.textContent = 'Reconnecting your active package...';
-          var loginForm = document.forms.accountLogin;
-          loginForm.elements.username.value = result.username;
-          loginForm.elements.password.value = result.password;
-          if (document.getElementById('sendin') && typeof hexMD5 === 'function') doLogin(loginForm);
-          else loginForm.requestSubmit();
+        body: JSON.stringify({ packageId: product.id, mac: portalClientMac })
+      })
+        .then(function (response) {
+          return response.json().then(function (result) {
+            if (!response.ok) throw new Error(result.error || 'Unable to activate this free plan.');
+            if (typeof result.username !== 'string' || typeof result.password !== 'string') {
+              throw new Error('The free plan was activated, but automatic sign-in details were not returned. Contact your network operator.');
+            }
+            return result;
+          });
         })
-        .catch(function () {});
+        .then(function (account) {
+          packageStatus.textContent = 'Free plan activated. Signing you in now...';
+          var loginForm = document.forms.accountLogin;
+          loginForm.elements.username.value = account.username;
+          loginForm.elements.password.value = account.password;
+          doLogin(loginForm);
+        })
+        .catch(function (error) {
+          console.error('Unable to activate free hotspot package', error);
+          packageStatus.textContent = error instanceof Error ? error.message : 'Unable to activate this free plan. Please try again.';
+          packageStatus.classList.add('is-error');
+          packageGrid.querySelectorAll('.package-card').forEach(function (card) {
+            card.disabled = false;
+          });
+          button.classList.remove('selected');
+          button.setAttribute('aria-pressed', 'false');
+        });
     }
-    autoReconnect();
+
+    function renderPackage(product) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'package-card';
+      button.setAttribute('aria-pressed', 'false');
+      button.setAttribute('aria-label', product.name + ', ' + (product.price === 0 ? 'free, tap to connect automatically' : 'KSh ' + Number(product.price).toLocaleString('en-KE')) + ', ' + product.speedLabel + ', ' + product.durationLabel);
+
+      var name = document.createElement('span');
+      name.className = 'package-name';
+      name.textContent = product.name;
+
+      var price = document.createElement('span');
+      price.className = 'package-price';
+      var currency = document.createElement('span');
+      currency.className = 'package-currency';
+      currency.textContent = 'KSh';
+      var amount = document.createElement('strong');
+      amount.className = 'package-price-value';
+      amount.textContent = Number(product.price).toLocaleString('en-KE');
+      price.append(currency, amount);
+
+      var details = document.createElement('span');
+      details.className = 'package-details';
+      var speed = document.createElement('span');
+      speed.className = 'package-detail';
+      var speedLabel = document.createElement('span');
+      speedLabel.className = 'package-detail-label';
+      speedLabel.textContent = 'Speed';
+      var speedValue = document.createElement('span');
+      speedValue.className = 'package-speed';
+      speedValue.textContent = product.speedLabel;
+      speed.append(speedLabel, speedValue);
+      var validity = document.createElement('span');
+      validity.className = 'package-detail';
+      var validityLabel = document.createElement('span');
+      validityLabel.className = 'package-detail-label';
+      validityLabel.textContent = 'Validity';
+      var validityValue = document.createElement('span');
+      validityValue.className = 'package-duration';
+      validityValue.textContent = product.durationLabel;
+      validity.append(validityLabel, validityValue);
+      details.append(speed, validity);
+      button.append(name, price, details);
+      button.addEventListener('click', function () {
+        if (product.price === 0) {
+          activateFreePackage(product, button);
+        } else {
+          selectPackage(product, button);
+        }
+      });
+      return button;
+    }
+
+    fetch(billingBaseUrl + '/api/hotspot/packages' + tenantQuery, { cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) throw new Error('Unable to load packages (HTTP ' + response.status + ').');
+        return response.json();
+      })
+      .then(function (products) {
+        if (!Array.isArray(products)) throw new Error('The package list response is invalid.');
+        packageGrid.replaceChildren();
+        if (products.length === 0) {
+          var empty = document.createElement('p');
+          empty.className = 'package-loading';
+          empty.textContent = 'No packages available right now.';
+          packageGrid.appendChild(empty);
+          packageStatus.textContent = 'Please try again later or contact your network operator.';
+          return;
+        }
+        products.forEach(function (product) {
+          if (!product || typeof product.id !== 'string' || typeof product.name !== 'string' ||
+              typeof product.price !== 'number' || typeof product.speedLabel !== 'string' ||
+              typeof product.durationLabel !== 'string') {
+            throw new Error('A package in the list has invalid details.');
+          }
+          packageGrid.appendChild(renderPackage(product));
+        });
+        packageStatus.textContent = 'Choose a package to continue.';
+      })
+      .catch(function (error) {
+        console.error('Unable to load hotspot packages', error);
+        packageGrid.replaceChildren();
+        var failure = document.createElement('p');
+        failure.className = 'package-loading is-error';
+        failure.setAttribute('role', 'alert');
+        failure.textContent = 'Packages could not be loaded. Please refresh the page to try again.';
+        packageGrid.appendChild(failure);
+        packageStatus.textContent = 'Unable to continue without an available package.';
+        packageStatus.classList.add('is-error');
+      });
+
+    purchaseForm.addEventListener('submit', function (event) {
+      if (!selectedPackage.value) {
+        event.preventDefault();
+        packageStatus.textContent = 'Select a package before continuing.';
+        packageStatus.classList.add('is-error');
+        packageGrid.focus();
+      }
+    });
+
+    fetch(billingBaseUrl + '/api/hotspot/portal-template' + tenantQuery, { cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) throw new Error('Unable to load captive portal settings.');
+        return response.json();
+      })
+      .then(function (portalSettings) {
+        if (portalSettings.activeTemplate) {
+          document.body.setAttribute('data-portal-template', portalSettings.activeTemplate);
+        }
+        if (portalSettings.companyName) {
+          document.querySelector('.marinet-brand').textContent = portalSettings.companyName;
+          document.title = portalSettings.companyName + ' Hotspot';
+        }
+        if (portalSettings.supportMessage) {
+          document.querySelector('.support-line').textContent = portalSettings.supportMessage;
+        }
+      })
+      .catch(function (error) {
+        console.error('Unable to load captive portal design settings', error);
+      });
   </script>
 </body>
 </html>

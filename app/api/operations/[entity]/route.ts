@@ -464,10 +464,31 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   if ('response' in access) return access.response
   const id = request.nextUrl.searchParams.get('id') || ''
   if (!uuidPattern.test(id)) return invalid('Record id is invalid.')
-  if (access.entity === 'vouchers') return invalid('Disable a voucher to revoke its RADIUS login.')
-
   try {
     if (access.entity === 'invoices') return invalid('Invoices are retained for accounting; use void instead of deleting.')
+    if (access.entity === 'vouchers') {
+      const deleted = await db.transaction(async (tx) => {
+        const [voucher] = await tx.select({ username: vouchers.username }).from(vouchers).where(and(
+          eq(vouchers.id, id),
+          eq(vouchers.tenantId, access.tenantId),
+        )).limit(1)
+        if (!voucher) return false
+        await tx.delete(radcheck).where(and(
+          eq(radcheck.username, voucher.username),
+          eq(radcheck.tenantId, access.tenantId),
+        ))
+        await tx.delete(radreply).where(and(
+          eq(radreply.username, voucher.username),
+          eq(radreply.tenantId, access.tenantId),
+        ))
+        const removed = await tx.delete(vouchers).where(and(
+          eq(vouchers.id, id),
+          eq(vouchers.tenantId, access.tenantId),
+        )).returning({ id: vouchers.id })
+        return removed.length > 0
+      })
+      return deleted ? NextResponse.json({ ok: true }) : invalid('Voucher not found.', 404)
+    }
     const deleted = access.entity === 'leads'
       ? await db.delete(leads).where(and(eq(leads.id, id), eq(leads.tenantId, access.tenantId))).returning({ id: leads.id })
       : access.entity === 'tickets'

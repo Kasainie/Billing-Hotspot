@@ -104,7 +104,7 @@ export async function resolvePublicTenantId(request: NextRequest): Promise<strin
   const host = request.headers.get('host')?.split(':')[0]?.toLowerCase() || ''
   const labels = host.split('.')
   const candidateSubdomain = labels.length > 2 ? labels[0] : ''
-  const subdomain = ['www', 'app', 'billing'].includes(candidateSubdomain) ? '' : candidateSubdomain
+  const subdomain = ['www', 'app', 'billing', 'login'].includes(candidateSubdomain) ? '' : candidateSubdomain
   const slug = (
     request.nextUrl.searchParams.get('tenant') ||
     request.headers.get('x-tenant-slug') ||

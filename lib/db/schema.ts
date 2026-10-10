@@ -171,6 +171,8 @@ export const packages = pgTable('packages', {
   burstTimeSeconds: integer('burst_time_seconds'),
   fupEnabled: boolean('fup_enabled').notNull().default(false),
   fupLimitBytes: bigint('fup_limit_bytes', { mode: 'number' }),
+  fupUploadRate: text('fup_upload_rate'),
+  fupDownloadRate: text('fup_download_rate'),
   scheduleEnabled: boolean('schedule_enabled').notNull().default(false),
   scheduleSpec: text('schedule_spec'),
   nasRestrictions: jsonb('nas_restrictions').$type<string[]>().notNull().default([]),
@@ -279,11 +281,23 @@ export const routerProvisioningTokens = pgTable('router_provisioning_tokens', {
     bridgePorts: Array<{ interface: string; bridge: string }>
     wanInterfaces: string[]
     bridgeName: string | null
+    serviceConfiguration?: {
+      bridgeName: string
+      ports: string[]
+      managedPorts: string[]
+      wanPorts: string[]
+      services: string[]
+      hotspotSubnet: string | null
+      pppoeSubnet: string | null
+      hotspotAntiSharing: boolean
+      preparedAt: string
+    }
   }>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   downloadedAt: timestamp('downloaded_at', { withTimezone: true }),
   appliedAt: timestamp('applied_at', { withTimezone: true }),
+  configuredAt: timestamp('configured_at', { withTimezone: true }),
 })
 
 export const routerMonitors = pgTable('router_monitors', {
@@ -355,6 +369,11 @@ export const routerMetricSamples = pgTable('router_metric_samples', {
   routerOsVersion: text('router_os_version'),
   boardName: text('board_name'),
   temperatureCelsius: integer('temperature_celsius'),
+  winboxEnabled: boolean('winbox_enabled'),
+  winboxPort: integer('winbox_port'),
+  webEnabled: boolean('web_enabled'),
+  webScheme: text('web_scheme'),
+  webPort: integer('web_port'),
 }, (table) => [
   index('router_metric_samples_router_sampled_idx').on(table.routerId, table.sampledAt),
 ])
@@ -424,6 +443,8 @@ export const hotspotPurchases = pgTable('hotspot_purchases', {
     burstTimeSeconds: number | null
     fupEnabled: boolean
     fupLimitBytes: number | null
+    fupUploadRate: string | null
+    fupDownloadRate: string | null
     scheduleEnabled: boolean
     scheduleSpec: string | null
     nasRestrictions: string[]

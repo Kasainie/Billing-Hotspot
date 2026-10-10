@@ -130,7 +130,9 @@ export default function GetStartedWizard() {
         {step === 2 && <section className="get-started-router">
           <RouterProvisioning
             initialSiteName={`${tenantName || 'Main'} Main Site`.slice(0, 64)}
-            onExit={() => setStep(1)}
+            exitLabel="Finish setup"
+            provisionedLabel="Continue"
+            onExit={() => { setRouterConfigured(true); setStep(3) }}
             onProvision={() => { setRouterConfigured(true); setStep(3) }}
           />
         </section>}
@@ -148,7 +150,7 @@ export default function GetStartedWizard() {
             {!paymentConfigured && <button className="wizard-back" onClick={() => setStep(1)}>Finish payment setup</button>}
             <button className="wizard-next" onClick={() => router.push('/')}>Open LKTECH dashboard</button>
           </div>
-          <a className="get-started-portal-link" href={`/hotspot?tenant=${encodeURIComponent(tenantSlug)}`} target="_blank" rel="noreferrer">Preview your captive portal</a>
+          <a className="get-started-portal-link" href={`/hotspot/login?tenant=${encodeURIComponent(tenantSlug)}`} target="_blank" rel="noreferrer">Preview your captive portal</a>
         </section>}
       </section>
     </main>

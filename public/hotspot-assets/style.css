@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   color-scheme: light;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #1c302f;
@@ -81,7 +81,7 @@ input:focus { border-color: #087f76; box-shadow: 0 0 0 3px rgba(8, 127, 118, .12
 }
 
 body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-primary: #66c9df; --portal-graphic-secondary: #ff8a3d; --portal-price-accent: #ffd16c; --portal-speed-accent: #86ddea; --portal-time-accent: #e2edf1; --portal-photo-wash: linear-gradient(180deg, rgba(7, 32, 50, .12), rgba(7, 32, 50, .2) 48%, rgba(7, 32, 50, .34)); --portal-panel-wash: rgba(6, 28, 47, .76); --portal-card-wash: rgba(11, 43, 67, .82); --portal-voucher-wash: rgba(4, 26, 45, .8); font-size: 14px; }
-.hotspot-home .portal-shell { display: block; min-height: 100vh; padding: 18px 12px 16px; background-color: #082b47; background-image: var(--portal-photo-wash), var(--portal-wallpaper, linear-gradient(135deg, #082b47, #123f5c)); background-size: cover, cover; background-position: center, center; background-repeat: no-repeat, no-repeat; background-attachment: fixed, fixed; }
+.hotspot-home .portal-shell { display: block; min-height: 100vh; padding: 18px 12px 16px; background-color: #082b47; background-image: var(--portal-photo-wash), var(--portal-wallpaper, url("themes/savannah-background.png")); background-size: cover, cover; background-position: center, center; background-repeat: no-repeat, no-repeat; background-attachment: fixed, fixed; }
 .portal-stack { width: min(100%, 460px); margin: 0 auto; color: #edf6fa; }
 .portal-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 3px 12px; }
 .hotspot-home .portal-brand { display: inline-flex; align-items: center; gap: 8px; color: #fff; font-size: 14px; font-weight: 800; letter-spacing: .04em; }
@@ -110,15 +110,16 @@ body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-prim
 .satellite-bottom { bottom: 14%; left: 18%; width: 5px; height: 5px; background: var(--portal-graphic-secondary); }
 .satellite-right { right: 15%; bottom: 16%; width: 6px; height: 6px; background: var(--portal-graphic-secondary); }
 .hotspot-home .portal-error { margin: 0 0 10px; }
-.package-section, .account-section { margin-top: 10px; border: 1px solid #80aac044; border-radius: 8px; background: var(--portal-panel-wash); padding: 13px; box-shadow: 0 8px 22px #00132230; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.package-section, .account-section, .receipt-section { margin-top: 10px; border: 1px solid #80aac044; border-radius: 8px; background: var(--portal-panel-wash); padding: 13px; box-shadow: 0 8px 22px #00132230; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
 .section-eyebrow { margin: 0 0 4px; color: #8fc9d6; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
-.section-heading h2, .account-section h2 { margin: 0; color: #f1f7fa; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; font-size: 16px; font-weight: 700; line-height: 1.3; }
+.section-heading h2, .account-section h2, .receipt-section h2 { margin: 0; color: #f1f7fa; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; font-size: 16px; font-weight: 700; line-height: 1.3; }
 .currency-label { border: 1px solid #6d9bb340; border-radius: 4px; padding: 4px 7px; color: #b4d2de; font-size: 12px; font-weight: 700; }
 .package-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
 .package-loading { grid-column: 1 / -1; margin: 0; border: 1px solid #75a2b344; border-radius: 6px; background: var(--portal-card-wash); padding: 13px 10px; color: #c3d8e1; font-size: 13px; line-height: 1.5; text-align: center; }
 .package-card { position: relative; display: flex; min-width: 0; min-height: 126px; flex-direction: column; align-items: stretch; justify-content: center; gap: 7px; overflow: hidden; border: 1px solid #8bafc366; border-radius: 7px; background: var(--portal-card-wash); padding: 12px; color: #f4f8fa; cursor: pointer; font-family: inherit; text-align: left; -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
 .package-card:hover, .package-card.selected { border-color: #ff994f; background: #173b50; box-shadow: inset 0 0 0 1px #ff994f; }
+.package-card:disabled { cursor: wait; opacity: .72; }
 .package-card:hover .package-price-value, .package-card.selected .package-price-value { color: #ffd16c; }
 .package-art { position: absolute; top: 5px; right: 5px; z-index: 0; width: 16px; height: 16px; border: 1px solid var(--portal-graphic-primary); border-radius: 50%; opacity: .2; pointer-events: none; }
 .package-art::before { position: absolute; inset: 3px; border: 1px solid var(--portal-graphic-secondary); border-radius: 50%; content: ''; }
@@ -132,26 +133,43 @@ body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-prim
 .package-detail-label { color: #d3e0e7; font-size: 12px; font-weight: 700; letter-spacing: .02em; line-height: 1.2; }
 .package-speed { color: var(--portal-speed-accent); font-size: 14px; font-variant-numeric: tabular-nums; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 .package-duration { color: var(--portal-time-accent); font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.3; overflow-wrap: anywhere; }
+.subscription-plans-link { display: block; margin: 9px 0 0; color: #8fe4f0; font-size: 12px; font-weight: 650; text-align: center; text-decoration: underline; text-underline-offset: 3px; }
+.subscription-plans-link:hover { color: #fff; }
 .purchase-form { display: grid; gap: 6px; margin-top: 11px; }
-.account-fields label { display: grid; gap: 5px; margin: 0; color: #d4e2e8; font-size: 13px; font-weight: 600; }
+.purchase-form > label, .account-fields label, .receipt-fields label { display: grid; gap: 5px; margin: 0; color: #d4e2e8; font-size: 13px; font-weight: 600; }
 .hotspot-home input { width: 100%; min-width: 0; min-height: 42px; border: 1px solid #648198; border-radius: 5px; outline: 0; background: #e8eef3; padding: 8px 10px; color: #1b2e3b; font: inherit; font-size: 14px; }
 .hotspot-home input::placeholder { color: #71818e; }
 .hotspot-home input:focus { border-color: #54bad2; box-shadow: 0 0 0 2px #54bad242; }
-.purchase-button, .account-button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 5px; background: #16b86b; padding: 8px 12px; color: #fff; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; }
+.purchase-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.purchase-button, .account-button, .receipt-button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 5px; background: #16b86b; padding: 8px 12px; color: #fff; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; }
 .purchase-button:disabled { cursor: not-allowed; opacity: .55; }
 .purchase-button:hover:not(:disabled) { background: #10a85f; }
-.portal-hint { margin: 0; color: #a9c0cb; font-size: 12px; line-height: 1.5; }
+.payment-hint { margin: 0; color: #a9c0cb; font-size: 12px; line-height: 1.5; }
 .purchase-status { margin: 0; color: #b8d5e1; font-size: 12px; line-height: 1.5; }
 .purchase-status.is-error, .package-loading.is-error { color: #ffc0b5; }
 .voucher-link { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 8px; margin: 9px 0; border: 1px solid #75a2b33d; border-radius: 6px; background: var(--portal-voucher-wash); color: #e2edf1; font-size: 13px; font-weight: 600; text-decoration: none; -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 .voucher-link:hover { border-color: #ff994f; color: #fff; }
 .account-section { margin-top: 0; padding: 15px; }
-.account-section h2 { font-size: 16px; }
-.account-section > p:not(.section-eyebrow) { margin: 6px 0 12px; color: #b7cbd5; font-size: 13px; line-height: 1.5; }
+.account-section h2, .receipt-section h2 { font-size: 16px; }
+.account-section > p:not(.section-eyebrow), .receipt-section > div:first-child > p:last-child { margin: 6px 0 12px; color: #b7cbd5; font-size: 13px; line-height: 1.5; }
 .account-fields { display: grid; gap: 7px; }
 .account-button { width: 100%; margin-top: 9px; }
-.account-button:hover { filter: brightness(.94); }
+.account-button:hover, .receipt-button:hover { filter: brightness(.94); }
+.receipt-section { padding: 14px; }
+.receipt-fields { display: grid; gap: 7px; }
+.receipt-button { width: 100%; margin-top: 9px; background: #347ff0; }
 .portal-footer { display: flex; justify-content: space-between; gap: 8px; margin: 13px 1px 0; border-top: 1px solid #83aabc55; padding: 10px 1px 0; color: #a8c1cc; font-size: 12px; line-height: 1.4; }
+.portal-state-panel { margin-top: 10px; border: 1px solid #80aac044; border-radius: 8px; background: var(--portal-panel-wash); padding: 15px; box-shadow: 0 8px 22px #00132230; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.portal-state-panel .portal-button { margin-top: 0; background: #16b86b; color: #fff; }
+.portal-state-panel .portal-button:hover { background: #10a85f; }
+.portal-state-panel .portal-button.secondary { background: #347ff0; }
+.portal-state-panel .portal-button.secondary:hover { background: #286fe0; }
+.portal-state-panel .portal-footnote { margin: 12px 0 0; color: #a9c0cb; font-size: 12px; }
+.hotspot-home .session-details { margin: 0 0 12px; border-color: #75a2b344; background: var(--portal-card-wash); }
+.hotspot-home .session-details div { border-color: #ffffff24; }
+.hotspot-home .session-details dt { color: #b7cbd5; }
+.hotspot-home .session-details dd { color: #f2f7fa; }
+.hotspot-home .portal-error { margin: 0 0 12px; border-color: #f0a08a66; background: #502f30b8; color: #ffd0c3; }
 
 @media (max-width: 380px) {
   .hotspot-home .portal-shell { padding-right: 9px; padding-left: 9px; }
@@ -163,10 +181,543 @@ body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-prim
   .package-price-value { font-size: 21px; }
   .package-speed { font-size: 13px; }
   .package-duration { font-size: 12px; }
+  .purchase-button { padding-right: 8px; padding-left: 8px; font-size: 13px; }
   .portal-footer { flex-direction: column; text-align: center; }
 }
 
 @media (max-width: 560px) {
   .package-card { min-height: 124px; }
   .package-details { grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 12px; }
+}
+body.hotspot-home.mari-net-portal {
+  background: var(--marinet-page-background, #efefee);
+  color: var(--marinet-text, #2f2f2f);
+}
+
+.hotspot-home.mari-net-portal .portal-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px 18px;
+  background: #efefee;
+}
+
+.hotspot-home.mari-net-portal .portal-stack {
+  width: min(100%, 760px);
+  margin: 0 auto;
+}
+
+.hotspot-home.mari-net-portal .marinet-card {
+  background: var(--marinet-card-background, #ebd3ae);
+  border: 1px solid var(--marinet-border, #c0b19a);
+  border-radius: 18px;
+  padding: 24px 24px 18px;
+  box-shadow: none;
+}
+
+.hotspot-home.mari-net-portal .marinet-brand {
+  margin: 0;
+  color: var(--marinet-text, #1f1f1f);
+  font-size: clamp(2.2rem, 3vw, 3.2rem);
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+}
+
+.hotspot-home.mari-net-portal .marinet-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  margin: 18px 0 14px;
+  font-size: 1.1rem;
+  color: var(--marinet-muted, #1d3d4d);
+}
+
+.hotspot-home.mari-net-portal .marinet-tabs span {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px 4px;
+  color: var(--marinet-muted, #2b3a47);
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.hotspot-home.mari-net-portal .marinet-tabs .is-active {
+  color: var(--marinet-text, #0d1d2a);
+  font-weight: 700;
+  border-bottom: 3px solid var(--marinet-accent, #f28b2d);
+  opacity: 1;
+}
+
+.hotspot-home.mari-net-portal .marinet-phone-form {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: min(100%, 430px);
+  margin: 0 auto;
+}
+
+.hotspot-home.mari-net-portal .purchase-form.marinet-phone-form {
+  display: grid;
+  width: 100%;
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+.hotspot-home.mari-net-portal .purchase-form .purchase-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.hotspot-home.mari-net-portal .phone-input-wrap {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--marinet-border, #c8b08d);
+  border-radius: 7px;
+  background: rgba(255,255,255,0.15);
+}
+
+.hotspot-home.mari-net-portal .phone-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  color: var(--marinet-accent, #f28b2d);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.hotspot-home.mari-net-portal .phone-input-wrap input {
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  color: var(--marinet-text, #1f2d39);
+  font-size: 1.05rem;
+  padding: 0;
+  box-shadow: none;
+}
+
+.hotspot-home.mari-net-portal .phone-input-wrap input::placeholder {
+  color: var(--marinet-muted, #5f6972);
+}
+
+.hotspot-home.mari-net-portal .marinet-phone-form button,
+.hotspot-home.mari-net-portal .field-row button,
+.hotspot-home.mari-net-portal .login-button {
+  min-height: 44px;
+  border: none;
+  border-radius: 7px;
+  background: var(--marinet-accent, #ea7d19);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: inset 0 -1px 0 rgba(0,0,0,0.08);
+}
+
+.hotspot-home.mari-net-portal .marinet-phone-form button {
+  min-width: 122px;
+  padding: 0 18px;
+}
+
+.hotspot-home.mari-net-portal .portlet {
+  margin-top: 18px;
+  background: var(--marinet-surface, rgba(255,255,255,0.12));
+  border: 1px solid var(--marinet-border, #d9d9d5);
+  border-radius: 12px;
+  padding: 14px 18px 16px;
+}
+
+.hotspot-home.mari-net-portal .panel-empty h2,
+.hotspot-home.mari-net-portal .portlet h3 {
+  margin: 0;
+  color: var(--marinet-text, #2f2f2f);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.hotspot-home.mari-net-portal .panel-empty h2 {
+  font-size: 1.15rem;
+}
+
+.hotspot-home.mari-net-portal .empty-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 84px;
+  margin-top: 14px;
+  border: 1px dashed var(--marinet-border, #b8b5b0);
+  border-radius: 8px;
+  color: var(--marinet-muted, #5d5d5d);
+  font-size: 1rem;
+  background: var(--marinet-field-background, rgba(255,255,255,0.25));
+}
+
+.hotspot-home.mari-net-portal .panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.hotspot-home.mari-net-portal .panel-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--marinet-accent, #ea7d19);
+  font-size: 1.15rem;
+}
+
+.hotspot-home.mari-net-portal .field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.hotspot-home.mari-net-portal .action-panel input,
+.hotspot-home.mari-net-portal .login-panel input,
+.hotspot-home.mari-net-portal .password-field input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--marinet-border, #d5d5d0);
+  border-radius: 7px;
+  background: var(--marinet-field-background, rgba(255,255,255,0.2));
+  padding: 10px 12px;
+  color: var(--marinet-text, #1d2a30);
+  font: inherit;
+  box-shadow: none;
+}
+
+.hotspot-home.mari-net-portal .action-panel input::placeholder,
+.hotspot-home.mari-net-portal .login-panel input::placeholder {
+  color: var(--marinet-muted, #646e73);
+}
+
+.hotspot-home.mari-net-portal .action-panel .field-row button,
+.hotspot-home.mari-net-portal .login-button {
+  padding: 0 18px;
+}
+
+.hotspot-home.mari-net-portal .login-panel {
+  padding-bottom: 18px;
+}
+
+.hotspot-home.mari-net-portal .login-panel label {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  color: var(--marinet-text, #2a3440);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.hotspot-home.mari-net-portal .password-field {
+  position: relative;
+  display: block;
+}
+
+.hotspot-home.mari-net-portal .password-field input {
+  padding-right: 62px;
+}
+
+.hotspot-home.mari-net-portal .password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--marinet-muted, #52606d);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hotspot-home.mari-net-portal .login-button {
+  width: 100%;
+  margin-top: 14px;
+  min-height: 48px;
+  font-size: 1.15rem;
+}
+
+.hotspot-home.mari-net-portal .support-line {
+  margin-top: 18px;
+  text-align: center;
+  color: var(--marinet-muted, #7e7b77);
+  font-size: 0.95rem;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="original"] {
+  --marinet-page-background: #071c2d;
+  --marinet-card-background: #102b3d;
+  --marinet-surface: #102b3d;
+  --marinet-field-background: #f3f8fb;
+  --marinet-border: #345468;
+  --marinet-text: #f4fbff;
+  --marinet-muted: #b8ccd8;
+  --marinet-input-text: #183041;
+  --marinet-input-muted: #687b87;
+  --marinet-accent: #22c78a;
+  --marinet-accent-hover: #17a875;
+  --marinet-accent-ink: #062b20;
+  --marinet-shadow: 0 24px 60px #020b13a6;
+  --marinet-page-glow: #1a547b;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="fresh"] {
+  --marinet-page-background: #e8f0e6;
+  --marinet-card-background: #ffffff;
+  --marinet-surface: #ffffff;
+  --marinet-field-background: #f8fbf7;
+  --marinet-border: #d1dfd1;
+  --marinet-text: #19372b;
+  --marinet-muted: #5b7163;
+  --marinet-accent: #287a59;
+  --marinet-accent-hover: #1f6448;
+  --marinet-accent-ink: #ffffff;
+  --marinet-shadow: 0 22px 55px #29483120;
+  --marinet-page-glow: #c4d9be;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="skyline"] {
+  --marinet-page-background: #e8f2fc;
+  --marinet-card-background: #ffffff;
+  --marinet-surface: #ffffff;
+  --marinet-field-background: #f7faff;
+  --marinet-border: #cbdced;
+  --marinet-text: #18334c;
+  --marinet-muted: #5c7388;
+  --marinet-accent: #236fc2;
+  --marinet-accent-hover: #195a9f;
+  --marinet-accent-ink: #ffffff;
+  --marinet-shadow: 0 22px 55px #234c7520;
+  --marinet-page-glow: #bdd8f4;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="copperline"] {
+  --marinet-page-background: #f3ece3;
+  --marinet-card-background: #fffdf9;
+  --marinet-surface: #fffdf9;
+  --marinet-field-background: #fffaf4;
+  --marinet-border: #e5d7c7;
+  --marinet-text: #392e29;
+  --marinet-muted: #75665c;
+  --marinet-accent: #ad4e32;
+  --marinet-accent-hover: #98472f;
+  --marinet-accent-ink: #ffffff;
+  --marinet-shadow: 0 22px 55px #64462d1c;
+  --marinet-page-glow: #e7c6a4;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] {
+  --marinet-page-background: #171e24;
+  --marinet-card-background: #252e35;
+  --marinet-surface: #252e35;
+  --marinet-field-background: #edf2ef;
+  --marinet-border: #43515a;
+  --marinet-text: #f5f8f2;
+  --marinet-muted: #bdc8c5;
+  --marinet-input-text: #202b30;
+  --marinet-input-muted: #647176;
+  --marinet-accent: #c4e765;
+  --marinet-accent-hover: #acd14e;
+  --marinet-accent-ink: #1c2813;
+  --marinet-shadow: 0 24px 60px #05090cb8;
+  --marinet-page-glow: #39474b;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="cobalt"] {
+  --marinet-page-background: #102e56;
+  --marinet-card-background: #173e6b;
+  --marinet-surface: #173e6b;
+  --marinet-field-background: #f1f8fc;
+  --marinet-border: #42658a;
+  --marinet-text: #f2f9ff;
+  --marinet-muted: #c0d4e7;
+  --marinet-input-text: #17344d;
+  --marinet-input-muted: #617689;
+  --marinet-accent: #54d6f2;
+  --marinet-accent-hover: #33badb;
+  --marinet-accent-ink: #082940;
+  --marinet-shadow: 0 24px 60px #07172bb3;
+  --marinet-page-glow: #28628c;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="lagoon"] {
+  --marinet-page-background: #dff1eb;
+  --marinet-card-background: #f8fcfa;
+  --marinet-surface: #f8fcfa;
+  --marinet-field-background: #ffffff;
+  --marinet-border: #c5ded5;
+  --marinet-text: #173a36;
+  --marinet-muted: #58716d;
+  --marinet-accent: #087f76;
+  --marinet-accent-hover: #06685f;
+  --marinet-accent-ink: #ffffff;
+  --marinet-shadow: 0 22px 55px #2051471c;
+  --marinet-page-glow: #b7ddd1;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="ember"] {
+  --marinet-page-background: #f4e7e4;
+  --marinet-card-background: #fffaf8;
+  --marinet-surface: #fffaf8;
+  --marinet-field-background: #ffffff;
+  --marinet-border: #e6cfcb;
+  --marinet-text: #39272b;
+  --marinet-muted: #796368;
+  --marinet-accent: #b8494d;
+  --marinet-accent-hover: #97383d;
+  --marinet-accent-ink: #ffffff;
+  --marinet-shadow: 0 22px 55px #66383b1c;
+  --marinet-page-glow: #e8c5c2;
+}
+
+.hotspot-home.mari-net-portal .portal-shell {
+  background-color: var(--marinet-page-background, #efefee);
+  background-image:
+    radial-gradient(ellipse at 50% -12%, var(--marinet-page-glow, #ffffff) 0, transparent 57%),
+    linear-gradient(160deg, var(--marinet-page-background, #efefee), var(--marinet-page-background, #efefee));
+}
+
+.hotspot-home.mari-net-portal .portal-stack {
+  color: var(--marinet-text, #2f2f2f);
+}
+
+.hotspot-home.mari-net-portal .marinet-card {
+  background: linear-gradient(140deg, var(--marinet-card-background, #ebd3ae), var(--marinet-surface, #ebd3ae));
+  border-color: var(--marinet-border, #c0b19a);
+  box-shadow: var(--marinet-shadow, 0 16px 36px #34302714);
+}
+
+.hotspot-home.mari-net-portal .marinet-tabs span + span::before {
+  position: absolute;
+  top: 50%;
+  left: -13px;
+  width: 5px;
+  height: 5px;
+  transform: translateY(-50%) rotate(45deg);
+  border-top: 1px solid var(--marinet-muted, #69757d);
+  border-right: 1px solid var(--marinet-muted, #69757d);
+  content: '';
+}
+
+.hotspot-home.mari-net-portal .portlet {
+  background: var(--marinet-surface, rgba(255,255,255,0.12));
+  border-color: var(--marinet-border, #d9d9d5);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--marinet-text, #111827) 10%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.hotspot-home.mari-net-portal .empty-panel {
+  border-color: var(--marinet-border, #b8b5b0);
+  background: var(--marinet-field-background, rgba(255,255,255,0.25));
+  color: var(--marinet-muted, #5d5d5d);
+}
+
+.hotspot-home.mari-net-portal .action-panel input,
+.hotspot-home.mari-net-portal .login-panel input,
+.hotspot-home.mari-net-portal .password-field input {
+  border-color: var(--marinet-border, #d5d5d0);
+  background: var(--marinet-field-background, #ffffff);
+  color: var(--marinet-input-text, var(--marinet-text, #1d2a30));
+}
+
+.hotspot-home.mari-net-portal .action-panel input::placeholder,
+.hotspot-home.mari-net-portal .login-panel input::placeholder {
+  color: var(--marinet-input-muted, var(--marinet-muted, #646e73));
+  opacity: .78;
+}
+
+.hotspot-home.mari-net-portal .action-panel button,
+.hotspot-home.mari-net-portal .marinet-phone-form button,
+.hotspot-home.mari-net-portal .login-button {
+  background: linear-gradient(135deg, var(--marinet-accent, #ea7d19), var(--marinet-accent-hover, #d86912));
+  color: var(--marinet-accent-ink, #ffffff);
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--marinet-accent, #ea7d19) 25%, transparent);
+  transition: transform .18s ease, filter .18s ease, box-shadow .18s ease;
+}
+
+.hotspot-home.mari-net-portal .action-panel button:hover,
+.hotspot-home.mari-net-portal .marinet-phone-form button:hover,
+.hotspot-home.mari-net-portal .login-button:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--marinet-accent, #ea7d19) 32%, transparent);
+}
+
+.hotspot-home.mari-net-portal .portlet h3,
+.hotspot-home.mari-net-portal .panel-empty h2,
+.hotspot-home.mari-net-portal .login-panel label {
+  color: var(--marinet-text, #2f2f2f);
+}
+
+.hotspot-home.mari-net-portal .panel-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--marinet-accent, #ea7d19) 12%, transparent);
+}
+
+.hotspot-home.mari-net-portal .phone-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--marinet-accent, #ea7d19) 14%, transparent);
+}
+
+.hotspot-home.mari-net-portal input:focus-visible,
+.hotspot-home.mari-net-portal button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--marinet-accent, #ea7d19) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.hotspot-home.mari-net-portal .support-line {
+  color: var(--marinet-muted, #7e7b77);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hotspot-home.mari-net-portal .action-panel button,
+  .hotspot-home.mari-net-portal .marinet-phone-form button,
+  .hotspot-home.mari-net-portal .login-button {
+    transition: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .hotspot-home.mari-net-portal .marinet-phone-form {
+    width: 100%;
+  }
+
+  .hotspot-home.mari-net-portal .marinet-phone-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hotspot-home.mari-net-portal .marinet-phone-form button,
+  .hotspot-home.mari-net-portal .field-row button {
+    width: 100%;
+  }
+
+  .hotspot-home.mari-net-portal .field-row {
+    grid-template-columns: 1fr;
+  }
 }

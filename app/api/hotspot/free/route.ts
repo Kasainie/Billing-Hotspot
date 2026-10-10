@@ -7,24 +7,38 @@ import { resolvePublicTenantId } from '@/lib/db/tenant'
 import { toFreeRadiusExpiration, toHotspotRadiusReplies } from '@/lib/hotspot-products'
 
 const allowedTypes = ['Hotspot', 'Bundle', 'Trial']
+const publicHeaders = {
+  'access-control-allow-origin': '*',
+  'cache-control': 'no-store',
+}
+
+function publicJson(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: publicHeaders })
+}
 
 export async function POST(request: NextRequest) {
-  const tenantId = await resolvePublicTenantId(request)
-  if (!tenantId) return NextResponse.json({ error: 'Workspace not found.' }, { status: 404 })
+  let tenantId: string | null
+  try {
+    tenantId = await resolvePublicTenantId(request)
+  } catch (error) {
+    console.error('Failed to resolve workspace for free hotspot activation', error)
+    return publicJson({ error: 'Unable to activate the free offer. Please try again or contact customer care.' }, 503)
+  }
+  if (!tenantId) return publicJson({ error: 'Workspace not found.' }, 404)
   let input: { packageId?: unknown; mac?: unknown }
   try {
     input = await request.json() as { packageId?: unknown; mac?: unknown }
   } catch {
-    return NextResponse.json({ error: 'Choose a free package to connect.' }, { status: 400 })
+    return publicJson({ error: 'Choose a free package to connect.' }, 400)
   }
 
   const packageId = typeof input.packageId === 'string' ? input.packageId : ''
   const clientMac = typeof input.mac === 'string' ? input.mac.trim().toUpperCase() : ''
   if (!/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/.test(clientMac)) {
-    return NextResponse.json({ error: 'Could not identify this device. Reopen the hotspot login page and try again.' }, { status: 400 })
+    return publicJson({ error: 'Could not identify this device. Reopen the hotspot login page and try again.' }, 400)
   }
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(packageId)) {
-    return NextResponse.json({ error: 'Choose a valid free package.' }, { status: 400 })
+    return publicJson({ error: 'Choose a valid free package.' }, 400)
   }
 
   const sourceIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null
@@ -73,6 +87,8 @@ export async function POST(request: NextRequest) {
           burstTimeSeconds: plan.burstTimeSeconds,
           fupEnabled: plan.fupEnabled,
           fupLimitBytes: plan.fupLimitBytes,
+          fupUploadRate: plan.fupUploadRate,
+          fupDownloadRate: plan.fupDownloadRate,
           scheduleEnabled: plan.scheduleEnabled,
           scheduleSpec: plan.scheduleSpec,
           nasRestrictions: plan.nasRestrictions,
@@ -100,13 +116,11 @@ export async function POST(request: NextRequest) {
       return { purchaseId: purchase.id, username, password }
     })
 
-    if ('error' in result) return NextResponse.json({ error: result.error }, { status: 409 })
-    return NextResponse.json({ id: result.purchaseId, username: result.username, password: result.password }, {
-      status: 201,
-      headers: { 'access-control-allow-origin': '*', 'cache-control': 'no-store' },
-    })
-  } catch {
-    return NextResponse.json({ error: 'Unable to activate the free offer. Please try again or contact customer care.' }, { status: 503 })
+    if ('error' in result)     return publicJson({ error: result.error }, 409)
+    return publicJson({ id: result.purchaseId, username: result.username, password: result.password }, 201)
+  } catch (error) {
+    console.error('Failed to activate free hotspot offer', error)
+    return publicJson({ error: 'Unable to activate the free offer. Please try again or contact customer care.' }, 503)
   }
 }
 

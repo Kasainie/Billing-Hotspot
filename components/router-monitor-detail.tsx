@@ -7,6 +7,7 @@ import { getLiveRouterUptimeSeconds } from '@/lib/router-monitoring'
 export type RouterMonitorRecord = {
   id: string
   siteId: string
+  siteName: string
   monitored: boolean
   routerName: string
   location: string
@@ -14,6 +15,8 @@ export type RouterMonitorRecord = {
   lastSeenAt: string | null
   connectorEnabled: boolean
   connectorLastSeenAt: string | null
+  lastSourceIp: string | null
+  metricsUpdatedAt: string | null
   cpuLoad: number | null
   freeMemoryBytes: number | null
   totalMemoryBytes: number | null
@@ -26,6 +29,11 @@ export type RouterMonitorRecord = {
   uptimeSeconds: number | null
   routerOsVersion: string | null
   boardName: string | null
+  winboxEnabled: boolean | null
+  winboxPort: number | null
+  webEnabled: boolean | null
+  webScheme: 'http' | 'https' | null
+  webPort: number | null
   health: number | null
 }
 
@@ -71,7 +79,7 @@ type MetricSample = {
 }
 
 type MetricsResponse = { samples: MetricSample[]; error?: string }
-type MonitorTab = 'System' | 'Reports' | 'Users' | 'Events' | 'Diagnosis'
+export type RouterMonitorTab = 'System' | 'Reports' | 'Users' | 'Events' | 'Diagnosis'
 
 const ranges = [
   { id: '1h', label: '1h' },
@@ -156,15 +164,17 @@ export function RouterMonitorDetail({
   onReprovision,
   onEnableConnector,
   onRemove,
+  initialTab = 'System',
 }: {
   router: RouterMonitorRecord
   onBack: () => void
   onReprovision: () => void
   onEnableConnector: () => Promise<RouterConnectorEnrollment>
   onRemove: () => Promise<void>
+  initialTab?: RouterMonitorTab
 }) {
   const [range, setRange] = useState<(typeof ranges)[number]['id']>('1h')
-  const [tab, setTab] = useState<MonitorTab>('System')
+  const [tab, setTab] = useState<RouterMonitorTab>(initialTab)
   const [samples, setSamples] = useState<MetricSample[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -389,7 +399,7 @@ export function RouterMonitorDetail({
       </div>
 
       {confirmDelete && <section className="router-delete-confirmation" role="alertdialog" aria-labelledby="router-delete-title" aria-describedby="router-delete-description">
-        <div><strong id="router-delete-title">Delete monitoring for {router.routerName}?</strong><p id="router-delete-description">This deletes the router monitor and its monitoring history. The network site and its other records will remain.</p></div>
+        <div><strong id="router-delete-title">Delete {router.routerName} and its network site?</strong><p id="router-delete-description">All routers linked to this site and their monitoring history will be deleted. Customer and equipment records will be kept.</p></div>
         {deleteError && <p className="router-discovery-status error" role="alert">{deleteError}</p>}
         <div className="router-delete-actions"><button type="button" className="outline-button" disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</button><button type="button" className="router-delete-confirm-button" disabled={deleting} onClick={() => void deleteRouter()}>{deleting ? 'Deleting…' : 'Confirm delete'}</button></div>
       </section>}

@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { routerMonitors } from '@/lib/db/schema'
+import { customers, routerMonitors, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { buildRouterMonitorScript } from '@/lib/router-monitor-script'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
@@ -67,15 +67,28 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const access = await authorize(request, id)
   if ('response' in access) return access.response
   try {
-    const [removed] = await db.delete(routerMonitors).where(and(
-      eq(routerMonitors.id, access.id),
-      eq(routerMonitors.tenantId, access.tenantId),
-    )).returning({ id: routerMonitors.id })
-    if (!removed) return NextResponse.json({ error: 'Router monitor not found in this workspace.' }, { status: 404 })
+    const removed = await db.transaction(async (tx) => {
+      const [monitor] = await tx.select({ siteId: routerMonitors.siteId }).from(routerMonitors).where(and(
+        eq(routerMonitors.id, access.id),
+        eq(routerMonitors.tenantId, access.tenantId),
+      )).limit(1)
+      if (!monitor) return false
+
+      await tx.update(customers).set({ siteId: null }).where(and(
+        eq(customers.siteId, monitor.siteId),
+        eq(customers.tenantId, access.tenantId),
+      ))
+      const [site] = await tx.delete(sites).where(and(
+        eq(sites.id, monitor.siteId),
+        eq(sites.tenantId, access.tenantId),
+      )).returning({ id: sites.id })
+      return Boolean(site)
+    })
+    if (!removed) return NextResponse.json({ error: 'Router or its network site was not found in this workspace.' }, { status: 404 })
     return new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } })
   } catch (error) {
-    console.error('Failed to remove router monitoring', error)
-    return NextResponse.json({ error: 'Unable to remove router monitoring.' }, { status: 503 })
+    console.error('Failed to remove router and its network site', error)
+    return NextResponse.json({ error: 'Unable to remove the router and its network site.' }, { status: 503 })
   }
 }
 

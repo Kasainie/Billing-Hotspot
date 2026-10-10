@@ -3,30 +3,38 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f7f6">
+  <meta name="theme-color" content="#082b47">
   <title>LKTech connected</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="hotspot-home">
   <main class="portal-shell">
-    <section class="portal-panel">
-      <div class="portal-brand" aria-label="LKTech"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
-      <p class="portal-kicker"><span class="online-dot"></span> CONNECTION ACTIVE</p>
-      <h1>You are connected.</h1>
-      <p class="portal-copy">Your LKTech Wi-Fi is ready.</p>
-      <a class="portal-button" href="$(link-login)">Return to hotspot sign-in <span aria-hidden="true">&#8594;</span></a>
-    </section>
+    <div class="portal-stack">
+      <header class="portal-header">
+        <div class="portal-brand" aria-label="LKTech"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
+        <span class="network-status"><span class="online-dot"></span> HOTSPOT LOGIN</span>
+      </header>
+      <section class="welcome-panel">
+        <p class="portal-kicker"><span class="online-dot"></span> CONNECTION ACTIVE</p>
+        <h1>You are connected.</h1>
+        <p>Your LKTech Wi-Fi is ready.</p>
+      </section>
+      <section class="portal-state-panel">
+        <a class="portal-button" href="$(link-redirect)">Continue browsing <span aria-hidden="true">&#8594;</span></a>
+      </section>
+    </div>
   </main>
   <script>
-    var backendBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    var billingBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? window.location.origin
       : 'https://billing.lktech.life';
-    var bindUrl = backendBaseUrl + '/api/hotspot/roam';
+    document.documentElement.style.setProperty('--portal-wallpaper', 'url("' + billingBaseUrl + '/hotspot-assets/themes/savannah-background.png")');
+    var bindUrl = billingBaseUrl + '/api/hotspot/roam';
     var bindBody = JSON.stringify({ username: '$(username)', mac: '$(mac)' });
     if (!navigator.sendBeacon || !navigator.sendBeacon(bindUrl, new Blob([bindBody], { type: 'text/plain' }))) {
       fetch(bindUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: bindBody, keepalive: true }).catch(function () {});
     }
-    window.setTimeout(function () { window.location.replace('$(link-login)'); }, 150);
+    window.setTimeout(function () { window.location.replace('$(link-redirect)'); }, 150);
   </script>
 </body>
 </html>

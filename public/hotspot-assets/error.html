@@ -3,20 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f7f6">
+  <meta name="theme-color" content="#082b47">
   <title>LKTech sign-in issue</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="hotspot-home">
   <main class="portal-shell">
-    <section class="portal-panel">
-      <div class="portal-brand" aria-label="LKTech"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
-      <p class="portal-kicker">SIGN-IN ISSUE</p>
-      <h1>Let's try again.</h1>
-      <p class="portal-error" role="alert">$(error)</p>
-      <a class="portal-button" href="$(link-login)">Return to sign in <span aria-hidden="true">&#8594;</span></a>
-      <p class="portal-footnote">Check your account details. If this continues, contact your network operator.</p>
-    </section>
+    <div class="portal-stack">
+      <header class="portal-header">
+        <div class="portal-brand" aria-label="LKTech"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
+        <span class="network-status"><span class="online-dot"></span> HOTSPOT LOGIN</span>
+      </header>
+      <section class="welcome-panel">
+        <p class="portal-kicker">SIGN-IN ISSUE</p>
+        <h1>Let's try again.</h1>
+        <p>We couldn't connect you to the network.</p>
+      </section>
+      <section class="portal-state-panel">
+        <p class="portal-error" role="alert">$(error)</p>
+        <a class="portal-button" href="$(link-login)">Return to sign in <span aria-hidden="true">&#8594;</span></a>
+        <p class="portal-footnote">Check your account details. If this continues, contact your network operator.</p>
+      </section>
+    </div>
   </main>
+  <script>
+    var billingBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? window.location.origin
+      : 'https://billing.lktech.life';
+    document.documentElement.style.setProperty('--portal-wallpaper', 'url("' + billingBaseUrl + '/hotspot-assets/themes/savannah-background.png")');
+  </script>
 </body>
 </html>
