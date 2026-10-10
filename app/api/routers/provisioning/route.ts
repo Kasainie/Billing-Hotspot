@@ -270,7 +270,9 @@ export async function PUT(request: NextRequest) {
   }
 
   const bridgeName = record.routerData?.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
-  const conflictingWanBridge = findWanBridgeConflict(bridgeName, record.routerData?.wanInterfaces || [])
+  const discoveredWanPorts = record.routerData?.wanInterfaces || []
+  const protectedWanPorts = [...new Set([...discoveredWanPorts, ...wanPorts])]
+  const conflictingWanBridge = findWanBridgeConflict(bridgeName, discoveredWanPorts)
   if (conflictingWanBridge) {
     return NextResponse.json({
       error: `The active WAN DHCP client is attached to ${conflictingWanBridge}, which is also selected as the subscriber bridge. Move the DHCP client to the physical uplink and select a separate subscriber bridge before preparing services.`,
@@ -278,7 +280,7 @@ export async function PUT(request: NextRequest) {
   }
 
   const detectedNetworks = record.routerData?.interfaceNetworks || []
-  const conflictingWanBridgeSubnet = findWanBridgeSubnetConflict(bridgeName, wanPorts, detectedNetworks)
+  const conflictingWanBridgeSubnet = findWanBridgeSubnetConflict(bridgeName, protectedWanPorts, detectedNetworks)
   if (conflictingWanBridgeSubnet) {
     return NextResponse.json({
       error: `The ${bridgeName} bridge still has an IP address in the WAN network ${conflictingWanBridgeSubnet.bridge.network}, also used by ${conflictingWanBridgeSubnet.wanInterface}. Reconcile that bridge address before configuring subscriber services; do not reuse the WAN gateway address.`,
@@ -286,7 +288,7 @@ export async function PUT(request: NextRequest) {
   }
 
   if (services.includes('Hotspot')) {
-    const conflictingWan = findWanSubnetConflict(hotspotSubnet || '', wanPorts, detectedNetworks)
+    const conflictingWan = findWanSubnetConflict(hotspotSubnet || '', protectedWanPorts, detectedNetworks)
     if (conflictingWan) {
       return NextResponse.json({
         error: `Hotspot subnet ${hotspotSubnet} conflicts with the detected WAN network on ${conflictingWan.interface}. Choose another subnet, such as 172.31.0.0/24, then prepare a new service configuration.`,
@@ -300,7 +302,7 @@ export async function PUT(request: NextRequest) {
       bridgeName,
       ports,
       managedPorts,
-      wanPorts,
+      wanPorts: protectedWanPorts,
       services,
       hotspotAntiSharing,
       hotspotSubnet,
