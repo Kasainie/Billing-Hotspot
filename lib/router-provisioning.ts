@@ -256,6 +256,10 @@ export function findWanSubnetConflict(
   ) || null
 }
 
+export function findWanBridgeConflict(bridgeName: string, wanInterfaces: string[]) {
+  return wanInterfaces.includes(bridgeName) ? bridgeName : null
+}
+
 export function buildSubscriberServiceScript({
   bridgeName,
   ports,

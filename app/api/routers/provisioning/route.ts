@@ -4,7 +4,7 @@ import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanSubnetConflict, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanSubnetConflict, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
 import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
@@ -268,6 +268,13 @@ export async function PUT(request: NextRequest) {
   }
   if (!record || record.status !== 'applied' || record.expiresAt.getTime() <= Date.now()) {
     return NextResponse.json({ error: 'Provisioning link is not ready for configuration or has expired.' }, { status: 409 })
+  }
+
+  const conflictingWanBridge = findWanBridgeConflict(bridgeName, record.routerData?.wanInterfaces || [])
+  if (conflictingWanBridge) {
+    return NextResponse.json({
+      error: `The active WAN DHCP client is attached to ${conflictingWanBridge}, which is also selected as the subscriber bridge. Move the DHCP client to the physical uplink and select a separate subscriber bridge before preparing services.`,
+    }, { status: 400 })
   }
 
   if (services.includes('Hotspot')) {

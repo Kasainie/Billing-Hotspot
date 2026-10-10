@@ -9,7 +9,7 @@ import { hotspotPortalTemplates } from './hotspot-templates.ts'
 import { normalizeKenyanPhone } from './daraja.ts'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
 
 test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -507,6 +507,11 @@ test('Hotspot service configuration rejects a subnet that overlaps a detected WA
   assert.deepEqual(findWanSubnetConflict('192.168.88.0/24', ['ether1'], wanNetworks), wanNetworks[0])
   assert.equal(findWanSubnetConflict('172.31.0.0/24', ['ether1'], wanNetworks), null)
   assert.equal(findWanSubnetConflict('192.168.88.0/24', ['ether2'], wanNetworks), null)
+})
+
+test('subscriber bridge cannot also host the active WAN DHCP client', () => {
+  assert.equal(findWanBridgeConflict('bridgeLocal', ['bridgeLocal']), 'bridgeLocal')
+  assert.equal(findWanBridgeConflict('bridgeLocal', ['ether1']), null)
 })
 
 test('localhost HTTP is accepted in development for local router provisioning', () => {
