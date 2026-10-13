@@ -2,12 +2,13 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { and, eq, isNull, lt, notInArray, or, sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { routerConnectorCommands, routerMetricSamples, routerMonitors, routerRemoteSessions } from '@/lib/db/schema'
+import { routerConnectorCommands, routerConnectorQueries, routerMetricSamples, routerMonitors, routerRemoteSessions } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
 import {
   matchesRouterConnectorToken,
   parseRouterConnectorCommandResults,
+  parseRouterConnectorResourceResults,
   parseRouterConnectorSessions,
   parseRouterConnectorTelemetry,
 } from '@/lib/router-connector'
@@ -66,9 +67,9 @@ async function report(request: NextRequest, routerId: string) {
   const contentLength = Number(request.headers.get('content-length') || 0)
   if (contentLength > 1_000_000) return NextResponse.json({ error: 'Router connector report is too large.' }, { status: 413 })
 
-  let input: { sessions?: unknown; commandResults?: unknown; telemetry?: unknown }
+  let input: { sessions?: unknown; commandResults?: unknown; resourceResults?: unknown; telemetry?: unknown }
   try {
-    input = await request.json() as { sessions?: unknown; commandResults?: unknown; telemetry?: unknown }
+    input = await request.json() as { sessions?: unknown; commandResults?: unknown; resourceResults?: unknown; telemetry?: unknown }
   } catch {
     return NextResponse.json({ error: 'Router connector report must be valid JSON.' }, { status: 400 })
   }
@@ -77,10 +78,11 @@ async function report(request: NextRequest, routerId: string) {
   }
   const sessions = parseRouterConnectorSessions(input.sessions)
   const commandResults = parseRouterConnectorCommandResults(input.commandResults ?? [])
+  const resourceResults = parseRouterConnectorResourceResults(input.resourceResults ?? [])
   const telemetry = input.telemetry === undefined || input.telemetry === null
     ? null
     : parseRouterConnectorTelemetry(input.telemetry)
-  if (!sessions || !commandResults || (input.telemetry !== undefined && input.telemetry !== null && !telemetry)) {
+  if (!sessions || !commandResults || !resourceResults || (input.telemetry !== undefined && input.telemetry !== null && !telemetry)) {
     return NextResponse.json({ error: 'Router connector report contains invalid sessions, commands, or telemetry.' }, { status: 400 })
   }
 
@@ -179,12 +181,37 @@ async function report(request: NextRequest, routerId: string) {
         ))
       }
 
+      for (const result of resourceResults) {
+        await tx.update(routerConnectorQueries).set({
+          status: result.succeeded ? 'succeeded' : 'failed',
+          result: result.data,
+          errorMessage: result.errorMessage,
+          completedAt: observedAt,
+          claimExpiresAt: null,
+          claimToken: null,
+        }).where(and(
+          eq(routerConnectorQueries.id, result.id),
+          eq(routerConnectorQueries.routerId, monitor.id),
+          eq(routerConnectorQueries.status, 'processing'),
+          eq(routerConnectorQueries.claimToken, result.claimToken),
+        ))
+      }
+
       await tx.delete(routerConnectorCommands).where(and(
         eq(routerConnectorCommands.routerId, monitor.id),
         lt(routerConnectorCommands.createdAt, new Date(observedAt.getTime() - 30 * 24 * 60 * 60 * 1000)),
         or(
           eq(routerConnectorCommands.status, 'succeeded'),
           eq(routerConnectorCommands.status, 'failed'),
+        ),
+      ))
+
+      await tx.delete(routerConnectorQueries).where(and(
+        eq(routerConnectorQueries.routerId, monitor.id),
+        lt(routerConnectorQueries.createdAt, new Date(observedAt.getTime() - 30 * 24 * 60 * 60 * 1000)),
+        or(
+          eq(routerConnectorQueries.status, 'succeeded'),
+          eq(routerConnectorQueries.status, 'failed'),
         ),
       ))
 
@@ -218,17 +245,49 @@ async function report(request: NextRequest, routerId: string) {
         }).where(eq(routerConnectorCommands.id, command.id))
         claimedCommands.push({ ...command, claimToken })
       }
-      return claimedCommands
+      const availableQueries = await tx.select({
+        id: routerConnectorQueries.id,
+        resource: routerConnectorQueries.resource,
+      }).from(routerConnectorQueries).where(and(
+        eq(routerConnectorQueries.routerId, monitor.id),
+        or(
+          eq(routerConnectorQueries.status, 'queued'),
+          and(
+            eq(routerConnectorQueries.status, 'processing'),
+            or(
+              isNull(routerConnectorQueries.claimExpiresAt),
+              lt(routerConnectorQueries.claimExpiresAt, observedAt),
+            ),
+          ),
+        ),
+      )).orderBy(routerConnectorQueries.createdAt).limit(4).for('update', { skipLocked: true })
+
+      const claimedQueries: Array<(typeof availableQueries)[number] & { claimToken: string }> = []
+      for (const query of availableQueries) {
+        const claimToken = randomUUID()
+        await tx.update(routerConnectorQueries).set({
+          status: 'processing',
+          claimExpiresAt,
+          claimToken,
+        }).where(eq(routerConnectorQueries.id, query.id))
+        claimedQueries.push({ ...query, claimToken })
+      }
+      return { commands: claimedCommands, queries: claimedQueries }
     })
 
     if (!commands) return NextResponse.json({ error: 'Router connector is disabled or not registered.' }, { status: 401 })
     return NextResponse.json({
-      commands: commands.map((command) => ({
+      commands: commands.commands.map((command) => ({
         id: command.id,
         claimToken: command.claimToken,
         sessionType: command.sessionType,
         routerSessionId: command.routerSessionId,
         username: command.username,
+      })),
+      queries: commands.queries.map((query) => ({
+        id: query.id,
+        claimToken: query.claimToken,
+        resource: query.resource,
       })),
     }, { headers: { 'cache-control': 'no-store' } })
   } catch (error) {

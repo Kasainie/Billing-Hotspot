@@ -6,6 +6,7 @@ import {
   isRouterSessionId,
   matchesRouterConnectorToken,
   parseRouterConnectorCommandResults,
+  parseRouterConnectorResourceResults,
   parseRouterConnectorSessions,
   parseRouterConnectorTelemetry,
 } from './router-connector.ts'
@@ -58,6 +59,26 @@ test('connector command results require a UUID and a boolean outcome', () => {
   assert.equal(parseRouterConnectorCommandResults([{ id, claimToken, succeeded: 'yes' }]), null)
   assert.equal(parseRouterConnectorCommandResults([{ id, succeeded: true }]), null)
   assert.equal(parseRouterConnectorCommandResults([{ id: 'invalid', succeeded: false }]), null)
+})
+
+test('connector resource results accept bounded router records and reject unsafe payloads', () => {
+  const id = 'a5746f73-7b79-4c0e-a52c-9c057e3074f8'
+  const claimToken = 'b5746f73-7b79-4c0e-a52c-9c057e3074f8'
+  assert.deepEqual(parseRouterConnectorResourceResults([{
+    id,
+    claimToken,
+    succeeded: true,
+    data: [{ '.id': '*1', name: 'nightly', disabled: 'false', 'run-count': '2' }],
+  }]), [{
+    id,
+    claimToken,
+    succeeded: true,
+    data: [{ '.id': '*1', name: 'nightly', disabled: 'false', 'run-count': '2' }],
+    errorMessage: null,
+  }])
+  assert.equal(parseRouterConnectorResourceResults([{ id, claimToken, succeeded: true, data: 'logs' }]), null)
+  assert.equal(parseRouterConnectorResourceResults([{ id, claimToken, succeeded: false, data: [] }]), null)
+  assert.equal(parseRouterConnectorResourceResults([{ id, claimToken, succeeded: true, data: [{ message: 'x'.repeat(4001) }] }]), null)
 })
 
 test('connector telemetry accepts valid router resource samples and rejects invalid counters', () => {

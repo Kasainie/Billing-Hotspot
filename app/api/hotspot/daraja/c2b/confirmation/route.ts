@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { mobileMoneyTransactions } from '@/lib/db/schema'
+import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 import { resolvePublicTenantId } from '@/lib/db/tenant'
 import { authorizeC2bCallback, parseC2bTransaction } from '@/lib/mobile-money-callback'
 import { reconcilePppoeMobileMoney } from '@/lib/pppoe-reconciliation'
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
     const authorization = await authorizeC2bCallback(request, tenantId, payload)
     if (!authorization.ok) return NextResponse.json({ ResultCode: '1', ResultDesc: authorization.error }, { status: authorization.status })
     const transaction = parseC2bTransaction(payload)
-    await db.transaction(async (tx) => {
+    const notification = await db.transaction(async (tx) => {
       const [inserted] = await tx.insert(mobileMoneyTransactions).values({
         tenantId,
         transactionId: transaction.transactionId,
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
         target: [mobileMoneyTransactions.tenantId, mobileMoneyTransactions.transactionId],
       }).returning({ id: mobileMoneyTransactions.id })
 
-      if (!inserted) return
+      if (!inserted) return null
 
       const accountNumber = /^\d{1,10}$/.test(transaction.billReference) ? Number(transaction.billReference) : Number.NaN
       const result = Number.isSafeInteger(accountNumber)
@@ -57,7 +58,16 @@ export async function POST(request: NextRequest) {
         eq(mobileMoneyTransactions.id, inserted.id),
         eq(mobileMoneyTransactions.tenantId, tenantId),
       ))
+      return result.matched ? result : null
     })
+    if (notification?.matched && notification.phone && notification.expiresAt) {
+      await enqueueTenantSms(
+        tenantId,
+        `paybill-payment:${notification.transactionId}`,
+        notification.phone,
+        `Hello ${notification.name}, KES ${notification.amount} received for your ${notification.plan} plan. Your account ${notification.username} is active until ${notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}. M-Pesa receipt: ${notification.transactionId}.`,
+      )
+    }
     return NextResponse.json({ ResultCode: '0', ResultDesc: 'Payment received.' })
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('Invalid ')) {

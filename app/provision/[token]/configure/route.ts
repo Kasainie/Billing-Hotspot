@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto'
 import { and, eq, gt, isNotNull } from 'drizzle-orm'
 import {
   buildSubscriberServiceScript,
-  DEFAULT_ROUTER_BRIDGE_NAME,
   findWanBridgeConflict,
   findWanBridgeSubnetConflict,
   findWanSubnetConflict,
+  resolveRouterSubscriberBridgeName,
 } from '@/lib/router-provisioning'
 import { db } from '@/lib/db'
 import { routerProvisioningTokens } from '@/lib/db/schema'
@@ -39,14 +39,21 @@ export async function GET(_request: Request, context: RouteContext<'/provision/[
       return new Response('Service choices are missing. Prepare a new router service configuration in LKTECH.', { status: 409 })
     }
 
-    const bridgeName = routerData.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
+    const wanInterfaces = routerData.wanInterfaces || []
+    const bridgeName = resolveRouterSubscriberBridgeName(routerData.bridgeName, routerData.bridges, wanInterfaces)
     const validNames = (names: unknown): names is string[] => Array.isArray(names) &&
       names.length > 0 &&
       names.length <= 64 &&
       names.every((name) => typeof name === 'string' && /^[a-zA-Z0-9_.-]{1,48}$/.test(name)) &&
       new Set(names).size === names.length
     const { ports, managedPorts, wanPorts, services } = configuration
-    if (!validNames(ports) || !validNames(managedPorts) || !Array.isArray(wanPorts) ||
+    const movablePorts = configuration.movablePorts ?? []
+    if (!validNames(ports) || !validNames(managedPorts) || !Array.isArray(movablePorts) ||
+        movablePorts.length > 64 ||
+        !movablePorts.every((name) => typeof name === 'string' && /^[a-zA-Z0-9_.-]{1,48}$/.test(name)) ||
+        new Set(movablePorts).size !== movablePorts.length ||
+        movablePorts.some((name) => !ports.includes(name)) ||
+        !Array.isArray(wanPorts) ||
         wanPorts.length > 64 || !wanPorts.every((name) => typeof name === 'string' && /^[a-zA-Z0-9_.-]{1,48}$/.test(name)) ||
         new Set(wanPorts).size !== wanPorts.length ||
         !Array.isArray(services) || !services.length || services.length > 2 ||
@@ -56,8 +63,14 @@ export async function GET(_request: Request, context: RouteContext<'/provision/[
       return new Response('Saved service choices are invalid. Prepare a new router service configuration in LKTECH.', { status: 409 })
     }
 
-    const wanInterfaces = routerData.wanInterfaces || []
     const protectedWanPorts = [...new Set([...wanInterfaces, ...wanPorts])]
+    const invalidMove = movablePorts.find((port) =>
+      protectedWanPorts.includes(port) ||
+      !routerData.bridgePorts.some((membership) => membership.interface === port && membership.bridge !== bridgeName),
+    )
+    if (invalidMove) {
+      return new Response(`Refusing to move ${invalidMove}; refresh router discovery and verify it is not the WAN uplink.`, { status: 409 })
+    }
     if (findWanBridgeConflict(bridgeName, wanInterfaces)) {
       return new Response(`Active WAN DHCP client is attached to ${bridgeName}, the selected subscriber bridge. Move WAN DHCP to its physical uplink and prepare services again.`, { status: 409 })
     }
@@ -79,6 +92,7 @@ export async function GET(_request: Request, context: RouteContext<'/provision/[
         bridgeName,
         ports,
         managedPorts,
+        movablePorts,
         wanPorts: protectedWanPorts,
         services,
         hotspotAntiSharing: configuration.hotspotAntiSharing,

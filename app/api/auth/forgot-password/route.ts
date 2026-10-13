@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { passwordResetTokens, tenantUsers } from '@/lib/db/schema'
 import { hashSessionToken } from '@/lib/db/tenant'
+import { escapeEmailHtml, sendEmail } from '@/lib/email'
 
 const resetTokenDurationMs = 30 * 60 * 1000
 const requestCooldownMs = 60 * 1000
@@ -32,16 +33,6 @@ function getMailConfiguration(requestUrl: string) {
   }
 
   return { apiKey, from, origin: parsedUrl.origin }
-}
-
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  })[character]!)
 }
 
 export async function POST(request: NextRequest) {
@@ -94,25 +85,15 @@ export async function POST(request: NextRequest) {
 
     const resetUrl = new URL('/reset-password', mail.origin)
     resetUrl.searchParams.set('token', token)
-    const name = escapeHtml(user.name)
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${mail.apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: mail.from,
-        to: [email],
-        subject: 'Reset your LKTECH password',
-        html: `<p>Hello ${name},</p><p>We received a request to reset your LKTECH password.</p><p><a href="${resetUrl.toString()}">Reset your password</a></p><p>This link expires in 30 minutes. If you did not request this, you can ignore this email.</p>`,
-        text: `Hello ${user.name},\n\nWe received a request to reset your LKTECH password.\n\nReset your password: ${resetUrl.toString()}\n\nThis link expires in 30 minutes. If you did not request this, you can ignore this email.`,
-      }),
-      signal: AbortSignal.timeout(10_000),
+    const name = escapeEmailHtml(user.name)
+    const sent = await sendEmail(mail, {
+      to: [email],
+      subject: 'Reset your LKTECH password',
+      html: `<p>Hello ${name},</p><p>We received a request to reset your LKTECH password.</p><p><a href="${resetUrl.toString()}">Reset your password</a></p><p>This link expires in 30 minutes. If you did not request this, you can ignore this email.</p>`,
+      text: `Hello ${user.name},\n\nWe received a request to reset your LKTECH password.\n\nReset your password: ${resetUrl.toString()}\n\nThis link expires in 30 minutes. If you did not request this, you can ignore this email.`,
     })
 
-    if (!response.ok) {
-      console.error('Resend rejected password reset email', { status: response.status })
+    if (!sent) {
       await db.delete(passwordResetTokens).where(eq(passwordResetTokens.tokenHash, tokenHash))
       return NextResponse.json({ error: 'Unable to send a password reset email right now. Please try again later.' }, { status: 503 })
     }

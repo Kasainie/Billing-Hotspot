@@ -4,20 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#082b47">
-  <title>LKTech connected</title>
+  <title>{{PORTAL_COMPANY_NAME}} connected</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="hotspot-home">
   <main class="portal-shell">
     <div class="portal-stack">
       <header class="portal-header">
-        <div class="portal-brand" aria-label="LKTech"><span class="portal-mark" aria-hidden="true">L</span><span>LKTECH</span></div>
+        <div class="portal-brand" aria-label="{{PORTAL_COMPANY_NAME}}"><span class="portal-mark" aria-hidden="true">L</span><span>{{PORTAL_COMPANY_NAME}}</span></div>
         <span class="network-status"><span class="online-dot"></span> HOTSPOT LOGIN</span>
       </header>
       <section class="welcome-panel">
         <p class="portal-kicker"><span class="online-dot"></span> CONNECTION ACTIVE</p>
         <h1>You are connected.</h1>
-        <p>Your LKTech Wi-Fi is ready.</p>
+        <p>Your {{PORTAL_COMPANY_NAME}} Wi-Fi is ready.</p>
       </section>
       <section class="portal-state-panel">
         <a class="portal-button" href="$(link-redirect)">Continue browsing <span aria-hidden="true">&#8594;</span></a>
@@ -34,7 +34,6 @@
     if (!navigator.sendBeacon || !navigator.sendBeacon(bindUrl, new Blob([bindBody], { type: 'text/plain' }))) {
       fetch(bindUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: bindBody, keepalive: true }).catch(function () {});
     }
-    window.setTimeout(function () { window.location.replace('$(link-redirect)'); }, 150);
   </script>
 </body>
 </html>

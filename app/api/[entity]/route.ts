@@ -3,6 +3,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { customers, packages, payments, pppoeAccounts, radcheck, radreply, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 import { normalizeKenyanPhone } from '@/lib/daraja'
 import { toHotspotRadiusReplies } from '@/lib/hotspot-products'
 
@@ -79,8 +80,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
   }
 
   try {
+    const limitParam = request.nextUrl.searchParams.get('limit')
+    const offsetParam = request.nextUrl.searchParams.get('offset')
+    const pageLimit = limitParam === null ? 200 : Number(limitParam)
+    const pageOffset = offsetParam === null ? 0 : Number(offsetParam)
+    if (!Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 200 ||
+        !Number.isInteger(pageOffset) || pageOffset < 0 || pageOffset > 1_000_000) {
+      return NextResponse.json({ error: 'Pagination must use a limit from 1 to 200 and a non-negative offset.' }, { status: 400 })
+    }
     const orderColumn = entity === 'payments' ? payments.paidAt : entity === 'packages' ? packages.createdAt : entity === 'customers' ? customers.createdAt : sites.createdAt
-    const rows = await db.select().from(table).where(eq(table.tenantId, tenantId)).orderBy(desc(orderColumn as never)).limit(200)
+    const rows = await db.select().from(table).where(eq(table.tenantId, tenantId)).orderBy(desc(orderColumn as never)).limit(pageLimit).offset(pageOffset)
     return NextResponse.json(rows)
   } catch (error) {
     console.error(`Failed to load tenant ${entity}`, error)
@@ -243,6 +252,27 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
       burstTimeSeconds: input.burstTimeSeconds ? Number(input.burstTimeSeconds) : null,
       nasRestrictions: input.nasRestrictions as string[],
     } : values
+    if (entity === 'payments') {
+      const [payment] = await db.insert(payments).values({ ...insertValues, tenantId } as never).returning()
+      if (payment.status === 'paid' && payment.customerId) {
+        const [customer] = await db.select({
+          name: customers.name,
+          phone: customers.phone,
+        }).from(customers).where(and(
+          eq(customers.id, payment.customerId),
+          eq(customers.tenantId, tenantId),
+        )).limit(1)
+        if (customer?.phone) {
+          await enqueueTenantSms(
+            tenantId,
+            `manual-payment:${payment.id}`,
+            customer.phone,
+            `Hello ${customer.name}, a payment of KES ${payment.amount} was recorded on your account${payment.reference ? ` (receipt ${payment.reference})` : ''}. Thank you.`,
+          )
+        }
+      }
+      return NextResponse.json(payment, { status: 201 })
+    }
     const [row] = await db.insert(table).values({ ...insertValues, tenantId } as never).returning()
     return NextResponse.json(row, { status: 201 })
   } catch { return NextResponse.json({ error: 'Unable to create record' }, { status: 500 }) }

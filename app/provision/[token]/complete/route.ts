@@ -130,7 +130,7 @@ export async function POST(request: NextRequest, context: RouteContext<'/provisi
     bridgePorts,
     wanInterfaces,
     interfaceNetworks,
-    bridgeName: selectRouterBridgeName(bridgeNames),
+    bridgeName: selectRouterBridgeName(bridgeNames, wanInterfaces),
   }
 
   try {

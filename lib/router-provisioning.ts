@@ -214,8 +214,13 @@ export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https:/
     const fetchAssets = (directory: string) => hotspotAssetNames.map((assetName) => {
       const assetUrl = assetName === 'login.html'
         ? new URL('/api/hotspot/portal-login', assetBaseUrl)
+        : ['status.html', 'logout.html', 'error.html', 'alogin.html'].includes(assetName)
+          ? new URL(`/hotspot/${assetName}`, assetBaseUrl)
         : new URL(assetName, assetBase)
       if (assetName === 'login.html' && validTenantSlug) assetUrl.searchParams.set('tenant', validTenantSlug)
+      if (['status.html', 'logout.html', 'error.html', 'alogin.html'].includes(assetName) && validTenantSlug) {
+        assetUrl.searchParams.set('tenant', validTenantSlug)
+      }
       const destination = `${directory}/${assetName}`
       return [
         replaceRouterOsFileCommand(destination),
@@ -237,8 +242,30 @@ export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https:/
   return hotspotBundleScripts[normalizedName] ?? null
 }
 
-export function selectRouterBridgeName(bridgeNames: string[]) {
-  return bridgeNames.find((name) => ['lktech', 'lktech-bridge'].includes(name.trim().toLowerCase())) || bridgeNames[0] || null
+export function selectRouterBridgeName(bridgeNames: string[], wanInterfaces: string[] = []) {
+  if (!bridgeNames.length) return null
+
+  const wanSet = new Set(wanInterfaces)
+  const subscriberBridges = bridgeNames.filter((name) => !wanSet.has(name))
+  const preferredBridge = subscriberBridges.find((name) => ['lktech', 'lktech-bridge'].includes(name.trim().toLowerCase()))
+  if (preferredBridge) return preferredBridge
+  if (subscriberBridges.length) return subscriberBridges[0]
+
+  const baseName = DEFAULT_ROUTER_BRIDGE_NAME
+  if (!bridgeNames.includes(baseName)) return baseName
+  let suffix = 1
+  while (bridgeNames.includes(`${baseName}-subscriber${suffix}`)) suffix += 1
+  return `${baseName}-subscriber${suffix}`
+}
+
+export function resolveRouterSubscriberBridgeName(
+  bridgeName: string | null | undefined,
+  bridgeNames: string[] = [],
+  wanInterfaces: string[] = [],
+) {
+  const candidates = [...new Set([...bridgeNames, ...(bridgeName ? [bridgeName] : [])])]
+  if (candidates.length === 0) candidates.push(DEFAULT_ROUTER_BRIDGE_NAME)
+  return selectRouterBridgeName(candidates, wanInterfaces) || DEFAULT_ROUTER_BRIDGE_NAME
 }
 
 export function parseServiceSubnet(value: string) {
@@ -295,6 +322,7 @@ export function buildSubscriberServiceScript({
   bridgeName,
   ports,
   managedPorts = ports,
+  movablePorts = [],
   wanPorts = [],
   services,
   hotspotAntiSharing = false,
@@ -304,6 +332,7 @@ export function buildSubscriberServiceScript({
   bridgeName: string
   ports: string[]
   managedPorts?: string[]
+  movablePorts?: string[]
   wanPorts?: string[]
   services: string[]
   hotspotAntiSharing?: boolean
@@ -311,10 +340,13 @@ export function buildSubscriberServiceScript({
   pppoeSubnet?: string
 }) {
   const selectedPorts = new Set(ports)
+  const movablePortSet = new Set(movablePorts)
   const protectedWanPorts = new Set(wanPorts)
   if (!/^[a-zA-Z0-9_.-]{1,48}$/.test(bridgeName) ||
-      [...managedPorts, ...ports, ...wanPorts].some((port) => !/^[a-zA-Z0-9_.-]{1,48}$/.test(port)) ||
+      [...managedPorts, ...ports, ...movablePorts, ...wanPorts].some((port) => !/^[a-zA-Z0-9_.-]{1,48}$/.test(port)) ||
       selectedPorts.size !== ports.length ||
+      movablePortSet.size !== movablePorts.length ||
+      movablePorts.some((port) => !selectedPorts.has(port) || protectedWanPorts.has(port)) ||
       managedPorts.some((port) => protectedWanPorts.has(port)) ||
       ports.some((port) => !managedPorts.includes(port) || protectedWanPorts.has(port))) {
     throw new Error('Bridge or interface name is invalid.')
@@ -371,8 +403,17 @@ export function buildSubscriberServiceScript({
   commands.push(`:if ([:len [/interface bridge find where name="${bridgeName}"]] = 0) do={/interface bridge add name="${bridgeName}"}`)
   for (const port of managedPorts) {
     if (selectedPorts.has(port)) {
+      if (movablePortSet.has(port)) {
+        commands.push(
+          `:if ([:len [/ip dhcp-client find where interface="${port}" and status="bound"]] > 0) do={:error "Refusing to move active DHCP uplink ${port}"}`,
+          `:if ([:len [/interface bridge port find where interface="${port}" and bridge!="${bridgeName}"]] > 0) do={/interface bridge port remove [find where interface="${port}" and bridge!="${bridgeName}"]}`,
+        )
+      } else {
+        commands.push(
+          `:if ([:len [/interface bridge port find where interface="${port}" and bridge!="${bridgeName}"]] > 0) do={:error "Refusing to move ${port}; it already belongs to another bridge"}`,
+        )
+      }
       commands.push(
-        `:if ([:len [/interface bridge port find where interface="${port}" and bridge!="${bridgeName}"]] > 0) do={:error "Refusing to move ${port}; it already belongs to another bridge"}`,
         `:if ([:len [/ip dhcp-client find where interface="${port}" and status="bound"]] > 0) do={:error "Refusing to bridge active DHCP uplink ${port}"}`,
         `:if ([:len [/interface bridge port find where interface="${port}"]] = 0) do={/interface bridge port add bridge="${bridgeName}" interface="${port}"}`,
       )

@@ -12,6 +12,10 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
   const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false)
   const [password, setPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [verificationPending, setVerificationPending] = useState(false)
+  const [verificationEmail, setVerificationEmail] = useState('')
+  const [verificationCode, setVerificationCode] = useState('')
+  const [notice, setNotice] = useState('')
   const isSignup = mode === 'signup'
 
   useEffect(() => {
@@ -51,12 +55,72 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const result = await response.json() as { error?: string }
-      if (!response.ok) {
-        setError(result.error || 'Unable to continue. Please try again.')
+      const result = await response.json() as {
+        error?: string
+        verificationRequired?: boolean
+        emailVerificationRequired?: boolean
+        user?: { email?: string }
+        diagnostic?: string
+      }
+      if (result.verificationRequired || result.emailVerificationRequired) {
+        setVerificationEmail(result.user?.email || String(payload.email || ''))
+        setVerificationPending(true)
+        setVerificationCode('')
+        setError(result.error || '')
+        setNotice(response.ok ? 'Check your inbox for a six-digit verification code.' : '')
         return
       }
-      window.location.assign(isSignup ? '/get-started' : '/')
+      if (!response.ok) {
+        setError([result.error || 'Unable to continue. Please try again.', result.diagnostic].filter(Boolean).join(' '))
+        return
+      }
+      window.location.assign('/')
+    } catch {
+      setError('Unable to reach the server. Check your connection and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function verifyEmail(formData: FormData) {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: verificationEmail, code: formData.get('code') }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) {
+        setError(result.error || 'Unable to verify your email. Please try again.')
+        return
+      }
+      window.location.assign('/get-started')
+    } catch {
+      setError('Unable to reach the server. Check your connection and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function resendVerificationCode() {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: verificationEmail, action: 'resend' }),
+      })
+      const result = await response.json() as { error?: string; message?: string }
+      if (!response.ok) {
+        setError(result.error || 'Unable to send another code. Please try again.')
+        return
+      }
+      setNotice(result.message || 'If your account is waiting for verification, a new code will be sent shortly.')
     } catch {
       setError('Unable to reach the server. Check your connection and try again.')
     } finally {
@@ -69,9 +133,37 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
       <section className="auth-card">
         <div className="auth-mark" aria-hidden="true">LK</div>
         <p className="auth-kicker">LKTECH · ISP OPERATIONS</p>
-        <h1>{isSignup ? 'Create your account' : 'Welcome back'}</h1>
-        <p className="auth-description">{isSignup ? 'Create your account first. We’ll help you name your ISP, connect payments, and set up your router next.' : 'Sign in to manage your provider workspace.'}</p>
-        <form action={submit} className="auth-form">
+        <h1>{verificationPending ? 'Verify your email' : isSignup ? 'Create your account' : 'Welcome back'}</h1>
+        <p className="auth-description">{verificationPending
+          ? <>We sent a six-digit code to <strong>{verificationEmail}</strong>. Enter it below to finish creating your account.</>
+          : isSignup
+            ? 'Create your owner account, then follow guided setup for your ISP workspace, first site, payments, and router.'
+            : 'Sign in to manage your provider workspace.'}</p>
+        {verificationPending ? <form action={verifyEmail} className="auth-form">
+          <label htmlFor="auth-verification-code">Email verification code</label>
+          <input
+            id="auth-verification-code"
+            className="auth-code-input"
+            name="code"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6}"
+            minLength={6}
+            maxLength={6}
+            value={verificationCode}
+            onChange={(event) => { setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6)); setError(''); setNotice('') }}
+            placeholder="000000"
+            aria-describedby="auth-verification-help"
+            required
+          />
+          <span className="auth-hint" id="auth-verification-help">The code expires after 10 minutes. You have five attempts.</span>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+          {notice && <p className="auth-success" role="status">{notice}</p>}
+          <button type="submit" className="auth-submit" disabled={busy || verificationCode.length !== 6}>{busy ? 'Please wait…' : 'Verify email'}</button>
+          <button type="button" className="auth-text-button" onClick={() => void resendVerificationCode()} disabled={busy}>Resend code</button>
+          <button type="button" className="auth-text-button" onClick={() => { setVerificationPending(false); setError(''); setNotice('') }} disabled={busy}>Back to {isSignup ? 'sign up' : 'sign in'}</button>
+        </form> : <form action={submit} className="auth-form">
           {isSignup && <>
             <label htmlFor="auth-name">Your name</label>
             <input id="auth-name" name="name" autoComplete="name" minLength={2} maxLength={120} required />
@@ -96,9 +188,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
           </>}
           {error && <p className="auth-error" role="alert">{error}</p>}
           <button type="submit" className="auth-submit" disabled={busy}>{busy ? 'Please wait…' : isSignup ? 'Create account' : 'Sign in'}</button>
-        </form>
-        {!isSignup && <p className="auth-switch"><a href="/forgot-password">Forgot your password?</a></p>}
-        <p className="auth-switch">{isSignup ? 'Already have an account?' : 'New to LKTECH?'} <a href={isSignup ? '/login' : '/signup'}>{isSignup ? 'Sign in' : 'Create an account'}</a></p>
+        </form>}
+        {!verificationPending && !isSignup && <p className="auth-switch"><a href="/forgot-password">Forgot your password?</a></p>}
+        {!verificationPending && <p className="auth-switch">{isSignup ? 'Already have an account?' : 'New to LKTECH?'} <a href={isSignup ? '/login' : '/signup'}>{isSignup ? 'Sign in' : 'Create an account'}</a></p>}
       </section>
     </main>
   )

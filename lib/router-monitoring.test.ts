@@ -17,19 +17,23 @@ test('the provisioning builder can include the optional legacy monitoring script
     },
   })
 
-  assert.match(script, /name="lktech-monitor" interval=1m/)
+  assert.match(script, /name="lktech-monitor" interval=30s start-time=startup/)
+  assert.match(script, /on-event=":delay 10s; \/system script run lktech-monitor"/)
   assert.match(script, /\/api\/routers\/telemetry/)
   assert.ok(script.indexOf('name="lktech-monitor"') > script.indexOf('/import hotspot.rsc'))
 })
 
-test('router monitor setup installs an authenticated RouterOS heartbeat every minute', () => {
+test('router monitor setup installs a reboot-safe authenticated RouterOS heartbeat', () => {
   const script = buildRouterMonitorScript({
     routerId: 'a5746f73-7b79-4c0e-a52c-9c057e3074f8',
     monitorToken: 'a'.repeat(43),
     telemetryUrl: 'https://billing.example.com/api/routers/telemetry',
   })
 
-  assert.match(script, /interval=1m/)
+  assert.match(script, /interval=30s start-time=startup/)
+  assert.match(script, /:delay 10s; \/system script run lktech-monitor/)
+  assert.match(script, /lktech-monitor"\]\] > 0\) do=\{\/system scheduler remove/)
+  assert.match(script, /lktech-monitor"\]\] > 0\) do=\{\/system script remove/)
   assert.match(script, /\/system script run lktech-monitor/)
   assert.match(script, /x-router-monitor-id/)
   assert.match(script, /x-router-monitor-token/)

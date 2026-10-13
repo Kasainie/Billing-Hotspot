@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { customers, mobileMoneyTransactions, payments, pppoeAccounts } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 import { reconcilePppoeMobileMoney } from '@/lib/pppoe-reconciliation'
 
 export async function GET(request: NextRequest) {
@@ -97,10 +98,28 @@ export async function PATCH(request: NextRequest) {
         customerId: reconciliation.customerId,
         matchReason: null,
       }).where(eq(mobileMoneyTransactions.id, transaction.id))
-      return { status: 200 as const, customerId: reconciliation.customerId, expiresAt: reconciliation.expiresAt?.toISOString() }
+      return {
+        status: 200 as const,
+        customerId: reconciliation.customerId,
+        expiresAt: reconciliation.expiresAt?.toISOString(),
+        name: reconciliation.name,
+        phone: reconciliation.phone,
+        username: reconciliation.username,
+        plan: reconciliation.plan,
+        amount: reconciliation.amount,
+        transactionId: reconciliation.transactionId,
+      }
     })
 
     if (result.status !== 200) return NextResponse.json({ error: result.error }, { status: result.status })
+    if (result.expiresAt && result.name && result.phone && result.username && result.plan && result.transactionId) {
+      await enqueueTenantSms(
+        session.tenantId,
+        `paybill-payment:${result.transactionId}`,
+        result.phone,
+        `Hello ${result.name}, KES ${result.amount} received for your ${result.plan} plan. Your account ${result.username} is active until ${new Date(result.expiresAt).toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}. M-Pesa receipt: ${result.transactionId}.`,
+      )
+    }
     return NextResponse.json({ customerId: result.customerId, expiresAt: result.expiresAt })
   } catch (error) {
     console.error('Failed to reconcile mobile-money transaction', error)

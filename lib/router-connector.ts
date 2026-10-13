@@ -21,6 +21,17 @@ export type RouterConnectorCommandResult = {
   errorMessage: string | null
 }
 
+export const routerResourceNames = ['logs', 'backups', 'scheduler', 'scripts'] as const
+export type RouterResourceName = typeof routerResourceNames[number]
+
+export type RouterConnectorResourceResult = {
+  id: string
+  claimToken: string
+  succeeded: boolean
+  data: Record<string, string | number | boolean | null>[] | null
+  errorMessage: string | null
+}
+
 export type RouterConnectorTelemetry = {
   sampleId: string
   cpuLoad: number
@@ -177,6 +188,52 @@ export function parseRouterConnectorCommandResults(value: unknown): RouterConnec
     if (result.errorMessage !== null && result.errorMessage !== undefined && !errorMessage) return null
     seenIds.add(result.id)
     results.push({ id: result.id, claimToken: result.claimToken, succeeded: result.succeeded, errorMessage })
+  }
+  return results
+}
+
+export function parseRouterConnectorResourceResults(value: unknown): RouterConnectorResourceResult[] | null {
+  if (!Array.isArray(value) || value.length > 20) return null
+  const results: RouterConnectorResourceResult[] = []
+  const seenIds = new Set<string>()
+
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+    const result = item as Record<string, unknown>
+    if (typeof result.id !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(result.id) ||
+        typeof result.claimToken !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(result.claimToken) ||
+        typeof result.succeeded !== 'boolean' ||
+        seenIds.has(result.id)) return null
+    const errorMessage = result.errorMessage === null || result.errorMessage === undefined
+      ? null
+      : optionalText(result.errorMessage, 240)
+    if (result.errorMessage !== null && result.errorMessage !== undefined && !errorMessage) return null
+
+    let data: RouterConnectorResourceResult['data'] = null
+    if (result.succeeded) {
+      if (!Array.isArray(result.data) || result.data.length > 100) return null
+      data = []
+      for (const entry of result.data) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+        const fields = Object.entries(entry)
+        if (fields.length > 12) return null
+        const parsed: Record<string, string | number | boolean | null> = {}
+        for (const [key, field] of fields) {
+          if ((key !== '.id' && !/^[a-z][a-z0-9-]{0,40}$/i.test(key)) ||
+              !(field === null || typeof field === 'boolean' ||
+                (typeof field === 'string' && field.length <= 4000) ||
+                (typeof field === 'number' && Number.isSafeInteger(field) && field >= 0))) return null
+          parsed[key] = field
+        }
+        data.push(parsed)
+      }
+    } else if (result.data !== undefined && result.data !== null) {
+      return null
+    }
+    seenIds.add(result.id)
+    results.push({ id: result.id, claimToken: result.claimToken, succeeded: result.succeeded, data, errorMessage })
   }
   return results
 }

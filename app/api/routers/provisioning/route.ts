@@ -4,7 +4,7 @@ import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, DEFAULT_ROUTER_BRIDGE_NAME, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, isValidProvisioningBaseUrl, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
 import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
@@ -232,6 +232,7 @@ export async function PUT(request: NextRequest) {
     : null
   const ports = readNames(configuration.ports)
   const managedPorts = readNames(configuration.managedPorts)
+  const movablePorts = readNames(configuration.movablePorts ?? [])
   const wanPorts = readNames(configuration.wanPorts)
   const services = Array.isArray(configuration.services) && configuration.services.length <= 2 && configuration.services.every((item) => item === 'Hotspot' || item === 'PPPoE')
     ? configuration.services as string[]
@@ -239,9 +240,10 @@ export async function PUT(request: NextRequest) {
   const hotspotSubnet = typeof configuration.hotspotSubnet === 'string' ? configuration.hotspotSubnet : undefined
   const pppoeSubnet = typeof configuration.pppoeSubnet === 'string' ? configuration.pppoeSubnet : undefined
   const hotspotAntiSharing = configuration.hotspotAntiSharing === true
-  if (!ports?.length || !managedPorts || !wanPorts ||
+  if (!ports?.length || !managedPorts || !movablePorts || !wanPorts ||
       !services?.length || new Set(services).size !== services.length ||
       new Set(ports).size !== ports.length || new Set(managedPorts).size !== managedPorts.length ||
+      new Set(movablePorts).size !== movablePorts.length || movablePorts.some((port) => !ports.includes(port)) ||
       new Set(wanPorts).size !== wanPorts.length ||
       (configuration.hotspotSubnet !== undefined && typeof configuration.hotspotSubnet !== 'string') ||
       (configuration.pppoeSubnet !== undefined && typeof configuration.pppoeSubnet !== 'string') ||
@@ -269,9 +271,23 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: 'Provisioning link is not ready for configuration or has expired.' }, { status: 409 })
   }
 
-  const bridgeName = record.routerData?.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
   const discoveredWanPorts = record.routerData?.wanInterfaces || []
+  const bridgeName = resolveRouterSubscriberBridgeName(
+    record.routerData?.bridgeName,
+    record.routerData?.bridges,
+    discoveredWanPorts,
+  )
   const protectedWanPorts = [...new Set([...discoveredWanPorts, ...wanPorts])]
+  const inventoryBridgePorts = record.routerData?.bridgePorts || []
+  const invalidMove = movablePorts.find((port) =>
+    protectedWanPorts.includes(port) ||
+    !inventoryBridgePorts.some((membership) => membership.interface === port && membership.bridge !== bridgeName),
+  )
+  if (invalidMove) {
+    return NextResponse.json({
+      error: `${invalidMove} cannot be moved to the subscriber bridge. Refresh router discovery and verify that the interface is not the WAN uplink.`,
+    }, { status: 400 })
+  }
   const conflictingWanBridge = findWanBridgeConflict(bridgeName, discoveredWanPorts)
   if (conflictingWanBridge) {
     return NextResponse.json({
@@ -302,6 +318,7 @@ export async function PUT(request: NextRequest) {
       bridgeName,
       ports,
       managedPorts,
+      movablePorts,
       wanPorts: protectedWanPorts,
       services,
       hotspotAntiSharing,
@@ -335,6 +352,7 @@ export async function PUT(request: NextRequest) {
             bridgeName,
             ports,
             managedPorts,
+            movablePorts,
             wanPorts,
             services,
             hotspotSubnet: services.includes('Hotspot') ? hotspotSubnet || null : null,

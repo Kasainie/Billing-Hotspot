@@ -24,6 +24,12 @@ export async function POST(request: NextRequest) {
     if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
       return NextResponse.json({ error: 'Email or password is incorrect.' }, { status: 401 })
     }
+    if (!user.emailVerified) {
+      return NextResponse.json({
+        error: 'Verify your email address before signing in. Open sign up to request a new verification code.',
+        emailVerificationRequired: true,
+      }, { status: 403 })
+    }
     const [membership] = await db.select({
       tenantId: tenantMemberships.tenantId,
       tenantName: tenants.name,

@@ -82,7 +82,7 @@ export const hotspotPortalTemplates = [
 ] as const
 
 export const defaultHotspotPortalBranding = {
-  companyName: 'LKTECH',
+  companyName: 'Mari-Net',
   welcomeHeadline: 'Connect to what matters.',
   welcomeMessage: 'Work, learn, stream, and stay close to the people who matter. Choose a plan and get online.',
   supportMessage: 'Need help? Contact your network operator.',

@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { hotspotPortalSettings } from '@/lib/db/schema'
 import { getTenantSession, resolvePublicTenantId } from '@/lib/db/tenant'
 import { defaultHotspotPortalBranding, isHotspotPortalTemplateId } from '@/lib/hotspot-templates'
+import { resolveHotspotCompanyName } from '@/lib/hotspot-portal-branding'
 
 const publicHeaders = {
   'access-control-allow-origin': '*',
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
       .limit(1)
     return NextResponse.json({
       activeTemplate: settings?.activeTemplate || 'original',
-      companyName: settings?.companyName || defaultHotspotPortalBranding.companyName,
+      companyName: resolveHotspotCompanyName(settings?.companyName),
       welcomeHeadline: settings?.welcomeHeadline || defaultHotspotPortalBranding.welcomeHeadline,
       welcomeMessage: settings?.welcomeMessage || defaultHotspotPortalBranding.welcomeMessage,
       supportMessage: settings?.supportMessage || defaultHotspotPortalBranding.supportMessage,

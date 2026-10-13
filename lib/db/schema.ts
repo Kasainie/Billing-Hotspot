@@ -16,10 +16,19 @@ export const tenantUsers = pgTable('tenant_users', {
   name: text('name').notNull(),
   passwordHash: text('password_hash'),
   googleSubject: text('google_subject'),
+  emailVerified: boolean('email_verified').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex('tenant_users_google_subject_unique_idx').on(table.googleSubject),
 ])
+
+export const emailVerificationCodes = pgTable('email_verification_codes', {
+  userId: uuid('user_id').notNull().primaryKey().references(() => tenantUsers.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 export const tenantMemberships = pgTable('tenant_memberships', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -58,6 +67,38 @@ export const tenantPaymentSettings = pgTable('tenant_payment_settings', {
   callbackUrl: text('callback_url').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const tenantSmsSettings = pgTable('tenant_sms_settings', {
+  tenantId: text('tenant_id').notNull().primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
+  environment: text('environment').notNull().default('production'),
+  username: text('username').notNull(),
+  apiKeyEncrypted: text('api_key_encrypted').notNull(),
+  senderId: text('sender_id'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const smsMessages = pgTable('sms_messages', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  eventKey: text('event_key').notNull(),
+  recipient: text('recipient').notNull(),
+  messageEncrypted: text('message_encrypted').notNull(),
+  status: text('status').notNull().default('queued'),
+  attempts: integer('attempts').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull().defaultNow(),
+  lastError: text('last_error'),
+  providerMessageId: text('provider_message_id'),
+  deliveryStatus: text('delivery_status').notNull().default('queued'),
+  deliveryReport: jsonb('delivery_report'),
+  deliveryReportedAt: timestamp('delivery_reported_at', { withTimezone: true }),
+  resendOfId: uuid('resend_of_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('sms_messages_tenant_event_unique_idx').on(table.tenantId, table.eventKey),
+  index('sms_messages_queued_next_attempt_idx').on(table.status, table.nextAttemptAt),
+])
 
 export const mobileMoneyTransactions = pgTable('mobile_money_transactions', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -353,6 +394,22 @@ export const routerConnectorCommands = pgTable('router_connector_commands', {
   index('router_connector_commands_queue_idx').on(table.routerId, table.status, table.createdAt),
 ])
 
+export const routerConnectorQueries = pgTable('router_connector_queries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  routerId: uuid('router_id').notNull().references(() => routerMonitors.id, { onDelete: 'cascade' }),
+  requestedBy: uuid('requested_by').references(() => tenantUsers.id, { onDelete: 'set null' }),
+  resource: text('resource').notNull(),
+  status: text('status').notNull().default('queued'),
+  result: jsonb('result'),
+  errorMessage: text('error_message'),
+  claimExpiresAt: timestamp('claim_expires_at', { withTimezone: true }),
+  claimToken: uuid('claim_token'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+}, (table) => [
+  index('router_connector_queries_queue_idx').on(table.routerId, table.status, table.createdAt),
+])
+
 export const routerMetricSamples = pgTable('router_metric_samples', {
   id: uuid('id').defaultRandom().primaryKey(),
   routerId: uuid('router_id').notNull().references(() => routerMonitors.id, { onDelete: 'cascade' }),
@@ -464,7 +521,7 @@ export const hotspotPurchases = pgTable('hotspot_purchases', {
   uniqueIndex('hotspot_purchases_receipt_unique_idx').on(table.receipt),
 ])
 
-export const schema = { tenants, tenantUsers, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerMetricSamples }
+export const schema = { tenants, tenantUsers, emailVerificationCodes, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, tenantSmsSettings, smsMessages, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerConnectorQueries, routerMetricSamples }
 export type Site = typeof sites.$inferSelect
 export type Customer = typeof customers.$inferSelect
 export type Payment = typeof payments.$inferSelect

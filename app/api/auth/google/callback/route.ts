@@ -2,7 +2,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { tenantMemberships, tenantSessions, tenantUsers, tenants } from '@/lib/db/schema'
+import { emailVerificationCodes, tenantMemberships, tenantSessions, tenantUsers, tenants } from '@/lib/db/schema'
 import { createSessionToken, hashSessionToken, SESSION_DURATION_SECONDS, sessionCookieOptions } from '@/lib/db/tenant'
 import { getGoogleOAuthConfiguration } from '@/lib/google-oauth'
 
@@ -114,6 +114,9 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      await tx.update(tenantUsers).set({ emailVerified: true }).where(eq(tenantUsers.id, user.id))
+      await tx.delete(emailVerificationCodes).where(eq(emailVerificationCodes.userId, user.id))
+
       const [membership] = await tx.select({
         tenantId: tenantMemberships.tenantId,
         tenantName: tenants.name,
@@ -155,7 +158,7 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    const response = NextResponse.redirect(new URL('/', new URL(configured.redirectUri).origin))
+    const response = NextResponse.redirect(new URL(mode === 'signup' ? '/get-started' : '/', new URL(configured.redirectUri).origin))
     response.cookies.set('billing_session', token, sessionCookieOptions())
     clearOAuthCookies(response)
     return response

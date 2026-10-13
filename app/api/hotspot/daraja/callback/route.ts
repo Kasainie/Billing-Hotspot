@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { customers, hotspotPurchases, payments, pppoeAccounts, pppoePayments, radcheck, radreply } from '@/lib/db/schema'
 import { toFreeRadiusExpiration, toHotspotRadiusReplies } from '@/lib/hotspot-products'
 import { getTenantDarajaConfiguration } from '@/lib/db/tenant-payments'
+import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 
 type DarajaCallback = {
   Body?: { stkCallback?: {
@@ -63,12 +64,12 @@ async function processPppoePayment(callback: DarajaCallback, checkoutRequestId: 
     return NextResponse.json({ ResultCode: 1, ResultDesc: 'Payment details did not match the checkout.' }, { status: 409 })
   }
 
-  await db.transaction(async (tx) => {
+  const notification = await db.transaction(async (tx) => {
     const [lockedPayment] = await tx.select().from(pppoePayments)
       .where(and(eq(pppoePayments.id, payment.id), eq(pppoePayments.tenantId, payment.tenantId), inArray(pppoePayments.status, ['initiating', 'pending'])))
       .for('update')
       .limit(1)
-    if (!lockedPayment) return
+    if (!lockedPayment) return null
 
     const [lockedAccount] = await tx.select().from(pppoeAccounts)
       .where(and(eq(pppoeAccounts.accountNumber, lockedPayment.accountNumber), eq(pppoeAccounts.tenantId, lockedPayment.tenantId)))
@@ -84,6 +85,8 @@ async function processPppoePayment(callback: DarajaCallback, checkoutRequestId: 
     if (customerId) {
       const [customer] = await tx.select({
         radiusUsername: customers.radiusUsername,
+        name: customers.name,
+        phone: customers.phone,
         expiresAt: customers.expiresAt,
       }).from(customers).where(and(eq(customers.id, customerId), eq(customers.tenantId, lockedPayment.tenantId))).limit(1)
       if (!customer?.radiusUsername) throw new Error('PPPoE customer has no RADIUS username.')
@@ -118,6 +121,14 @@ async function processPppoePayment(callback: DarajaCallback, checkoutRequestId: 
         op: ':=',
         value: radiusPassword,
       })
+    }
+    if (!radiusPassword) {
+      const [storedPassword] = await tx.select({ value: radcheck.value }).from(radcheck).where(and(
+        eq(radcheck.username, radiusUsername),
+        eq(radcheck.tenantId, lockedPayment.tenantId),
+        eq(radcheck.attribute, 'Cleartext-Password'),
+      )).limit(1)
+      radiusPassword = storedPassword?.value || null
     }
 
     for (const [attribute, value] of [
@@ -180,8 +191,31 @@ async function processPppoePayment(callback: DarajaCallback, checkoutRequestId: 
       failureReason: null,
       callbackPayload: callback as never,
     }).where(and(eq(pppoePayments.id, lockedPayment.id), eq(pppoePayments.tenantId, lockedPayment.tenantId)))
+    const [customer] = await tx.select({ name: customers.name, phone: customers.phone }).from(customers)
+      .where(and(eq(customers.id, customerId), eq(customers.tenantId, lockedPayment.tenantId))).limit(1)
+    return {
+      tenantId: lockedPayment.tenantId,
+      paymentId: lockedPayment.id,
+      name: customer?.name || lockedAccount.name,
+      phone: customer?.phone || lockedAccount.phone,
+      amount: lockedPayment.amount,
+      plan: lockedPayment.productName,
+      receipt: receiptValue,
+      username: radiusUsername,
+      password: radiusPassword,
+      expiresAt,
+    }
   })
 
+  if (notification) {
+    const passwordText = notification.password ? ` Password: ${notification.password}.` : ''
+    await enqueueTenantSms(
+      notification.tenantId,
+      `pppoe-payment:${notification.paymentId}`,
+      notification.phone,
+      `Hello ${notification.name}, KES ${notification.amount} received for ${notification.plan}. Receipt ${notification.receipt}. Your account ${notification.username}${passwordText} is active until ${notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}.`,
+    )
+  }
   return NextResponse.json({ ResultCode: 0, ResultDesc: 'Accepted' })
 }
 
@@ -240,12 +274,12 @@ export async function POST(request: NextRequest) {
 
     const radiusUsername = `lk${randomBytes(6).toString('hex')}`
     const radiusPassword = randomBytes(12).toString('hex')
-    await db.transaction(async (tx) => {
+    const notification = await db.transaction(async (tx) => {
       const [lockedPurchase] = await tx.select().from(hotspotPurchases)
         .where(and(eq(hotspotPurchases.id, purchase.id), eq(hotspotPurchases.tenantId, purchase.tenantId), inArray(hotspotPurchases.status, ['initiating', 'pending'])))
         .for('update')
         .limit(1)
-      if (!lockedPurchase) return
+      if (!lockedPurchase) return null
 
       const packagePolicy = lockedPurchase.packageSnapshot
       const paidAt = new Date()
@@ -284,8 +318,27 @@ export async function POST(request: NextRequest) {
         failureReason: null,
         callbackPayload: callback as never,
       }).where(and(eq(hotspotPurchases.id, lockedPurchase.id), eq(hotspotPurchases.tenantId, lockedPurchase.tenantId)))
+      return {
+        tenantId: lockedPurchase.tenantId,
+        purchaseId: lockedPurchase.id,
+        phone: lockedPurchase.phone,
+        productName: lockedPurchase.productName,
+        amount: lockedPurchase.amount,
+        receipt: receiptValue,
+        username: radiusUsername,
+        password: radiusPassword,
+        expiresAt,
+      }
     })
 
+    if (notification) {
+      await enqueueTenantSms(
+        notification.tenantId,
+        `hotspot-payment:${notification.purchaseId}`,
+        notification.phone,
+        `Your payment of KES ${notification.amount} for ${notification.productName} was received. Receipt ${notification.receipt}. Wi-Fi username: ${notification.username}; password: ${notification.password}. Access expires ${notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}.`,
+      )
+    }
     return NextResponse.json({ ResultCode: 0, ResultDesc: 'Accepted' })
   } catch (error) {
     console.error('Failed to process Daraja payment callback', error)

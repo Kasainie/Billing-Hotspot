@@ -80,5 +80,16 @@ export async function reconcilePppoeMobileMoney(
     reference: input.transactionId,
     paidAt: input.paidAt,
   })
-  return { matched: true, customerId: customer.id, reason: null, expiresAt }
+  return {
+    matched: true,
+    customerId: customer.id,
+    reason: null,
+    expiresAt,
+    name: customer.name,
+    phone: customer.phone,
+    username: customer.radiusUsername,
+    plan: customer.plan,
+    amount: input.amount,
+    transactionId: input.transactionId,
+  }
 }

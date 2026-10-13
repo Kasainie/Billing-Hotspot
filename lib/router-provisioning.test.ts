@@ -5,11 +5,12 @@ import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { toFreeRadiusExpiration, toHotspotProduct, toHotspotRadiusReplies } from './hotspot-products.ts'
 import { prepareHotspotPortalHtml } from './hotspot-portal-html.ts'
+import { prepareHotspotPortalBranding, resolveHotspotCompanyName } from './hotspot-portal-branding.ts'
 import { hotspotPortalTemplates } from './hotspot-templates.ts'
 import { normalizeKenyanPhone } from './daraja.ts'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, DEFAULT_ROUTER_BRIDGE_NAME, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, selectRouterBridgeName } from './router-provisioning.ts'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, DEFAULT_ROUTER_BRIDGE_NAME, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, resolveRouterSubscriberBridgeName, selectRouterBridgeName } from './router-provisioning.ts'
 
 test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -62,7 +63,16 @@ test('detected LKTech bridge is preferred over the legacy Centipid bridge', () =
   assert.equal(selectRouterBridgeName(['centripid-bridge', 'lktech']), 'lktech')
   assert.equal(selectRouterBridgeName(['lktech-bridge']), 'lktech-bridge')
   assert.equal(selectRouterBridgeName(['bridge1']), 'bridge1')
+  assert.equal(selectRouterBridgeName(['bridgeLocal'], ['bridgeLocal']), 'lktech')
+  assert.equal(selectRouterBridgeName(['lktech', 'bridgeLocal'], ['lktech', 'bridgeLocal']), 'lktech-subscriber1')
+  assert.equal(selectRouterBridgeName(['bridgeLocal', 'subscriber'], ['bridgeLocal']), 'subscriber')
   assert.equal(DEFAULT_ROUTER_BRIDGE_NAME, 'lktech')
+})
+
+test('stale WAN bridge selection resolves to a separate subscriber bridge', () => {
+  assert.equal(resolveRouterSubscriberBridgeName('bridgeLocal', ['bridgeLocal'], ['bridgeLocal']), 'lktech')
+  assert.equal(resolveRouterSubscriberBridgeName('bridgeLocal', ['bridgeLocal', 'lktech'], ['bridgeLocal']), 'lktech')
+  assert.equal(resolveRouterSubscriberBridgeName('subscriber', ['bridgeLocal', 'subscriber'], ['bridgeLocal']), 'subscriber')
 })
 
 test('all RouterOS bundle files resolve to valid content', () => {
@@ -111,8 +121,11 @@ test('hotspot file bundle downloads portal pages and assets to RouterOS hotspot 
   assert.match(script!, /flash\/hotspot/)
   assert.doesNotMatch(script!, /"\$[A-Za-z]/)
   assert.ok(script!.includes('/api/hotspot/portal-login'), 'tenant-aware captive login page is included in the portal installer')
-  for (const assetName of ['status.html', 'logout.html', 'error.html', 'alogin.html', 'api.json', 'style.css', 'md5.js']) {
+  for (const assetName of ['api.json', 'style.css', 'md5.js']) {
     assert.ok(script!.includes(`/hotspot-assets/${assetName}`), `${assetName} is included in the portal installer`)
+  }
+  for (const assetName of ['status.html', 'logout.html', 'error.html', 'alogin.html']) {
+    assert.ok(script!.includes(`/hotspot/${assetName}"`), `${assetName} is served with workspace branding`)
   }
 })
 
@@ -127,6 +140,24 @@ test('tenant-aware router provisioning carries the workspace slug into downloade
   assert.match(provisioning, /\/hotspot\/hotspot-files\.rsc\?tenant=acme-network/)
   const portalBundle = getHotspotBundleScript('hotspot-files.rsc', 'https://billing.example.com', 'acme-network')
   assert.match(portalBundle!, /\/api\/hotspot\/portal-login\?tenant=acme-network/)
+  for (const assetName of ['status.html', 'logout.html', 'error.html', 'alogin.html']) {
+    assert.match(portalBundle!, new RegExp(`/hotspot/${assetName}\\?tenant=acme-network`))
+  }
+})
+
+test('captive portal status pages use the configured tenant brand safely', () => {
+  const pages = ['alogin.html', 'status.html', 'logout.html', 'error.html']
+    .map((fileName) => readFileSync(new URL(`../public/hotspot-assets/${fileName}`, import.meta.url), 'utf8'))
+  for (const page of pages) {
+    assert.match(page, /\{\{PORTAL_COMPANY_NAME\}\}/)
+    assert.doesNotMatch(page, /LKTECH|LKTech/)
+    const branded = prepareHotspotPortalBranding(page, 'Mari-Net <Guest & Wi-Fi>')
+    assert.match(branded, /Mari-Net &lt;Guest &amp; Wi-Fi&gt;/)
+    assert.doesNotMatch(branded, /\{\{PORTAL_COMPANY_NAME\}\}/)
+  }
+  assert.equal(resolveHotspotCompanyName('LKTECH'), 'Mari-Net')
+  assert.equal(resolveHotspotCompanyName(null), 'Mari-Net')
+  assert.equal(resolveHotspotCompanyName('Custom Wi-Fi'), 'Custom Wi-Fi')
 })
 
 test('portal CHAP helper matches standard MD5 vectors', () => {
@@ -184,7 +215,7 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
   assert.match(loginPage, /if \(product\.price === 0\)/)
   assert.match(loginPage, /tap to connect automatically/)
   assert.match(connectedPage, /href="\$\(link-redirect\)"/)
-  assert.match(connectedPage, /window\.location\.replace\('\$\(link-redirect\)'\)/)
+  assert.doesNotMatch(connectedPage, /window\.location\.replace/)
   assert.match(statusPage, /\$\(link-logout\)/)
   assert.match(errorPage, /\$\(error\)/)
   assert.match(logoutPage, /\$\(link-login\)/)
@@ -351,6 +382,35 @@ test('subscriber service selection removes unchecked bridge ports and protects W
   assert.match(script, /Uplink wan1 is already on bridge; remove it from the subscriber bridge/)
   assert.doesNotMatch(script, /interface="wan1" and bridge="bridge"\]\] > 0\) do=\{\/interface bridge port remove/)
   assert.doesNotMatch(script, /interface="ether5" and bridge!/)
+})
+
+test('subscriber service script moves only explicitly approved ports from another bridge', () => {
+  const script = buildSubscriberServiceScript({
+    bridgeName: 'lktech',
+    ports: ['ether2'],
+    managedPorts: ['ether2'],
+    movablePorts: ['ether2'],
+    wanPorts: ['ether1'],
+    services: ['PPPoE'],
+    pppoeSubnet: '172.31.1.0/24',
+  })
+
+  assert.match(script, /Refusing to move active DHCP uplink ether2/)
+  assert.match(script, /interface="ether2" and bridge!="lktech"\]\] > 0\) do=\{\/interface bridge port remove/)
+  assert.match(script, /interface="ether2"\]\] = 0\) do=\{\/interface bridge port add bridge="lktech"/)
+  assert.doesNotMatch(script, /interface="ether1" and bridge!="lktech"/)
+})
+
+test('subscriber service script rejects WAN or unselected ports marked for movement', () => {
+  assert.throws(() => buildSubscriberServiceScript({
+    bridgeName: 'lktech',
+    ports: ['ether2'],
+    managedPorts: ['ether1', 'ether2'],
+    movablePorts: ['ether1'],
+    wanPorts: ['ether1'],
+    services: ['PPPoE'],
+    pppoeSubnet: '172.31.1.0/24',
+  }), /interface name is invalid/)
 })
 
 test('subscriber service configuration rejects selected or managed WAN ports', () => {

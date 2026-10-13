@@ -1,8 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Clock3, Cpu, HardDrive, MemoryStick, RefreshCw, Router as RouterIcon, Thermometer, Wifi } from 'lucide-react'
-import { getLiveRouterUptimeSeconds } from '@/lib/router-monitoring'
+import { Activity, AlertCircle, ArrowLeft, CalendarClock, CheckCircle2, Clock3, Code2, Copy, Cpu, CreditCard, FileArchive, FileText, HardDrive, MemoryStick, RefreshCw, Router as RouterIcon, ScrollText, Thermometer, Wifi, X } from 'lucide-react'
+import { calculateRouterHealth, getLiveRouterUptimeSeconds } from '@/lib/router-monitoring'
 
 export type RouterMonitorRecord = {
   id: string
@@ -66,6 +66,10 @@ export type RouterConnectorEnrollment = {
 type MetricSample = {
   sampledAt: string
   cpuLoad: number
+  freeMemoryBytes: number
+  totalMemoryBytes: number
+  freeDiskBytes: number | null
+  totalDiskBytes: number | null
   memoryUsedPercent: number | null
   diskUsedPercent: number | null
   totalRxBytes: number | null
@@ -79,7 +83,44 @@ type MetricSample = {
 }
 
 type MetricsResponse = { samples: MetricSample[]; error?: string }
-export type RouterMonitorTab = 'System' | 'Reports' | 'Users' | 'Events' | 'Diagnosis'
+export type RouterMonitorTab = 'System' | 'Reports' | 'Users' | 'Payments' | 'Events' | 'Logs' | 'Diagnosis' | 'Backups' | 'Scheduler' | 'Script'
+
+type RouterResourceName = 'logs' | 'backups' | 'scheduler' | 'scripts'
+type RouterResourceRecord = Record<string, string | number | boolean | null>
+type RouterSummary = {
+  registeredUsers: number
+  dataBytesThisMonth: number | null
+  uptimePercent30d: number | null
+  revenueMtd: number
+  paidTransactionsMtd: number
+  payments: Array<{
+    id: string
+    paidAt: string
+    amount: number
+    method: string
+    reference: string | null
+    subscriber: string
+    source: string
+  }>
+}
+
+type RouterResourceQuery = {
+  queryId: string
+  status: 'queued' | 'processing' | 'succeeded' | 'failed'
+  result: RouterResourceRecord[] | null
+  errorMessage: string | null
+  completedAt: string | null
+}
+
+type DiagnosisStatus = 'passed' | 'issue' | 'unknown'
+type DiagnosisFilter = 'issues' | 'all' | 'passed'
+
+const routerResourceByTab: Partial<Record<RouterMonitorTab, RouterResourceName>> = {
+  Logs: 'logs',
+  Backups: 'backups',
+  Scheduler: 'scheduler',
+  Script: 'scripts',
+}
 
 const ranges = [
   { id: '1h', label: '1h' },
@@ -176,6 +217,8 @@ export function RouterMonitorDetail({
   const [range, setRange] = useState<(typeof ranges)[number]['id']>('1h')
   const [tab, setTab] = useState<RouterMonitorTab>(initialTab)
   const [samples, setSamples] = useState<MetricSample[]>([])
+  const [summary, setSummary] = useState<RouterSummary | null>(null)
+  const [summaryError, setSummaryError] = useState('')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
@@ -195,6 +238,14 @@ export function RouterMonitorDetail({
   const [connectorEnrollment, setConnectorEnrollment] = useState<RouterConnectorEnrollment | null>(null)
   const [connectorEnrollmentError, setConnectorEnrollmentError] = useState('')
   const [copiedConnectorToken, setCopiedConnectorToken] = useState(false)
+  const [hotspotRefreshScript, setHotspotRefreshScript] = useState('')
+  const [hotspotRefreshLoading, setHotspotRefreshLoading] = useState(false)
+  const [hotspotRefreshError, setHotspotRefreshError] = useState('')
+  const [hotspotRefreshCopied, setHotspotRefreshCopied] = useState(false)
+  const [diagnosisFilter, setDiagnosisFilter] = useState<DiagnosisFilter>('issues')
+  const [resourceData, setResourceData] = useState<Partial<Record<RouterResourceName, RouterResourceQuery>>>({})
+  const [resourceLoading, setResourceLoading] = useState<RouterResourceName | null>(null)
+  const [resourceError, setResourceError] = useState('')
   const loadInFlight = useRef(false)
 
   useEffect(() => {
@@ -228,6 +279,53 @@ export function RouterMonitorDetail({
     }
   }, [range, router.id, router.monitored])
 
+  const loadSummary = useCallback(async () => {
+    if (!router.monitored) return
+    setSummaryError('')
+    try {
+      const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/summary`, { cache: 'no-store' })
+      const result = await response.json() as RouterSummary & { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to load router business data.')
+      setSummary(result)
+    } catch (reason) {
+      setSummaryError(reason instanceof Error ? reason.message : 'Unable to load router business data.')
+    }
+  }, [router.id, router.monitored])
+
+  const loadRouterResource = useCallback(async (resource: RouterResourceName) => {
+    setResourceLoading(resource)
+    setResourceError('')
+    try {
+      const baseUrl = `/api/routers/${encodeURIComponent(router.id)}/resources`
+      const createResponse = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ resource }),
+      })
+      const created = await createResponse.json() as { queryId?: string; error?: string }
+      if (!createResponse.ok || !created.queryId) {
+        throw new Error(created.error || 'Unable to request live RouterOS data.')
+      }
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1500))
+        const response = await fetch(`${baseUrl}?queryId=${encodeURIComponent(created.queryId)}`, { cache: 'no-store' })
+        const query = await response.json() as RouterResourceQuery & { error?: string }
+        if (!response.ok) throw new Error(query.error || 'Unable to read the RouterOS query status.')
+        if (query.status === 'succeeded') {
+          setResourceData((current) => ({ ...current, [resource]: query }))
+          return
+        }
+        if (query.status === 'failed') throw new Error(query.errorMessage || 'RouterOS could not return this resource.')
+      }
+      throw new Error('RouterOS has not returned this data yet. Check that the connector is online and refresh to try again.')
+    } catch (reason) {
+      setResourceError(reason instanceof Error ? reason.message : 'Unable to load the RouterOS resource.')
+    } finally {
+      setResourceLoading(null)
+    }
+  }, [router.id])
+
   const loadRouterSessions = useCallback(async () => {
     if (!router.monitored) return
     setLoadingRemoteSessions(true)
@@ -260,6 +358,19 @@ export function RouterMonitorDetail({
       document.removeEventListener('visibilitychange', refreshOnFocus)
     }
   }, [loadMetrics])
+
+  useEffect(() => {
+    void loadSummary()
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadSummary()
+    }, 60_000)
+    return () => window.clearInterval(interval)
+  }, [loadSummary])
+
+  useEffect(() => {
+    const resource = routerResourceByTab[tab]
+    if (resource) void loadRouterResource(resource)
+  }, [loadRouterResource, tab])
 
   useEffect(() => {
     if (tab !== 'Users') return
@@ -323,6 +434,29 @@ export function RouterMonitorDetail({
       setDisconnectingSession('')
     }
   }
+  const prepareHotspotRefresh = async () => {
+    setHotspotRefreshLoading(true)
+    setHotspotRefreshError('')
+    setHotspotRefreshCopied(false)
+    try {
+      const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/hotspot-files`, { cache: 'no-store' })
+      const result = await response.json() as { script?: string; error?: string }
+      if (!response.ok || !result.script) throw new Error(result.error || 'Unable to prepare the Hotspot file refresh script.')
+      setHotspotRefreshScript(result.script)
+    } catch (reason) {
+      setHotspotRefreshError(reason instanceof Error ? reason.message : 'Unable to prepare the Hotspot file refresh script.')
+    } finally {
+      setHotspotRefreshLoading(false)
+    }
+  }
+  const copyHotspotRefreshScript = async () => {
+    try {
+      await navigator.clipboard.writeText(hotspotRefreshScript)
+      setHotspotRefreshCopied(true)
+    } catch {
+      setHotspotRefreshError('Could not copy the script. Select it and copy it manually.')
+    }
+  }
   const copyConnectorSetup = async () => {
     if (!connectorEnrollment) return
     const config = [
@@ -348,33 +482,34 @@ export function RouterMonitorDetail({
     const rate = (current: number, before: number) => Math.max(0, current - before) * 8 / elapsedSeconds / 1_000_000
     return [{ rx: rate(sample.totalRxBytes, previous.totalRxBytes), tx: rate(sample.totalTxBytes, previous.totalTxBytes) }]
   }), [samples])
-  const transferredBytes = useMemo(() => {
-    if (samples.length < 2) return null
-    const first = samples[0]
-    const last = samples.at(-1)!
-    if (first.totalRxBytes === null || first.totalTxBytes === null || last.totalRxBytes === null || last.totalTxBytes === null) return null
-    const received = Math.max(0, last.totalRxBytes - first.totalRxBytes)
-    const sent = Math.max(0, last.totalTxBytes - first.totalTxBytes)
-    return received + sent
-  }, [samples])
-  const sampleCoverage = useMemo(() => {
-    if (samples.length < 2) return null
-    const rangeDuration = { '1h': 3600, '24h': 86400, '7d': 604800, '30d': 2592000 }[range]
-    const cutoff = Date.now() - rangeDuration * 1000
-    const observed = samples.filter((sample) => new Date(sample.sampledAt).getTime() >= cutoff)
-    if (observed.length < 2) return null
-    const durations = observed.slice(1).map((sample, index) => {
-      const current = new Date(sample.sampledAt).getTime()
-      const previous = new Date(observed[index].sampledAt).getTime()
-      return Math.max(0, Math.min(current - previous, 3 * 60 * 1000))
-    })
-    const covered = durations.reduce((total, value) => total + value, 0)
-    const observedSpan = Math.max(1, new Date(observed.at(-1)!.sampledAt).getTime() - new Date(observed[0].sampledAt).getTime())
-    return Math.round(Math.min(100, covered / Math.min(observedSpan, rangeDuration * 1000) * 100))
-  }, [range, samples])
   const cpuValues = samples.map((sample) => sample.cpuLoad)
   const memoryValues = samples.flatMap((sample) => sample.memoryUsedPercent === null ? [] : [sample.memoryUsedPercent])
   const diskValues = samples.flatMap((sample) => sample.diskUsedPercent === null ? [] : [sample.diskUsedPercent])
+  const latestHeartbeatAt = latest?.sampledAt || router.lastSeenAt
+  const heartbeatIsRecent = Boolean(latestHeartbeatAt && liveClock - new Date(latestHeartbeatAt).getTime() <= 90_000)
+  const liveCpuLoad = latest?.cpuLoad ?? router.cpuLoad
+  const liveMemoryUsedPercent = latest?.memoryUsedPercent ?? router.memoryUsedPercent
+  const liveDiskUsedPercent = latest?.diskUsedPercent ?? router.diskUsedPercent
+  const liveHealth = calculateRouterHealth({
+    online: heartbeatIsRecent,
+    cpuLoad: liveCpuLoad,
+    freeMemoryBytes: latest?.freeMemoryBytes ?? router.freeMemoryBytes,
+    totalMemoryBytes: latest?.totalMemoryBytes ?? router.totalMemoryBytes,
+    freeDiskBytes: latest?.freeDiskBytes ?? router.freeDiskBytes,
+    totalDiskBytes: latest?.totalDiskBytes ?? router.totalDiskBytes,
+  })
+  const diagnosticChecks: Array<{ name: string; detail: string; status: DiagnosisStatus }> = [
+    { name: 'Router connectivity', detail: heartbeatIsRecent ? 'Receiving current heartbeat' : 'No heartbeat received in the last 90 seconds', status: heartbeatIsRecent ? 'passed' : 'issue' },
+    { name: 'CPU load', detail: liveCpuLoad === null ? 'No telemetry available' : `${liveCpuLoad}%`, status: liveCpuLoad === null ? 'unknown' : liveCpuLoad < 85 ? 'passed' : 'issue' },
+    { name: 'Memory capacity', detail: liveMemoryUsedPercent === null ? 'No telemetry available' : `${Math.round(liveMemoryUsedPercent)}% used`, status: liveMemoryUsedPercent === null ? 'unknown' : liveMemoryUsedPercent < 90 ? 'passed' : 'issue' },
+    { name: 'Disk capacity', detail: liveDiskUsedPercent === null ? 'No telemetry available' : `${Math.round(liveDiskUsedPercent)}% used`, status: liveDiskUsedPercent === null ? 'unknown' : liveDiskUsedPercent < 90 ? 'passed' : 'issue' },
+    { name: 'RouterOS version', detail: router.routerOsVersion || 'Not reported', status: router.routerOsVersion ? 'passed' : 'unknown' },
+  ]
+  const issueCount = diagnosticChecks.filter((item) => item.status === 'issue').length
+  const passedCount = diagnosticChecks.filter((item) => item.status === 'passed').length
+  const filteredDiagnosis = diagnosticChecks.filter((item) =>
+    diagnosisFilter === 'all' || (diagnosisFilter === 'issues' && item.status === 'issue') ||
+    (diagnosisFilter === 'passed' && item.status === 'passed'))
 
   return (
     <section className="router-detail-workspace">
@@ -383,42 +518,57 @@ export function RouterMonitorDetail({
         <div className="router-detail-title">
           <span className={`router-detail-icon ${router.status === 'online' ? 'is-online' : 'is-offline'}`}><RouterIcon size={20} /></span>
           <h1>{router.routerName}</h1>
-          <span className={`router-detail-state ${router.status}`}>{router.status === 'not_configured' ? 'Not monitored' : router.status}</span>
+          <span className={`router-detail-state ${heartbeatIsRecent ? 'online' : 'offline'}`}>{!router.monitored ? 'Not monitored' : heartbeatIsRecent ? 'Online' : 'Offline'}</span>
         </div>
         <div className="router-detail-facts">
+          {router.lastSourceIp && <span>IP {router.lastSourceIp}</span>}
           <span>{router.boardName || 'RouterOS device'}</span>
-          <span>{router.routerOsVersion || 'RouterOS version unavailable'}</span>
+          <span>RouterOS {router.routerOsVersion || 'version unavailable'}</span>
           <span>Up {formatDuration(liveUptimeSeconds)}</span>
-          {router.lastSeenAt && <span>Heartbeat {formatSampleTime(router.lastSeenAt)}</span>}
+          {router.lastSeenAt && <span>Last report {formatSampleTime(router.lastSeenAt)}</span>}
         </div>
         <div className="router-detail-actions">
-          <button type="button" className="outline-button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={14} className={refreshing ? 'is-spinning' : undefined} /> Diagnose</button>
-          <button type="button" className="outline-button" onClick={onReprovision}><RefreshCw size={14} /> Legacy script</button>
-          <button type="button" className="outline-button router-remove-button" onClick={() => { setConfirmDelete(true); setDeleteError('') }}>Delete router</button>
+          <button type="button" className="outline-button" onClick={() => { setDiagnosisFilter('issues'); setTab('Diagnosis'); void loadMetrics(); void loadSummary() }} disabled={refreshing}><Activity size={14} className={refreshing ? 'is-spinning' : undefined} /> Diagnose</button>
+          <button type="button" className="outline-button" onClick={() => void prepareHotspotRefresh()} disabled={hotspotRefreshLoading}><RefreshCw size={14} className={hotspotRefreshLoading ? 'is-spinning' : undefined} /> {hotspotRefreshLoading ? 'Preparing…' : 'Refresh Hotspot files'}</button>
+          <button type="button" className="outline-button" onClick={onReprovision}><RefreshCw size={14} /> Reinstall monitor</button>
+          <button type="button" className="outline-button router-remove-button" onClick={() => { setConfirmDelete(true); setDeleteError('') }}>Actions · Delete</button>
         </div>
       </div>
 
+      {hotspotRefreshError && !hotspotRefreshScript && <p className="dashboard-notice" role="alert">{hotspotRefreshError}</p>}
+      {hotspotRefreshScript && <div className="router-script-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setHotspotRefreshScript('') }}>
+        <section className="router-script-modal panel" role="dialog" aria-modal="true" aria-labelledby="hotspot-refresh-title">
+          <div className="router-script-modal-heading"><div><span>CAPTIVE PORTAL</span><h2 id="hotspot-refresh-title">Refresh Hotspot files</h2><p>Copy this script into the router’s MikroTik terminal and run it to fetch the latest login page and portal files. This does not restart the router.</p></div><button type="button" aria-label="Close" onClick={() => { setHotspotRefreshScript(''); setHotspotRefreshError(''); setHotspotRefreshCopied(false) }}><X size={17} /></button></div>
+          <label className="router-script-label">RouterOS refresh script<textarea readOnly value={hotspotRefreshScript} rows={10} onFocus={(event) => event.currentTarget.select()} /></label>
+          {hotspotRefreshError && <p className="router-discovery-status error" role="alert">{hotspotRefreshError}</p>}
+          <div className="router-script-modal-actions"><button type="button" className="outline-button" onClick={() => { setHotspotRefreshScript(''); setHotspotRefreshError(''); setHotspotRefreshCopied(false) }}>Close</button><button type="button" className="router-link-button" onClick={() => void copyHotspotRefreshScript()}><Copy size={14} /> {hotspotRefreshCopied ? 'Copied' : 'Copy script'}</button></div>
+        </section>
+      </div>}
+
       {confirmDelete && <section className="router-delete-confirmation" role="alertdialog" aria-labelledby="router-delete-title" aria-describedby="router-delete-description">
-        <div><strong id="router-delete-title">Delete {router.routerName} and its network site?</strong><p id="router-delete-description">All routers linked to this site and their monitoring history will be deleted. Customer and equipment records will be kept.</p></div>
+        <div><strong id="router-delete-title">Delete {router.routerName}?</strong><p id="router-delete-description">This router and its monitoring history will be deleted. The network site, customers, and equipment records will be kept.</p></div>
         {deleteError && <p className="router-discovery-status error" role="alert">{deleteError}</p>}
         <div className="router-delete-actions"><button type="button" className="outline-button" disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</button><button type="button" className="router-delete-confirm-button" disabled={deleting} onClick={() => void deleteRouter()}>{deleting ? 'Deleting…' : 'Confirm delete'}</button></div>
       </section>}
 
       {error && <p className="dashboard-notice" role="alert">{error}</p>}
-      {!router.monitored && <div className="router-unmonitored-notice"><strong>Router monitoring is not enabled yet.</strong><span>Install the monitor once from the MikroTik terminal. The router will then report automatically every minute; no VPS or extra computer is needed.</span><button className="router-link-button" type="button" onClick={onReprovision}>Set up automatic monitoring</button></div>}
+      {!router.monitored && <div className="router-unmonitored-notice"><strong>Router monitoring is not enabled yet.</strong><span>Install the monitor once from the MikroTik terminal. It starts automatically after a reboot and retries reports every 30 seconds; no VPS or extra computer is needed.</span><button className="router-link-button" type="button" onClick={onReprovision}>Set up automatic monitoring</button></div>}
 
-      <div className="router-detail-stats">
-        <article><span>ACTIVE USERS</span><strong>{router.activeHotspotUsers === null || router.activePppoeUsers === null ? '—' : (router.activeHotspotUsers + router.activePppoeUsers).toLocaleString()}</strong><small>{router.activeHotspotUsers ?? '—'} Hotspot · {router.activePppoeUsers ?? '—'} PPPoE</small></article>
-        <article><span>DATA · {ranges.find((item) => item.id === range)?.label}</span><strong>{formatBytes(transferredBytes)}</strong><small>Received + sent from Ethernet counters</small></article>
-        <article><span>MONITOR COVERAGE · {ranges.find((item) => item.id === range)?.label}</span><strong>{sampleCoverage === null ? '—' : `${sampleCoverage}%`}</strong><small>Based on received heartbeats</small></article>
-        <article><span>HEALTH</span><strong>{router.health === null ? '—' : router.health}</strong><small>{router.health === null ? 'Waiting for live metrics' : router.health >= 85 ? 'good' : router.health >= 65 ? 'attention' : 'critical'}</small></article>
+      {summaryError && <p className="router-summary-error" role="alert">{summaryError}</p>}
+      <div className="router-detail-stats router-business-stats">
+        <article><span>REGISTERED USERS</span><strong>{summary ? summary.registeredUsers.toLocaleString() : '—'}</strong><small>Customers assigned to {router.siteName}</small></article>
+        <article><span>ACTIVE USERS</span><strong>{router.activeHotspotUsers === null || router.activePppoeUsers === null ? '—' : (router.activeHotspotUsers + router.activePppoeUsers).toLocaleString()}</strong><small>{router.activeHotspotUsers ?? '—'} Hotspot · {router.activePppoeUsers ?? '—'} PPPoE</small><MiniTrend samples={samples} /></article>
+        <article><span>DATA THIS MONTH</span><strong>{formatBytes(summary?.dataBytesThisMonth)}</strong><small>Upload + download from router counters</small></article>
+        <article><span>REVENUE MTD</span><strong>{summary ? formatCurrency(summary.revenueMtd) : '—'}</strong><small>{summary?.paidTransactionsMtd.toLocaleString() ?? '—'} paid transactions · site customers</small></article>
+        <article><span>UPTIME · 30D</span><strong>{summary?.uptimePercent30d === null || summary?.uptimePercent30d === undefined ? '—' : `${summary.uptimePercent30d.toFixed(2)}%`}</strong><small>Heartbeat availability estimate</small></article>
+        <article><span>HEALTH</span><strong>{liveHealth === null ? '—' : liveHealth}</strong><small>{liveHealth === null ? 'Waiting for live metrics' : liveHealth >= 85 ? 'good' : liveHealth >= 65 ? 'attention' : 'critical'}</small></article>
       </div>
 
       <div className="router-monitor-toolbar">
         <div className="router-monitor-tabs" role="tablist" aria-label="Router monitor pages">
-          {(['System', 'Reports', 'Users', 'Events', 'Diagnosis'] as const).map((item) => <button type="button" role="tab" aria-selected={tab === item} className={tab === item ? 'active' : ''} key={item} onClick={() => setTab(item)}>{item}{item === 'Users' && router.activeHotspotUsers !== null && <span>{router.activeHotspotUsers + (router.activePppoeUsers || 0)}</span>}</button>)}
+          {(['System', 'Reports', 'Users', 'Payments', 'Events', 'Logs', 'Diagnosis', 'Backups', 'Scheduler', 'Script'] as const).map((item) => <button type="button" role="tab" aria-selected={tab === item} className={tab === item ? 'active' : ''} key={item} onClick={() => setTab(item)}>{item}{item === 'Users' && router.activeHotspotUsers !== null && <span>{router.activeHotspotUsers + (router.activePppoeUsers || 0)}</span>}{item === 'Payments' && summary && <span>{summary.paidTransactionsMtd}</span>}{item === 'Logs' && resourceData.logs?.result && <span>{resourceData.logs.result.length}</span>}{item === 'Backups' && resourceData.backups?.result && <span>{resourceData.backups.result.length}</span>}</button>)}
         </div>
-        <div className="router-monitor-ranges" aria-label="Monitoring time range">{ranges.map((item) => <button type="button" key={item.id} className={range === item.id ? 'active' : ''} onClick={() => setRange(item.id)}>{item.label}</button>)}</div>
+        {(['System', 'Reports', 'Events'].includes(tab)) && <div className="router-monitor-ranges" aria-label="Monitoring time range">{ranges.map((item) => <button type="button" key={item.id} className={range === item.id ? 'active' : ''} onClick={() => setRange(item.id)}>{item.label}</button>)}</div>}
       </div>
 
       {loading && <p className="router-monitor-loading" role="status">Loading router telemetry…</p>}
@@ -434,11 +584,11 @@ export function RouterMonitorDetail({
           </div>
           <aside className="router-monitor-side">
             <section className="router-monitor-health panel">
-              <div className="router-monitor-side-heading"><strong>Health</strong><span>{router.health === null ? '—' : `${router.health} / 100`}</span></div>
-              <div className="router-health-ring" style={{ '--health-percent': `${router.health ?? 0}%` } as React.CSSProperties}><div><strong>{router.health ?? '—'}</strong><span>/ 100</span></div></div>
-              <ResourceBar icon={Cpu} label="CPU load" value={router.cpuLoad} />
-              <ResourceBar icon={MemoryStick} label="Memory" value={router.memoryUsedPercent} />
-              <ResourceBar icon={HardDrive} label="Disk" value={router.diskUsedPercent} />
+              <div className="router-monitor-side-heading"><strong>Health</strong><span>{liveHealth === null ? '—' : `${liveHealth} / 100`}</span></div>
+              <div className="router-health-ring" style={{ '--health-percent': `${liveHealth ?? 0}%` } as React.CSSProperties}><div><strong>{liveHealth ?? '—'}</strong><span>/ 100</span></div></div>
+              <ResourceBar icon={Cpu} label="CPU load" value={liveCpuLoad} />
+              <ResourceBar icon={MemoryStick} label="Memory" value={liveMemoryUsedPercent} />
+              <ResourceBar icon={HardDrive} label="Disk" value={liveDiskUsedPercent} />
               <ResourceValue icon={Thermometer} label="Temperature" value={latest?.temperatureCelsius === null || latest?.temperatureCelsius === undefined ? '—' : `${latest.temperatureCelsius} °C`} />
               <ResourceValue icon={Clock3} label="Uptime" value={formatDuration(liveUptimeSeconds)} />
               <ResourceValue icon={RouterIcon} label="RouterOS" value={router.routerOsVersion || '—'} />
@@ -448,7 +598,7 @@ export function RouterMonitorDetail({
             <section className="router-monitor-health panel router-connection-panel">
               <div className="router-monitor-side-heading"><strong>Connection &amp; monitoring</strong></div>
               <ResourceValue icon={Clock3} label="Last heartbeat" value={router.lastSeenAt ? formatSampleTime(router.lastSeenAt) : 'Never received'} />
-              <ResourceValue icon={RefreshCw} label="Monitoring cadence" value={router.connectorEnabled ? 'Metrics 1 min · status 5 sec' : router.monitored ? 'Router reports every minute' : 'Not configured'} />
+              <ResourceValue icon={RefreshCw} label="Monitoring cadence" value={router.connectorEnabled ? 'Metrics 1 min · status 5 sec' : router.monitored ? 'Router reports every 30 sec' : 'Not configured'} />
               <ResourceValue icon={RouterIcon} label="Device model" value={router.boardName || 'Unavailable'} />
               <button className="outline-button" type="button" onClick={onReprovision}>Install / reinstall RouterOS monitor</button>
             </section>
@@ -513,17 +663,133 @@ export function RouterMonitorDetail({
             </div>
         </div>
       </section>}
+      {tab === 'Payments' && <section className="panel router-monitor-tab-panel router-data-panel">
+        <div className="router-data-heading"><div><h2>Site payments</h2><p>Recorded payments linked to subscribers assigned to {router.siteName}.</p></div><button type="button" className="outline-button" onClick={() => void loadSummary()}><RefreshCw size={13} /> Refresh</button></div>
+        {summaryError && <p className="router-data-error" role="alert">{summaryError}</p>}
+        <div className="router-payment-total"><span>Paid revenue this month</span><strong>{summary ? formatCurrency(summary.revenueMtd) : '—'}</strong><small>{summary?.paidTransactionsMtd.toLocaleString() ?? '—'} confirmed transactions</small></div>
+        <div className="table-scroll"><table><thead><tr><th>Paid at</th><th>Subscriber</th><th>Source</th><th>Method</th><th>Reference</th><th>Amount</th></tr></thead><tbody>
+          {summary?.payments.map((payment) => <tr key={`${payment.source}:${payment.id}`}><td>{formatSampleTime(payment.paidAt)}</td><td>{payment.subscriber}</td><td>{payment.source}</td><td>{payment.method}</td><td className="mono">{payment.reference || '—'}</td><td>{formatCurrency(payment.amount)}</td></tr>)}
+          {summary && summary.payments.length === 0 && <tr><td colSpan={6}>No paid subscriber transactions are recorded for this site yet.</td></tr>}
+          {!summary && !summaryError && <tr><td colSpan={6}>Loading site payment records…</td></tr>}
+        </tbody></table></div>
+      </section>}
       {tab === 'Events' && <HeartbeatEvents samples={samples} loading={loading} />}
-      {tab === 'Diagnosis' && <section className="panel router-monitor-tab-panel"><h2>Router diagnosis</h2><p>Checks are based on the latest signed router heartbeat.</p><ul className="router-diagnosis-list">
-        <li><span>Monitoring agent</span><strong className={router.status === 'online' ? 'is-good' : 'is-warning'}>{router.status === 'online' ? 'Receiving heartbeats' : 'No report in the last 90 seconds'}</strong></li>
-        <li><span>CPU load</span><strong className={router.cpuLoad !== null && router.cpuLoad < 85 ? 'is-good' : 'is-warning'}>{router.cpuLoad === null ? 'No data' : `${router.cpuLoad}%`}</strong></li>
-        <li><span>Memory capacity</span><strong className={router.memoryUsedPercent !== null && router.memoryUsedPercent < 90 ? 'is-good' : 'is-warning'}>{router.memoryUsedPercent === null ? 'No data' : `${Math.round(router.memoryUsedPercent)}% used`}</strong></li>
-        <li><span>Disk capacity</span><strong className={router.diskUsedPercent !== null && router.diskUsedPercent < 90 ? 'is-good' : 'is-warning'}>{router.diskUsedPercent === null ? 'No data' : `${Math.round(router.diskUsedPercent)}% used`}</strong></li>
-        <li><span>Latest report</span><strong>{router.lastSeenAt ? formatSampleTime(router.lastSeenAt) : 'Never received'}</strong></li>
-      </ul><button className="outline-button" type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={14} /> Run checks again</button></section>}
-      <div className="router-monitor-last-updated">{loading ? 'Loading telemetry…' : lastRefreshedAt ? `Dashboard refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()} · router reports every minute` : 'Waiting for telemetry'}<button type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={12} className={refreshing ? 'is-spinning' : undefined} /> Refresh</button></div>
+      {tab === 'Logs' && <RouterResourcePanel title="RouterOS logs" description="Most recent log messages read directly from this router." resource="logs" icon={ScrollText} query={resourceData.logs} loading={resourceLoading === 'logs'} error={resourceError} onRefresh={() => void loadRouterResource('logs')} columns={[['time', 'Time'], ['topics', 'Topics'], ['message', 'Message']]} emptyMessage="The router returned no log entries." />}
+      {tab === 'Backups' && <RouterResourcePanel title="Router backup files" description="Once the connector is online, LKTech creates a binary router backup immediately if none exists, then every 24 hours. The 30 newest automatic copies stay on the router and appear first. Existing .backup and .rsc files are also listed." resource="backups" icon={FileArchive} query={resourceData.backups} loading={resourceLoading === 'backups'} error={resourceError} onRefresh={() => void loadRouterResource('backups')} columns={ [['name', 'File name'], ['size', 'Size'], ['creation-time', 'Created'], ['last-modified', 'Last modified']]} emptyMessage="No .backup or .rsc files are present on the router." />}
+      {tab === 'Scheduler' && <RouterResourcePanel title="Router scheduler" description="Scheduled RouterOS tasks read live from the router. This view is read-only." resource="scheduler" icon={CalendarClock} query={resourceData.scheduler} loading={resourceLoading === 'scheduler'} error={resourceError} onRefresh={() => void loadRouterResource('scheduler')} columns={[['name', 'Name'], ['disabled', 'Disabled'], ['interval', 'Interval'], ['next-run', 'Next run'], ['run-count', 'Run count'], ['owner', 'Owner']]} emptyMessage="No scheduler entries are configured on this router." />}
+      {tab === 'Script' && <RouterResourcePanel title="Router scripts" description="Shows RouterOS script metadata and the source of LKTech’s installed monitoring/provisioning script. Its router authentication token is redacted; other script source is not exposed." resource="scripts" icon={Code2} query={resourceData.scripts} loading={resourceLoading === 'scripts'} error={resourceError} onRefresh={() => void loadRouterResource('scripts')} columns={[['name', 'Name'], ['disabled', 'Disabled'], ['owner', 'Owner'], ['policy', 'Policy'], ['run-count', 'Run count'], ['last-started', 'Last run'], ['source', 'LKTech script source']]} emptyMessage="No scripts are configured on this router." />}
+      {tab === 'Diagnosis' && <section className="panel router-monitor-tab-panel router-diagnosis-panel">
+        <div className="router-data-heading"><div><h2>Router diagnosis</h2><p>Checks are based on the latest signed telemetry received for this router.</p></div><button className="router-diagnosis-run" type="button" onClick={() => { void loadMetrics(); void loadSummary() }} disabled={refreshing}><Activity size={14} /> Run diagnosis</button></div>
+        <div className="router-diagnosis-content">
+          <div className="router-diagnosis-filters" role="group" aria-label="Filter diagnosis checks">
+            {([
+              ['issues', 'Issues', issueCount],
+              ['all', 'All', diagnosticChecks.length],
+              ['passed', 'Passed', passedCount],
+            ] as const).map(([filter, label, count]) => <button type="button" key={filter} className={diagnosisFilter === filter ? 'active' : ''} aria-pressed={diagnosisFilter === filter} onClick={() => setDiagnosisFilter(filter)}>{label}<span>{count}</span></button>)}
+          </div>
+          {diagnosisFilter === 'issues' && issueCount === 0 && <div className={`router-diagnosis-summary ${diagnosticChecks.some((item) => item.status === 'unknown') ? 'has-unknown' : ''}`}>
+            {diagnosticChecks.some((item) => item.status === 'unknown') ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+            <span>{diagnosticChecks.some((item) => item.status === 'unknown') ? 'No active issues; some checks need telemetry.' : 'No open issues — all checks passed.'}</span>
+          </div>}
+          {diagnosisFilter !== 'issues' || issueCount > 0 ? <ul className="router-diagnosis-results">
+            {filteredDiagnosis.map((check) => <li key={check.name} className={`diagnosis-${check.status}`}>
+              {check.status === 'passed' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+              <span><strong>{check.name}</strong><small>{check.detail}</small></span>
+              <b>{check.status === 'passed' ? 'Passed' : check.status === 'issue' ? 'Issue' : 'No data'}</b>
+            </li>)}
+          </ul> : null}
+          <p className="router-diagnosis-updated">{router.metricsUpdatedAt ? `Telemetry sample ${formatSampleTime(router.metricsUpdatedAt)}` : 'No telemetry sample has been received yet.'}</p>
+        </div>
+      </section>}
+      <div className="router-monitor-last-updated">{loading ? 'Loading telemetry…' : lastRefreshedAt ? `Dashboard refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()} · router reports every 30 seconds` : 'Waiting for telemetry'}<button type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={12} className={refreshing ? 'is-spinning' : undefined} /> Refresh</button></div>
     </section>
   )
+}
+
+function formatCurrency(amount: number) {
+  return `Ksh ${new Intl.NumberFormat('en-KE', { maximumFractionDigits: 0 }).format(amount)}`
+}
+
+function MiniTrend({ samples }: { samples: MetricSample[] }) {
+  const values = samples.map((sample) => sample.activeHotspotUsers + sample.activePppoeUsers)
+  if (values.length < 2) return <span className="router-mini-trend-empty">Collecting usage</span>
+  const maximum = Math.max(...values, 1)
+  const points = values.map((value, index) =>
+    `${index / (values.length - 1) * 150},${26 - value / maximum * 22}`).join(' ')
+  return <svg className="router-mini-trend" viewBox="0 0 150 28" role="img" aria-label="Active user counts in recent router reports">
+    <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+}
+
+function RouterResourcePanel({
+  title,
+  description,
+  resource,
+  icon: Icon,
+  query,
+  loading,
+  error,
+  onRefresh,
+  columns,
+  emptyMessage,
+}: {
+  title: string
+  description: string
+  resource: RouterResourceName
+  icon: typeof Cpu
+  query?: RouterResourceQuery
+  loading: boolean
+  error: string
+  onRefresh: () => void
+  columns: Array<[string, string]>
+  emptyMessage: string
+}) {
+  const records = (query?.result || []).slice()
+  if (resource === 'backups') {
+    records.sort((left, right) => routerResourceTimestamp(right) - routerResourceTimestamp(left))
+  }
+  return <section className="panel router-monitor-tab-panel router-data-panel">
+    <div className="router-data-heading"><div className="router-data-title"><Icon size={17} /><span><h2>{title}</h2><p>{description}</p></span></div><button type="button" className="outline-button" onClick={onRefresh} disabled={loading}><RefreshCw size={13} className={loading ? 'is-spinning' : undefined} /> {loading ? 'Loading…' : 'Refresh from router'}</button></div>
+    {error && <p className="router-data-error" role="alert">{error}</p>}
+    {!error && loading && <p className="router-data-loading" role="status">Reading live {resource} data from RouterOS…</p>}
+    {!error && !loading && !query && <p className="router-data-loading">Waiting for the RouterOS API connector.</p>}
+    {!error && !loading && query && records.length === 0 && <div className="router-resource-empty"><FileText size={18} /><span>{emptyMessage}</span></div>}
+    {!error && !loading && query && records.length > 0 && <div className="table-scroll"><table><thead><tr>{columns.map(([key, label]) => <th key={key}>{label}</th>)}</tr></thead><tbody>
+      {records.map((record, index) => <tr key={String(record['.id'] || record.name || index)}>{columns.map(([key]) => <td key={key} className={key === 'message' || key === 'name' ? 'router-resource-primary' : ''}>{key === 'source' && typeof record[key] === 'string' ? <details className="router-script-source"><summary>View LKTech source</summary><pre>{record[key]}</pre></details> : formatResourceValue(record[key])}</td>)}</tr>)}
+    </tbody></table></div>}
+    <p className="router-resource-footnote">{resource === 'backups' ? 'Automatic backups are saved on the router every 24 hours; LKTech keeps the latest 30.' : 'Read-only RouterOS REST data'}{query?.completedAt ? ` · last queried ${formatSampleTime(query.completedAt)}` : ''}</p>
+  </section>
+}
+
+function routerResourceTimestamp(record: RouterResourceRecord) {
+  const name = record.name
+  if (typeof name === 'string') {
+    const automaticName = /^lktech-auto-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\.backup$/i.exec(name)
+    if (automaticName) {
+      const [, year, month, day, hour, minute, second] = automaticName
+      return Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second))
+    }
+  }
+
+  for (const field of ['last-modified', 'creation-time']) {
+    const value = record[field]
+    if (typeof value !== 'string') continue
+    const routerOsDate = /^([a-z]{3})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$/i.exec(value)
+    if (routerOsDate) {
+      const month = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(routerOsDate[1].toLowerCase())
+      if (month >= 0) return Date.UTC(Number(routerOsDate[3]), month, Number(routerOsDate[2]), Number(routerOsDate[4]), Number(routerOsDate[5]), Number(routerOsDate[6]))
+    }
+    const timestamp = Date.parse(value)
+    if (Number.isFinite(timestamp)) return timestamp
+  }
+  return 0
+}
+
+function formatResourceValue(value: string | number | boolean | null | undefined) {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  return String(value)
 }
 
 function ResourceBar({ icon: Icon, label, value }: { icon: typeof Cpu; label: string; value: number | null }) {

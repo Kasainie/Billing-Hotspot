@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
   ArrowRight,
@@ -19,6 +20,7 @@ import {
   Clock3,
   CreditCard,
   Copy,
+  Download,
   Eye,
   EyeOff,
   FileText,
@@ -40,19 +42,23 @@ import {
   Signal,
   SlidersHorizontal,
   Ticket,
+  Trash2,
+  Upload,
   Users,
   Wifi,
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { DEFAULT_ROUTER_BRIDGE_NAME, parseServiceSubnet } from '@/lib/router-provisioning'
+import { parseServiceSubnet, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
 import { defaultHotspotPortalBranding, hotspotPortalTemplates, isHotspotPortalTemplateId, type HotspotPortalTemplateId } from '@/lib/hotspot-templates'
 import { PaymentSettings } from '@/components/payment-settings'
+import { SmsSettings } from '@/components/sms-settings'
 import { PaymentReconciliation } from '@/components/payment-reconciliation'
 import { OperationsWorkspace } from '@/components/operations-workspace'
 import { LiveHotspotSessions } from '@/components/live-hotspot-sessions'
 import { RouterMonitorDetail, type RouterConnectorEnrollment, type RouterMonitorRecord, type RouterMonitorTab } from '@/components/router-monitor-detail'
 import { SubscriberProfile, type SubscriberProfileData } from '@/components/subscriber-profile'
+import { escapeCsvField as escapeSubscriberCsvField, parseCsv } from '@/lib/subscriber-csv'
 
 const navigationSections: { label?: string; items: { label: string; icon: LucideIcon; count?: string; children?: { label: string; view: string; icon?: LucideIcon }[] }[] }[] = [
   { items: [{ label: 'Overview', icon: LayoutDashboard }] },
@@ -68,7 +74,7 @@ const navigationSections: { label?: string; items: { label: string; icon: Lucide
     { label: 'Devices', icon: Router, children: [{ label: 'Routers', view: 'Routers', icon: Network }, { label: 'TR-069', view: 'TR-069' }] },
   ] },
   { label: 'FINANCE', items: [
-    { label: 'Billing', icon: FileText, children: [{ label: 'Payments', view: 'Payments', icon: CreditCard }, { label: 'Payment settings', view: 'Payment settings', icon: Settings2 }, { label: 'Invoices', view: 'Invoices' }, { label: 'Expenses', view: 'Expenses' }] },
+    { label: 'Billing', icon: FileText, children: [{ label: 'Payments', view: 'Payments', icon: CreditCard }, { label: 'Payment settings', view: 'Payment settings', icon: Settings2 }, { label: 'SMS settings', view: 'SMS settings', icon: MessageCircle }, { label: 'Invoices', view: 'Invoices' }, { label: 'Expenses', view: 'Expenses' }] },
     { label: 'Vouchers', icon: Ticket, children: [{ label: 'List', view: 'Voucher list' }, { label: 'Generate', view: 'Generate vouchers' }, { label: 'Analytics', view: 'Voucher analytics' }] },
   ] },
 ]
@@ -171,6 +177,7 @@ export function AdminDashboard() {
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [dashboardNotice, setDashboardNotice] = useState('')
   const [showAllSites, setShowAllSites] = useState(false)
+  const [deletingSiteId, setDeletingSiteId] = useState('')
   const [dataStatus, setDataStatus] = useState<'loading' | 'live' | 'error'>('loading')
   const [currentTenantId, setCurrentTenantId] = useState('')
   const [currentTenantName, setCurrentTenantName] = useState('Loading workspace…')
@@ -352,6 +359,7 @@ export function AdminDashboard() {
       { id: 'routers', label: 'Routers', detail: 'Provision network devices', target: 'Routers', type: 'Page' },
       { id: 'portal-design', label: 'Portal design', detail: 'Customize the hotspot portal', target: 'Portal design', type: 'Page' },
       { id: 'payment-settings', label: 'Payment settings', detail: 'Configure payment providers', target: 'Payment settings', type: 'Page' },
+      { id: 'sms-settings', label: 'SMS settings', detail: 'Configure customer text notifications', target: 'SMS settings', type: 'Page' },
     ]
     const matchingShortcuts = shortcuts.filter((item) => !term || `${item.label} ${item.detail}`.toLowerCase().includes(term))
     if (!term) return matchingShortcuts
@@ -435,6 +443,7 @@ export function AdminDashboard() {
   }
 
   const displayedSites = dashboardData.sites.map((site) => ({
+    id: site.id,
     name: site.name,
     location: site.location,
     code: site.id.slice(0, 6).toUpperCase(),
@@ -447,6 +456,29 @@ export function AdminDashboard() {
   const customerNames = useMemo(() => new Map(dashboardData.customers.map((customer) => [customer.id, customer.name])), [dashboardData.customers])
   const activeSiteCount = dashboardData.sites.filter((site) => site.status.toLowerCase() === 'active').length
   const networkStatusTone = dataStatus !== 'live' || !dashboardData.sites.length || activeSiteCount !== dashboardData.sites.length ? 'amber' : 'green'
+
+  async function deleteSite(site: typeof displayedSites[number]) {
+    if (!window.confirm(`Delete site ${site.name}? Customers and equipment will be kept but unlinked from this site. Routers and their monitoring history linked to this site will also be deleted.`)) return
+    setDeletingSiteId(site.id)
+    setDashboardNotice('')
+    try {
+      const response = await fetch(`/api/sites?id=${encodeURIComponent(site.id)}`, { method: 'DELETE' })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to delete site.')
+      setDashboardData((current) => ({
+        ...current,
+        sites: current.sites.filter((currentSite) => currentSite.id !== site.id),
+        summary: { ...current.summary, siteCount: Math.max(0, current.summary.siteCount - 1) },
+      }))
+      if (siteFilter === site.name) setSiteFilter('All sites')
+      setDashboardNotice(`Site "${site.name}" deleted. Customers and equipment were kept; linked routers were removed.`)
+      window.dispatchEvent(new Event('workspace-data-changed'))
+    } catch (error) {
+      setDashboardNotice(error instanceof Error ? error.message : 'Unable to delete site.')
+    } finally {
+      setDeletingSiteId('')
+    }
+  }
 
   function formatDashboardValue(value: number) {
     return new Intl.NumberFormat().format(value)
@@ -556,11 +588,11 @@ export function AdminDashboard() {
           </div>
           <div className="header-menu-anchor" ref={profileRef}>
             <button type="button" className="top-avatar" aria-label={`Account menu for ${currentUser || 'user'}`} aria-expanded={profileOpen} onClick={() => { setProfileOpen((open) => !open); setNotificationsOpen(false); setSearchOpen(false) }}>{userInitials}</button>
-            {profileOpen && <div className="header-popover profile-popover"><div className="profile-summary"><div className="profile-avatar">{userInitials}</div><span><strong>{currentUser || 'Workspace user'}</strong><small>{currentEmail}</small></span></div><div className="profile-workspace"><span>ACTIVE WORKSPACE</span><strong>{currentTenantName}</strong></div><button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Payment settings'); setProfileOpen(false) }}><Settings2 size={15} /> Payment settings</button><button type="button" className="profile-menu-item profile-signout" onClick={() => { setProfileOpen(false); void signOut() }}>Sign out</button></div>}
+            {profileOpen && <div className="header-popover profile-popover"><div className="profile-summary"><div className="profile-avatar">{userInitials}</div><span><strong>{currentUser || 'Workspace user'}</strong><small>{currentEmail}</small></span></div><div className="profile-workspace"><span>ACTIVE WORKSPACE</span><strong>{currentTenantName}</strong></div><button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Payment settings'); setProfileOpen(false) }}><Settings2 size={15} /> Payment settings</button><button type="button" className="profile-menu-item" onClick={() => { setActiveNav('SMS settings'); setProfileOpen(false) }}><MessageCircle size={15} /> SMS settings</button><button type="button" className="profile-menu-item profile-signout" onClick={() => { setProfileOpen(false); void signOut() }}>Sign out</button></div>}
           </div>
         </div></header>
         <div className="page-wrap" data-dashboard-network={dashboardSections.network} data-dashboard-activity={dashboardSections.activity} data-dashboard-operations={dashboardSections.operations}>
-          {activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'Payments' ? <PaymentReconciliation /> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} /> : <ModulePanel title={activeNav} /> : null}
+          {activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'SMS settings' ? <SmsSettings /> : activeNav === 'Payments' ? <PaymentReconciliation /> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} /> : <ModulePanel title={activeNav} /> : null}
           {activeNav === 'Overview' ? <>
           <div className="page-heading"><div><div className="live-label"><StatusDot tone={networkStatusTone} /> WORKSPACE OVERVIEW</div><h1>{timeGreeting || 'Welcome'}, {currentUser.trim().split(/\s+/)[0] || 'there'}.</h1><p>Workspace records and billing activity for your network.</p></div><div className="heading-actions"><button ref={customizeButtonRef} type="button" className="outline-button" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={openDashboardCustomization}><SlidersHorizontal size={15} /> Customize</button><button type="button" className="primary-button" onClick={exportDashboardReport}><ArrowDownRight size={15} /> Export report</button></div></div>
           {dashboardNotice && <p className="dashboard-notice" role="status">{dashboardNotice}<button type="button" aria-label="Dismiss message" onClick={() => setDashboardNotice('')}><X size={13} /></button></p>}
@@ -580,7 +612,7 @@ export function AdminDashboard() {
           {dashboardSections.network && <div className="overview-grid">
             <section className="panel site-panel">
               <div className="panel-heading"><div><h3>Configured sites</h3><span>{dataStatus === 'live' ? `${dashboardData.sites.length} sites in this workspace` : 'Workspace site records'}</span></div><button type="button" className="text-button" onClick={() => setShowAllSites((value) => !value)} disabled={filteredSites.length <= 3}>{showAllSites ? 'Show less' : 'View all'} <ArrowUpRight size={13} /></button></div>
-              {dataStatus === 'loading' ? <p className="header-empty">Loading site records…</p> : dataStatus === 'error' ? <p className="header-empty">Site records are unavailable.</p> : visibleSites.length ? visibleSites.map((site) => <div className="site-row" key={site.code}><div className={`site-icon site-${site.color}`}><Globe2 size={17} /></div><div className="site-info"><strong>{site.name}</strong><span>{site.location || site.code}</span></div><div className="site-stat"><strong>{formatDashboardValue(site.customers)}</strong><span>subscribers</span></div><div className="health"><div><StatusDot tone={site.status.toLowerCase() === 'active' ? 'green' : 'amber'} /></div><span>{site.status}</span></div></div>) : <p className="header-empty">{siteFilter === 'All sites' ? 'No sites have been added to this workspace.' : 'No sites match this filter.'}</p>}
+              {dataStatus === 'loading' ? <p className="header-empty">Loading site records…</p> : dataStatus === 'error' ? <p className="header-empty">Site records are unavailable.</p> : visibleSites.length ? visibleSites.map((site) => <div className="site-row" key={site.id}><div className={`site-icon site-${site.color}`}><Globe2 size={17} /></div><div className="site-info"><strong>{site.name}</strong><span>{site.location || site.code}</span></div><div className="site-stat"><strong>{formatDashboardValue(site.customers)}</strong><span>subscribers</span></div><div className="health"><div><StatusDot tone={site.status.toLowerCase() === 'active' ? 'green' : 'amber'} /></div><span>{site.status}</span></div><button type="button" className="text-button danger-text" aria-label={`Delete site ${site.name}`} title={`Delete site ${site.name}`} disabled={deletingSiteId !== ''} onClick={() => void deleteSite(site)}><Trash2 size={14} />{deletingSiteId === site.id ? 'Deleting…' : 'Delete'}</button></div>) : <p className="header-empty">{siteFilter === 'All sites' ? 'No sites have been added to this workspace.' : 'No sites match this filter.'}</p>}
             </section>
             <section className="panel revenue-panel">
               <div className="panel-heading"><div><h3>Payments received</h3><span>Confirmed payments · {range}</span></div></div>
@@ -632,6 +664,7 @@ type RouterInventory = {
   interfaces: Array<{ name: string; running: boolean; disabled: boolean }>
   bridgePorts: Array<{ interface: string; bridge: string }>
   wanInterfaces: string[]
+  bridges?: string[]
   bridgeName: string | null
   serviceConfiguration?: {
     bridgeName: string
@@ -690,6 +723,7 @@ export function RouterProvisioning({
   const [manualPortError, setManualPortError] = useState('')
   const [manualWanPort, setManualWanPort] = useState('')
   const [selectedPorts, setSelectedPorts] = useState<string[]>([])
+  const [allowMovingBridgePorts, setAllowMovingBridgePorts] = useState(false)
   const [useCustomSubnet, setUseCustomSubnet] = useState(false)
   const [hotspotSubnet, setHotspotSubnet] = useState(defaultHotspotSubnet)
   const [pppoeSubnet, setPppoeSubnet] = useState(defaultPppoeSubnet)
@@ -707,7 +741,11 @@ export function RouterProvisioning({
   const requiresProvisioningKey = process.env.NODE_ENV !== 'development'
   const activeHotspotSubnet = useCustomSubnet ? hotspotSubnet : defaultHotspotSubnet
   const activePppoeSubnet = useCustomSubnet ? pppoeSubnet : defaultPppoeSubnet
-  const activeBridgeName = routerInventory?.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
+  const activeBridgeName = resolveRouterSubscriberBridgeName(
+    routerInventory?.bridgeName,
+    routerInventory?.bridges,
+    routerInventory?.wanInterfaces,
+  )
   const hotspotNetwork = parseServiceSubnet(activeHotspotSubnet)
   const pppoeNetwork = parseServiceSubnet(activePppoeSubnet)
   const duplicateServiceNetworks = Boolean(hotspotNetwork && pppoeNetwork && hotspotNetwork.cidr === pppoeNetwork.cidr)
@@ -737,8 +775,19 @@ export function RouterProvisioning({
     const wanInterfaces = new Set([...(routerInventory?.wanInterfaces || []), ...(manualWanPort ? [manualWanPort] : [])])
     const validInterfaces = new Set([...(routerInventory?.interfaces.map((item) => item.name) || []), ...manualPorts])
     const ports = selectedPorts.filter((port) => validInterfaces.has(port) && !wanInterfaces.has(port))
+    const movablePorts = ports.filter((port) =>
+      routerInventory?.bridgePorts.some((membership) => membership.interface === port && membership.bridge !== activeBridgeName),
+    )
     if (ports.length === 0) {
       setConfigurationError('Select at least one subscriber port; the detected WAN port cannot be bridged.')
+      return
+    }
+    if (needsPhysicalWanSelection) {
+      setConfigurationError(`The WAN DHCP client runs on ${wanBridge}. Mark the physical uplink port as WAN before moving any bridge ports.`)
+      return
+    }
+    if (movablePorts.length && !allowMovingBridgePorts) {
+      setConfigurationError('Confirm that the selected bridge ports may be moved to the subscriber bridge.')
       return
     }
     setPreparingConfiguration(true)
@@ -746,6 +795,7 @@ export function RouterProvisioning({
     try {
       const configuration = {
         ports,
+        movablePorts,
         managedPorts: [...validInterfaces].filter((port) => !wanInterfaces.has(port)),
         wanPorts: [...wanInterfaces],
         services,
@@ -780,6 +830,13 @@ export function RouterProvisioning({
     } catch {
       setCopied(null)
     }
+  }
+
+  const goToPreviousStep = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (step === 0) onExit()
+    else setStep(step - 1)
   }
 
   const createProvisioningScript = async () => {
@@ -858,7 +915,7 @@ export function RouterProvisioning({
       const inventory = result.routerData as RouterInventory
       setRouterInventory(inventory)
       if (!inventoryInitialized) {
-        const bridgeName = inventory.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
+        const bridgeName = resolveRouterSubscriberBridgeName(inventory.bridgeName, inventory.bridges, inventory.wanInterfaces)
         setSelectedPorts(inventory.bridgePorts.filter((port) => port.bridge === bridgeName && !inventory.wanInterfaces.includes(port.interface)).map((port) => port.interface))
         setInventoryInitialized(true)
       }
@@ -888,7 +945,7 @@ export function RouterProvisioning({
           const inventory = result.routerData as RouterInventory
           setRouterInventory(inventory)
           if (!inventoryInitialized) {
-            const bridgeName = inventory.bridgeName || DEFAULT_ROUTER_BRIDGE_NAME
+            const bridgeName = resolveRouterSubscriberBridgeName(inventory.bridgeName, inventory.bridges, inventory.wanInterfaces)
             const existingPorts = inventory.bridgePorts
               .filter((port) => port.bridge === bridgeName && !inventory.wanInterfaces.includes(port.interface))
               .map((port) => port.interface)
@@ -898,7 +955,6 @@ export function RouterProvisioning({
         }
         if (result.status === 'applied') {
           setProvisioningMessage(result.routerData?.interfaces?.length ? 'MikroTik is online' : 'Router online; add bridge ports manually or refresh discovery')
-          setStep((currentStep) => currentStep < 2 ? 2 : currentStep)
         }
         else if (result.status === 'configured') setProvisioningMessage('Router services confirmed. This router is ready to go live.')
         else if (result.status === 'downloaded') setProvisioningMessage('Script downloaded; waiting for RouterOS to finish and confirm')
@@ -912,13 +968,18 @@ export function RouterProvisioning({
     void checkStatus()
     const timer = window.setInterval(checkStatus, 2500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [provisioningId, provisioningAdminKey, requiresProvisioningKey, inventoryInitialized])
+  }, [provisioningId, provisioningAdminKey, requiresProvisioningKey, inventoryInitialized, activeBridgeName])
 
   const createScriptButtonLabel = provisioningState === 'creating' ? 'Creating script...' : fetchCommand ? 'Create a new script' : 'Create WinBox script'
   const provisionExpiryNote = 'This one-time script link expires in 15 minutes.'
   const availablePorts = [...new Set([...(routerInventory?.interfaces.map((port) => port.name) || []), ...manualPorts])]
   const hasDiscoveredPorts = Boolean(routerInventory?.interfaces.length)
   const wanPorts = [...new Set([...(routerInventory?.wanInterfaces || []), ...(manualWanPort ? [manualWanPort] : [])])]
+  const wanBridge = routerInventory?.wanInterfaces.find((name) => routerInventory.bridges?.includes(name))
+  const needsPhysicalWanSelection = Boolean(wanBridge && !manualWanPort)
+  const hasPortsOnOtherBridges = availablePorts.some((port) =>
+    routerInventory?.bridgePorts.some((membership) => membership.interface === port && membership.bridge !== activeBridgeName),
+  )
   const confirmedConfiguration = provisioningRecord?.routerData?.serviceConfiguration
   const provisioningEvents = [
     { label: 'Provisioning link created', at: provisioningRecord?.createdAt },
@@ -954,6 +1015,11 @@ export function RouterProvisioning({
         </>}
 
         {step === 1 && <>
+          <button type="button" className="wizard-back provisioning-step-back" onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            setStep(0)
+          }}><ArrowLeft size={15} />Back to router identity</button>
           <div className="provision-card-heading"><h2>Provisioning script</h2><p>Open WinBox → New Terminal and paste this one-liner.</p></div>
 
           <div className="device-mode-warning" role="status">
@@ -987,23 +1053,35 @@ export function RouterProvisioning({
           </section>
 
           <section className="router-setup-section">
-            <div className="router-setup-title"><div><h2>Bridge ports</h2><p>Interfaces that join {activeBridgeName} for subscriber traffic.</p></div><button className="text-button" onClick={refreshRouterInventory}>Refresh</button></div>
-            <p className="router-setup-hint">Subscriber bridge is selected automatically: <strong>{activeBridgeName}</strong>.</p>
-            <div className="uplink-warning"><AlertTriangle size={16} /><div><strong>Don't bridge the uplink port</strong><p>{wanPorts.length ? `${wanPorts.join(', ')} ${routerInventory?.wanInterfaces.length ? 'runs the router\'s DHCP client' : 'is marked as the uplink/WAN'}. Adding it to ${activeBridgeName} can cut off internet access; leave it unselected.` : 'No DHCP uplink was detected. Mark the WAN port below before selecting subscriber interfaces.'}</p></div></div>
+            <div className="router-setup-title"><div><h2>Subscriber ports</h2><p>Choose which physical ports carry Hotspot or PPPoE traffic.</p></div><button type="button" className="text-button" onClick={refreshRouterInventory}>Refresh ports</button></div>
+            <div className="subscriber-bridge-target"><span>Subscriber bridge</span><strong>{activeBridgeName}</strong><small>Selected automatically; the WAN bridge will not be used for subscriber services.</small></div>
+            <ol className="port-setup-steps">
+              <li><span>1</span><div><strong>Protect your internet connection</strong><small>Mark the port connected to your modem or ISP as WAN.</small></div></li>
+              <li><span>2</span><div><strong>Choose subscriber ports</strong><small>Select every port where subscriber devices will connect.</small></div></li>
+              {hasPortsOnOtherBridges && <li><span>3</span><div><strong>Approve moving ports if needed</strong><small>Only selected ports will move to {activeBridgeName}.</small></div></li>}
+            </ol>
+            <div className="uplink-warning"><AlertTriangle size={16} /><div><strong>{wanBridge ? `Internet DHCP is running on ${wanBridge}` : wanPorts.length ? 'WAN interface detected' : 'Identify your internet uplink'}</strong><p>{wanBridge
+              ? `The router uses ${wanBridge} for internet DHCP. The app cannot safely identify which physical port leads to your modem, so mark that physical port as WAN below.`
+              : wanPorts.length ? `${wanPorts.join(', ')} is protected as WAN. Do not select the port connected to your modem.`
+                : 'No WAN port was detected. Find the port connected to your internet modem and mark it WAN below.'}</p></div></div>
+            {needsPhysicalWanSelection && <p className="port-setup-action-hint" role="status">Action needed: locate the physical ISP/modem cable on the router and click <strong>Mark WAN</strong> beside that port. Subscriber ports can then be selected safely.</p>}
+            {hasPortsOnOtherBridges && <label className={`bridge-port-move-confirmation${needsPhysicalWanSelection ? ' needs-wan' : ''}`}><input type="checkbox" checked={allowMovingBridgePorts} disabled={needsPhysicalWanSelection} onChange={(event) => setAllowMovingBridgePorts(event.target.checked)} /><span><strong>Allow selected ports to move to {activeBridgeName}</strong><small>{needsPhysicalWanSelection ? 'Mark the physical WAN port first to enable this option.' : 'Only checked subscriber ports will move. Moving a port may disconnect devices connected to it.'}</small></span></label>}
+            {availablePorts.length > 0 && <div className="port-selection-summary"><strong>{selectedPorts.filter((port) => !wanPorts.includes(port)).length} selected</strong><span>for subscriber service</span></div>}
             {availablePorts.length > 0 ? <div className="router-port-list">{availablePorts.map((portName) => {
               const isWan = wanPorts.includes(portName)
               const existingBridge = routerInventory?.bridgePorts.find((item) => item.interface === portName)?.bridge
               const lockedToOtherBridge = Boolean(existingBridge && existingBridge !== activeBridgeName)
+              const moveNotConfirmed = Boolean(lockedToOtherBridge && !allowMovingBridgePorts)
               return <div className="router-port-row" key={portName}>
-                <label className={`router-port${selectedPorts.includes(portName) ? ' selected' : ''}${isWan || lockedToOtherBridge ? ' unavailable' : ''}`}>
-                  <input type="checkbox" checked={selectedPorts.includes(portName)} disabled={isWan || lockedToOtherBridge} onChange={() => togglePort(portName)} />
-                  <span><strong>{portName}</strong><small>{isWan ? 'Uplink / WAN · leave unselected' : lockedToOtherBridge ? `Already on ${existingBridge}` : existingBridge || 'Add to subscriber bridge'}</small></span>
-                  {isWan && <b>UPLINK / WAN</b>}
+                <label className={`router-port${selectedPorts.includes(portName) ? ' selected' : ''}${isWan || moveNotConfirmed ? ' unavailable' : ''}`}>
+                  <input type="checkbox" checked={selectedPorts.includes(portName)} disabled={isWan || moveNotConfirmed} onChange={() => togglePort(portName)} />
+                  <span><strong>{portName}</strong><small>{isWan ? 'Internet uplink · excluded from subscriber bridge' : lockedToOtherBridge ? `${existingBridge} · ${allowMovingBridgePorts ? `will move to ${activeBridgeName}` : 'approve moving above to select'}` : existingBridge ? `Currently on ${existingBridge}` : `Will join ${activeBridgeName}`}</small></span>
+                  {isWan && <b>WAN · PROTECTED</b>}
                 </label>
-                {!isWan && <button type="button" className="router-port-wan-toggle" aria-pressed={manualWanPort === portName} onClick={() => toggleWanPort(portName)}>{manualWanPort === portName ? 'Marked WAN' : 'Mark WAN'}</button>}
+                {!isWan && <button type="button" className="router-port-wan-toggle" aria-label={`${manualWanPort === portName ? 'Unmark' : 'Mark'} ${portName} as WAN`} aria-pressed={manualWanPort === portName} onClick={() => toggleWanPort(portName)}>{manualWanPort === portName ? 'WAN selected' : 'Mark WAN'}</button>}
               </div>
             })}</div> : <p className="router-setup-hint">{routerInventory ? 'No ports were received from the router. Add the interface names shown in WinBox below.' : 'Waiting for router interface discovery. Keep the provisioning page open.'}</p>}
-            <p className="router-setup-hint">Only checked ports carry subscriber services. Existing members of this bridge that are unchecked will be removed when the script runs; ports on other bridges and marked WAN ports are left unchanged.</p>
+            <p className="router-setup-hint port-setup-footnote">Only selected ports carry subscriber traffic. WAN ports are protected. Unchecked members already on {activeBridgeName} will be removed from that bridge when you apply.</p>
             {!hasDiscoveredPorts && <div className="manual-port-entry">
               <label htmlFor="manual-router-port">Interface name</label>
               <div><input id="manual-router-port" value={manualPortName} maxLength={48} onChange={(event) => setManualPortName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addManualPort() } }} placeholder="e.g. ether2" /><button type="button" className="manual-port-add" onClick={addManualPort}>Add port</button></div>
@@ -1024,7 +1102,7 @@ export function RouterProvisioning({
           </section>
 
           {configurationError && <p className="router-discovery-status error" role="alert">{configurationError}</p>}
-          <button className="wizard-next apply-router-config" disabled={preparingConfiguration || (!routerInventory && manualPorts.length === 0) || !selectedPorts.some((port) => !wanPorts.includes(port)) || services.length === 0 || (services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork) || duplicateServiceNetworks} onClick={createRouterConfiguration}>{preparingConfiguration ? 'Preparing configuration...' : 'Apply configuration'}<ArrowRight size={15} /></button>
+          <button className="wizard-next apply-router-config" disabled={preparingConfiguration || (!routerInventory && manualPorts.length === 0) || !selectedPorts.some((port) => !wanPorts.includes(port)) || needsPhysicalWanSelection || (selectedPorts.some((port) => routerInventory?.bridgePorts.some((membership) => membership.interface === port && membership.bridge !== activeBridgeName)) && !allowMovingBridgePorts) || services.length === 0 || (services.includes('Hotspot') && !hotspotNetwork) || (services.includes('PPPoE') && !pppoeNetwork) || duplicateServiceNetworks} onClick={createRouterConfiguration}>{preparingConfiguration ? 'Preparing configuration...' : 'Apply configuration'}<ArrowRight size={15} /></button>
         </>}
 
         {step === 3 && provisioningState === 'configured' ? <>
@@ -1064,9 +1142,9 @@ export function RouterProvisioning({
       </section>
 
       {!(step === 3 && provisioningState === 'configured') && <div className="provision-footer">
-        <button className="wizard-back" onClick={() => step === 0 ? onExit() : setStep((current) => current - 1)}><ArrowLeft size={15} />Back</button>
-        {step < steps.length - 1 && step !== 2 && <button className="wizard-next" disabled={(step === 0 && (!routerName.trim() || !fetchCommand || (requiresProvisioningKey && provisioningAdminKey.length < 32))) || (step === 1 && provisioningState !== 'applied')} onClick={() => setStep((current) => current + 1)}>{step === 0 ? 'Provision' : 'Configure services'}<ArrowRight size={15} /></button>}
-        {step === steps.length - 1 && <button className="wizard-next" disabled={provisioningState !== 'configured'} onClick={() => onProvision()}>Go live<Check size={15} /></button>}
+        <button type="button" className="wizard-back" onClick={goToPreviousStep}><ArrowLeft size={15} />{step === 1 ? 'Back to router identity' : 'Back'}</button>
+        {step < steps.length - 1 && step !== 2 && <button type="button" className="wizard-next" disabled={(step === 0 && (!routerName.trim() || !fetchCommand || (requiresProvisioningKey && provisioningAdminKey.length < 32))) || (step === 1 && provisioningState !== 'applied')} onClick={() => setStep((current) => current + 1)}>{step === 0 ? 'Provision' : 'Configure services'}<ArrowRight size={15} /></button>}
+        {step === steps.length - 1 && <button type="button" className="wizard-next" disabled={provisioningState !== 'configured'} onClick={() => onProvision()}>Go live<Check size={15} /></button>}
       </div>}
     </section>
   )
@@ -1105,6 +1183,14 @@ function RouterManagement() {
   const [scriptBusy, setScriptBusy] = useState(false)
   const [scriptCopied, setScriptCopied] = useState(false)
   const [copiedError, setCopiedError] = useState('')
+  const [routerMenu, setRouterMenu] = useState<{
+    router: RouterMonitorRecord
+    webConsoleUrl: string | null
+    top: number
+    left: number
+  } | null>(null)
+  const routerMenuAnchorRef = useRef<HTMLElement | null>(null)
+  const routerMenuPopupRef = useRef<HTMLDivElement | null>(null)
   const loadInFlight = useRef(false)
 
   const load = useCallback(async () => {
@@ -1155,6 +1241,35 @@ function RouterManagement() {
     }
   }, [load])
 
+  useEffect(() => {
+    if (!routerMenu) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target
+      if (target instanceof Node &&
+          !routerMenuPopupRef.current?.contains(target) &&
+          !routerMenuAnchorRef.current?.contains(target)) {
+        setRouterMenu(null)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setRouterMenu(null)
+        routerMenuAnchorRef.current?.focus()
+      }
+    }
+    const closeOnScroll = () => setRouterMenu(null)
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('scroll', closeOnScroll, true)
+    window.addEventListener('resize', closeOnScroll)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer)
+      document.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('scroll', closeOnScroll, true)
+      window.removeEventListener('resize', closeOnScroll)
+    }
+  }, [routerMenu])
+
   const filteredRouters = useMemo(() => {
     const term = filter.trim().toLowerCase()
     return routers.filter((router) =>
@@ -1172,6 +1287,22 @@ function RouterManagement() {
     setProvisioningSiteName('Central Hub')
     setShowProvisioning(true)
   }
+  const toggleRouterMenu = (router: RouterMonitorRecord, webConsoleUrl: string | null, anchor: HTMLElement) => {
+    if (routerMenu?.router.id === router.id) {
+      setRouterMenu(null)
+      return
+    }
+    const rect = anchor.getBoundingClientRect()
+    const popupWidth = 220
+    const popupHeight = 232
+    const left = Math.max(8, Math.min(rect.right - popupWidth, window.innerWidth - popupWidth - 8))
+    const top = rect.bottom + popupHeight + 8 <= window.innerHeight
+      ? rect.bottom + 6
+      : Math.max(8, rect.top - popupHeight - 6)
+    routerMenuAnchorRef.current = anchor
+    setRouterMenu({ router, webConsoleUrl, top, left })
+  }
+  const closeRouterMenu = () => setRouterMenu(null)
 
   const generateMonitorScript = async (router: RouterMonitorRecord) => {
     setSelectedRouterId(router.id)
@@ -1203,7 +1334,7 @@ function RouterManagement() {
     const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/monitoring`, { method: 'DELETE' })
     const result = response.status === 204 ? null : await response.json() as { error?: string }
     if (!response.ok) throw new Error(result?.error || 'Unable to delete router monitoring.')
-    const remainingRouters = routers.filter((item) => item.siteId !== router.siteId)
+    const remainingRouters = routers.filter((item) => item.id !== router.id)
     setRouters(remainingRouters)
     setSummary({
       total: remainingRouters.length,
@@ -1216,7 +1347,7 @@ function RouterManagement() {
   }
 
   const confirmRemoveRouter = async (router: RouterMonitorRecord) => {
-    if (!window.confirm(`Delete router ${router.routerName} and its linked network site? Other routers attached to the site will also be deleted. Customer and equipment records will be kept.`)) return
+    if (!window.confirm(`Delete router ${router.routerName} and its monitoring history? Its network site, customers, and equipment records will be kept.`)) return
     setError('')
     try {
       await removeRouterMonitor(router)
@@ -1283,7 +1414,7 @@ function RouterManagement() {
       {scriptBusy && <p className="router-detail-script-status" role="status">Preparing a new one-time monitor script…</p>}
       {installScript && <div className="router-script-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setInstallScript(null) }}>
         <section className="router-script-modal panel" role="dialog" aria-modal="true" aria-labelledby="router-script-title">
-          <div className="router-script-modal-heading"><div><span>SECURE ROUTER MONITORING</span><h2 id="router-script-title">Install on {installScript.routerName}</h2><p>Copy this script into the MikroTik terminal once. It creates a startup scheduler and reports metrics automatically every minute; no separate computer or VPS is needed. The script contains a private monitor token, so do not share it.</p></div><button type="button" aria-label="Close" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}><X size={17} /></button></div>
+          <div className="router-script-modal-heading"><div><span>SECURE ROUTER MONITORING</span><h2 id="router-script-title">Install on {installScript.routerName}</h2><p>Copy this script into the MikroTik terminal once. It starts automatically after a reboot and reports metrics every 30 seconds; no separate computer or VPS is needed. The script contains a private monitor token, so do not share it.</p></div><button type="button" aria-label="Close" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}><X size={17} /></button></div>
           <label className="router-script-label">RouterOS install script<textarea readOnly value={installScript.script} rows={10} onFocus={(event) => event.currentTarget.select()} /></label>
           {copiedError && <p className="router-discovery-status error" role="alert">{copiedError}</p>}
           <div className="router-script-modal-actions"><button type="button" className="outline-button" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}>Close</button><button type="button" className="router-link-button" onClick={() => void copyMonitorScript()}><Copy size={14} /> {scriptCopied ? 'Copied' : 'Copy script'}</button></div>
@@ -1293,6 +1424,7 @@ function RouterManagement() {
   }
 
   return (
+    <>
     <section className="router-management">
       <div className="router-management-heading">
         <div>
@@ -1353,19 +1485,21 @@ function RouterManagement() {
                     ? <time dateTime={router.lastSeenAt} title={router.metricsUpdatedAt ? `Metrics sampled ${new Date(router.metricsUpdatedAt).toLocaleString()}` : 'Heartbeat received'}>{new Date(router.lastSeenAt).toLocaleString()}</time>
                     : <span className="router-unknown-value">Never reported</span>}</td>
                   <td>
-                    <details className="router-row-menu">
-                      <summary aria-label={`Actions for ${router.routerName}`}><MoreHorizontal size={17} /></summary>
-                      <div className="router-row-menu-items" role="menu">
-                        <button type="button" role="menuitem" onClick={() => { setRouterDetailTab('System'); setSelectedRouterId(router.id) }}>View router</button>
-                        <button type="button" role="menuitem" disabled={!router.monitored} onClick={() => { setRouterDetailTab('Diagnosis'); setSelectedRouterId(router.id) }}>Diagnose</button>
-                        {webConsoleUrl
-                          ? <a role="menuitem" href={webConsoleUrl} target="_blank" rel="noopener noreferrer">Open web console</a>
-                          : <button type="button" role="menuitem" disabled>Open web console · not reported</button>}
-                        <button type="button" role="menuitem" disabled={scriptBusy} onClick={() => void generateMonitorScript(router)}>{router.monitored ? 'Regenerate monitor script' : 'Set up monitoring'}</button>
-                        <button type="button" role="menuitem" onClick={() => beginReprovision(router)}>Reprovision router</button>
-                        <button type="button" role="menuitem" className="router-menu-delete" onClick={() => void confirmRemoveRouter(router)}>Delete router…</button>
-                      </div>
-                    </details>
+                    <div className="router-row-menu">
+                      <button
+                        ref={(element) => {
+                          if (routerMenu?.router.id === router.id) routerMenuAnchorRef.current = element
+                        }}
+                        type="button"
+                        className="router-row-menu-trigger"
+                        aria-label={`Actions for ${router.routerName}`}
+                        aria-haspopup="menu"
+                        aria-expanded={routerMenu?.router.id === router.id}
+                        onClick={(event) => toggleRouterMenu(router, webConsoleUrl, event.currentTarget)}
+                      >
+                        <MoreHorizontal size={17} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
                 )
@@ -1379,6 +1513,20 @@ function RouterManagement() {
       </div>
       <div className="router-management-footer"><button type="button" className="router-refresh-button" onClick={() => void load()} disabled={refreshing}><RefreshCw size={13} className={refreshing ? 'is-spinning' : undefined} />{refreshing ? 'Refreshing…' : 'Refresh routers'}</button></div>
     </section>
+    {routerMenu && typeof document !== 'undefined' && createPortal(
+      <div className="router-row-menu-popup" role="menu" ref={routerMenuPopupRef} style={{ top: routerMenu.top, left: routerMenu.left }}>
+        <button type="button" role="menuitem" onClick={() => { closeRouterMenu(); setRouterDetailTab('System'); setSelectedRouterId(routerMenu.router.id) }}>View router</button>
+        <button type="button" role="menuitem" disabled={!routerMenu.router.monitored} onClick={() => { closeRouterMenu(); setRouterDetailTab('Diagnosis'); setSelectedRouterId(routerMenu.router.id) }}>Diagnose</button>
+        {routerMenu.webConsoleUrl
+          ? <a role="menuitem" href={routerMenu.webConsoleUrl} target="_blank" rel="noopener noreferrer" onClick={closeRouterMenu}>Open web console</a>
+          : <button type="button" role="menuitem" disabled>Open web console · not reported</button>}
+        <button type="button" role="menuitem" disabled={scriptBusy} onClick={() => { closeRouterMenu(); void generateMonitorScript(routerMenu.router) }}>{routerMenu.router.monitored ? 'Regenerate monitor script' : 'Set up monitoring'}</button>
+        <button type="button" role="menuitem" onClick={() => { closeRouterMenu(); beginReprovision(routerMenu.router) }}>Reprovision router</button>
+        <button type="button" role="menuitem" className="router-menu-delete" onClick={() => { closeRouterMenu(); void confirmRemoveRouter(routerMenu.router) }}>Delete router…</button>
+      </div>,
+      document.body,
+    )}
+    </>
   )
 }
 
@@ -1723,6 +1871,8 @@ function PackagePanel({ initialFilter = '' }: { initialFilter?: string }) {
 
 function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customers' | 'packages' | 'payments'; initialFilter?: string }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
+  const subscriberImportInput = useRef<HTMLInputElement>(null)
+  const [subscriberImportResult, setSubscriberImportResult] = useState<{ imported: number; failures: { row: number; reason: string }[]; failedCount: number } | null>(null)
   const [subscriberPlans, setSubscriberPlans] = useState<{ id: string; name: string; type: string; monthlyPrice: number; durationSeconds: number; availability: string }[]>([])
   const [subscriberPlansError, setSubscriberPlansError] = useState('')
   const [recordFilter, setRecordFilter] = useState(initialFilter)
@@ -1744,6 +1894,9 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
   const [expandedDetailsId, setExpandedDetailsId] = useState('')
   const [subscriberDetails, setSubscriberDetails] = useState<SubscriberProfileData | null>(null)
   const [detailsError, setDetailsError] = useState('')
+  const [smsSubscriberId, setSmsSubscriberId] = useState('')
+  const [smsDraft, setSmsDraft] = useState('')
+  const [sendingSmsId, setSendingSmsId] = useState('')
   const [showSubscriberPassword, setShowSubscriberPassword] = useState(false)
   const [copiedCredential, setCopiedCredential] = useState('')
   const labels = { sites: 'Routers', customers: 'Subscribers', packages: 'Plans', payments: 'Payments' }
@@ -1788,6 +1941,28 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       window.setTimeout(() => setCopiedCredential(''), 1800)
     } catch {
       setDetailsError(`Could not copy the ${kind === 'accountNumber' ? 'account number' : kind}. Please select and copy it manually.`)
+    }
+  }
+  const sendSubscriberSms = async (subscriberId: string) => {
+    setSendingSmsId(subscriberId)
+    setMessage('')
+    setMessageIsError(false)
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(subscriberId)}/sms`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: smsDraft }),
+      })
+      const result = await response.json() as { message?: string; error?: string }
+      if (!response.ok && response.status !== 202) throw new Error(result.error || 'Unable to send SMS.')
+      setMessage(result.message || 'SMS sent successfully.')
+      setSmsSubscriberId('')
+      setSmsDraft('')
+    } catch (reason) {
+      setMessageIsError(true)
+      setMessage(reason instanceof Error ? reason.message : 'Unable to send SMS.')
+    } finally {
+      setSendingSmsId('')
     }
   }
 
@@ -1836,6 +2011,166 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
     if (!normalizedFilter) return rows
     return rows.filter((row) => Object.values(row).some((value) => String(value ?? '').toLowerCase().includes(normalizedFilter)))
   }, [recordFilter, rows])
+  const exportSubscribers = async () => {
+    const columns = ['Name', 'Email', 'Phone', 'Plan', 'Plan ID', 'RADIUS Username', 'RADIUS Password', 'Status', 'Expires At', 'Created At']
+    setSaving(true)
+    setMessage('')
+    setMessageIsError(false)
+    try {
+      const allRows: Record<string, unknown>[] = []
+      let offset = 0
+      while (true) {
+        const response = await fetch(`/api/customers?limit=200&offset=${offset}`, { cache: 'no-store' })
+        const result = await response.json() as { error?: string } | Record<string, unknown>[]
+        if (!response.ok || !Array.isArray(result)) {
+          throw new Error(!Array.isArray(result) && result.error ? result.error : 'Unable to load subscribers for export.')
+        }
+        allRows.push(...result)
+        offset += result.length
+        if (offset > 10_000) throw new Error('Subscriber export is limited to 10,000 records.')
+        if (result.length < 200) break
+      }
+      const csvRows = allRows.map((row) => {
+        const matchingPlans = subscriberPlans.filter((plan) => plan.name.toLowerCase() === String(row.plan || '').trim().toLowerCase())
+        const plan = matchingPlans.length === 1 ? matchingPlans[0] : null
+        return [
+          String(row.name || ''),
+          String(row.email || ''),
+          String(row.phone || ''),
+          String(row.plan || ''),
+          plan?.id || '',
+          String(row.radiusUsername || ''),
+          '',
+          String(row.status || ''),
+          typeof row.expiresAt === 'string' ? row.expiresAt : '',
+          typeof row.createdAt === 'string' ? row.createdAt : '',
+        ]
+      })
+      const csv = `\uFEFF${[columns, ...csvRows].map((line) => line.map(escapeSubscriberCsvField).join(',')).join('\r\n')}`
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `lktech-subscribers-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setMessage(`Exported ${allRows.length} subscriber${allRows.length === 1 ? '' : 's'}. Passwords are intentionally blank.`)
+    } catch (reason) {
+      setMessageIsError(true)
+      setMessage(reason instanceof Error ? reason.message : 'Unable to export subscribers.')
+    } finally {
+      setSaving(false)
+    }
+  }
+  const importSubscribers = async (file: File) => {
+    setSaving(true)
+    setMessage('')
+    setMessageIsError(false)
+    setSubscriberImportResult(null)
+    try {
+      if (file.size > 2 * 1024 * 1024) throw new Error('Choose a CSV file smaller than 2 MB.')
+      const parsed = parseCsv(await file.text())
+      if (parsed.length < 2) throw new Error('The CSV must contain a header row and at least one subscriber.')
+      const headers = parsed[0].map((header) => header.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))
+      const column = (...names: string[]) => headers.findIndex((header) => names.includes(header))
+      const nameColumn = column('name', 'fullname')
+      const emailColumn = column('email', 'emailaddress')
+      const phoneColumn = column('phone', 'phonenumber')
+      const planColumn = column('plan', 'planname', 'package')
+      const planIdColumn = column('planid', 'packageid')
+      const usernameColumn = column('radiususername', 'username')
+      const passwordColumn = column('radiuspassword', 'password')
+      const requiredColumns = [
+        ['Name', nameColumn],
+        ['Email', emailColumn],
+        ['Plan or Plan ID', planColumn >= 0 || planIdColumn >= 0 ? 0 : -1],
+        ['RADIUS Username', usernameColumn],
+        ['RADIUS Password', passwordColumn],
+      ] as const
+      const missing = requiredColumns.filter(([, index]) => index < 0).map(([label]) => label)
+      if (missing.length) throw new Error(`Missing required CSV columns: ${missing.join(', ')}.`)
+      const records = parsed.slice(1)
+      if (records.length > 200) throw new Error('Import up to 200 subscribers per CSV file.')
+      if (subscriberPlans.length === 0) throw new Error(subscriberPlansError || 'Create an enabled service plan before importing subscribers.')
+
+      const failures: { row: number; reason: string }[] = []
+      let imported = 0
+      let nextRecord = 0
+      const importOne = async () => {
+        while (nextRecord < records.length) {
+          const recordIndex = nextRecord
+          nextRecord += 1
+          const values = records[recordIndex]
+          const lineNumber = recordIndex + 2
+          const valueAt = (index: number) => index < 0 ? '' : (values[index] || '').trim()
+          const nameValue = valueAt(nameColumn)
+          const emailValue = valueAt(emailColumn)
+          const usernameValue = valueAt(usernameColumn)
+          const passwordValue = valueAt(passwordColumn)
+          const planIdValue = valueAt(planIdColumn)
+          const planNameValue = valueAt(planColumn)
+          const planById = planIdValue ? subscriberPlans.find((plan) => plan.id === planIdValue) : undefined
+          const plansByName = planNameValue
+            ? subscriberPlans.filter((plan) => plan.name.toLowerCase() === planNameValue.toLowerCase())
+            : []
+          const plan = planById || (plansByName.length === 1 ? plansByName[0] : undefined)
+          if (!nameValue || !emailValue || !usernameValue || !passwordValue || !plan) {
+            const reason = !nameValue ? 'Name is required.'
+              : !emailValue ? 'Email is required.'
+                : !usernameValue ? 'RADIUS username is required.'
+                  : !passwordValue ? 'RADIUS password is required.'
+                    : plansByName.length > 1 ? 'Plan name is ambiguous; include a valid Plan ID.'
+                      : 'No enabled plan matches this row.'
+            failures.push({ row: lineNumber, reason })
+            continue
+          }
+          try {
+            const response = await fetch('/api/customers', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                name: nameValue,
+                email: emailValue,
+                phone: valueAt(phoneColumn),
+                packageId: plan.id,
+                radiusUsername: usernameValue,
+                password: passwordValue,
+              }),
+            })
+            const result = await response.json() as { error?: string }
+            if (!response.ok) throw new Error(result.error || 'Unable to create subscriber.')
+            imported += 1
+          } catch (reason) {
+            failures.push({
+              row: lineNumber,
+              reason: reason instanceof Error ? reason.message : 'Unable to create subscriber.',
+            })
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(4, records.length) }, () => importOne()))
+      setSubscriberImportResult({ imported, failures: failures.slice(0, 20), failedCount: failures.length })
+      setMessageIsError(imported === 0)
+      setMessage(imported
+        ? `Imported ${imported} subscriber${imported === 1 ? '' : 's'}${failures.length ? `; ${failures.length} row${failures.length === 1 ? '' : 's'} need attention` : ''}. Imported accounts are suspended until activated.`
+        : `No subscribers were imported. ${failures.length} row${failures.length === 1 ? '' : 's'} need attention.`)
+      if (imported) {
+        try {
+          await load()
+          window.dispatchEvent(new Event('workspace-data-changed'))
+        } catch (reason) {
+          setMessage(`Imported ${imported} subscriber${imported === 1 ? '' : 's'}, but the table could not refresh: ${reason instanceof Error ? reason.message : 'please refresh the list.'}`)
+        }
+      }
+    } catch (reason) {
+      setMessageIsError(true)
+      setMessage(reason instanceof Error ? reason.message : 'Unable to import subscribers.')
+    } finally {
+      setSaving(false)
+      if (subscriberImportInput.current) subscriberImportInput.current.value = ''
+    }
+  }
   const create = async () => {
     if (!name.trim()) { setMessageIsError(true); return setMessage('Enter the subscriber name.') }
     if (entity === 'customers' && (!radiusUsername.trim() || !radiusPassword)) { setMessageIsError(true); return setMessage('Enter a RADIUS username and password.') }
@@ -1930,8 +2265,15 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
     }
   }
   const selectedSubscriberPlan = subscriberPlans.find((plan) => plan.id === subscriberPlanId)
-  return <section className={`crud-workspace${entity === 'customers' ? ' subscriber-workspace' : ''}`}><div className="page-heading"><div><div className="live-label"><StatusDot /> LIVE DATA</div><h1>{labels[entity]}</h1><p>{entity === 'customers' ? 'Manage customer contact details, PPPoE and Wi-Fi logins, service plans, and account access.' : 'Manage records persisted in Supabase.'}</p></div><button className="primary-button" type="button" onClick={() => entity === 'customers' ? toggleSubscriberForm() : void create()} disabled={saving}>{saving ? 'Saving...' : entity === 'customers' ? subscriberFormOpen ? 'Close form' : 'Add subscriber' : 'Add record'}</button></div>
+  return <section className={`crud-workspace${entity === 'customers' ? ' subscriber-workspace' : ''}`}><div className="page-heading"><div><div className="live-label"><StatusDot /> LIVE DATA</div><h1>{labels[entity]}</h1><p>{entity === 'customers' ? 'Manage customer contact details, PPPoE and Wi-Fi logins, service plans, and account access.' : 'Manage records persisted in Supabase.'}</p></div>{entity === 'customers' ? <div className="subscriber-data-actions">
+    <input ref={subscriberImportInput} type="file" accept=".csv,text/csv" aria-label="Choose subscriber CSV file" className="subscriber-import-input" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSubscribers(file) }} />
+    <button className="outline-button" type="button" onClick={() => void exportSubscribers()} disabled={saving}><Download size={14} /> Export CSV</button>
+    <button className="outline-button" type="button" onClick={() => subscriberImportInput.current?.click()} disabled={saving || subscriberPlans.length === 0} title={subscriberPlansError || undefined}><Upload size={14} /> {saving ? 'Importing…' : 'Import CSV'}</button>
+    <button className="primary-button" type="button" onClick={toggleSubscriberForm} disabled={saving}>{subscriberFormOpen ? 'Close form' : 'Add subscriber'}</button>
+  </div> : <button className="primary-button" type="button" onClick={() => void create()} disabled={saving}>{saving ? 'Saving...' : 'Add record'}</button>}</div>
     {entity === 'customers' && <div className="subscriber-info-card"><span className="subscriber-info-icon" aria-hidden="true">i</span><p><strong>Account access</strong> New subscribers start suspended for safety. Set an expiry date and choose <strong>Confirm activation</strong> before they can connect. You can suspend or renew accounts at any time.</p></div>}
+    {entity === 'customers' && <p className="subscriber-import-help">Import a CSV with Name, Email, Plan or Plan ID, RADIUS Username, and RADIUS Password columns. Exported CSVs leave passwords blank for your security; add a 12–128 character password to each row before importing. Imports are limited to 200 records at a time, and new accounts stay suspended.</p>}
+    {entity === 'customers' && subscriberImportResult && subscriberImportResult.failedCount > 0 && <div className="subscriber-import-report" role="status"><strong>Import row results</strong><ul>{subscriberImportResult.failures.map((failure) => <li key={`${failure.row}-${failure.reason}`}>Row {failure.row}: {failure.reason}</li>)}</ul>{subscriberImportResult.failedCount > subscriberImportResult.failures.length && <small>Showing the first {subscriberImportResult.failures.length} of {subscriberImportResult.failedCount} failed rows.</small>}</div>}
     {entity === 'customers' ? (subscriberFormOpen ? <form className="subscriber-create-form panel" onSubmit={(event) => { event.preventDefault(); void create() }}>
       <div className="subscriber-form-heading"><div><span className="eyebrow">NEW SUBSCRIBER</span><h2>Create subscriber account</h2><p>Add the customer details and a unique login for your FreeRADIUS server.</p></div></div>
       <div className="subscriber-form-grid">
@@ -1957,7 +2299,7 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       <td><strong>{String(row.plan || 'No plan assigned')}</strong>{Number(row.monthlyRate) > 0 && <span>KSh {Number(row.monthlyRate).toLocaleString('en-KE')} / month</span>}</td>
       <td><span className={`subscriber-status subscriber-status-${status.replace(/[^a-z0-9-]/g, '-')}`}>{status === 'active' ? 'Active' : status === 'suspended' ? 'Suspended' : status === 'expired' ? 'Expired' : status}</span></td>
       <td>{expiry && Number.isFinite(expiry.getTime()) ? <><strong>{expiry.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span>{expiry.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit' })}</span></> : <span className="subscriber-no-expiry">No expiry set</span>}</td>
-      <td>{row.radiusUsername ? <div className="subscriber-actions"><button className="subscriber-details-toggle" type="button" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={() => void toggleSubscriberDetails(String(row.id))}>{detailsLoadingId === String(row.id) ? 'Loading…' : expandedDetailsId === String(row.id) ? 'Hide details' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></div> : <span>Login unavailable</span>}</td>
+      <td><div className="subscriber-actions">{row.radiusUsername ? <><button className="subscriber-details-toggle" type="button" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={() => void toggleSubscriberDetails(String(row.id))}>{detailsLoadingId === String(row.id) ? 'Loading…' : expandedDetailsId === String(row.id) ? 'Hide details' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></> : <span>Login unavailable</span>}<button className="text-button" type="button" disabled={!row.phone || sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(smsSubscriberId === String(row.id) ? '' : String(row.id)); setSmsDraft(''); setMessage(''); setMessageIsError(false) }}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send SMS'}</button></div>{smsSubscriberId === String(row.id) && <div className="subscriber-sms-compose"><label htmlFor={`subscriber-sms-${String(row.id)}`}>Message to {String(row.name || 'subscriber')}</label><textarea id={`subscriber-sms-${String(row.id)}`} value={smsDraft} onChange={(event) => setSmsDraft(event.target.value)} maxLength={500} rows={3} placeholder="Type your message..." /><span>{smsDraft.length}/500 characters</span><div><button className="text-button" type="button" disabled={!smsDraft.trim() || sendingSmsId === String(row.id)} onClick={() => void sendSubscriberSms(String(row.id))}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send message'}</button><button className="text-button" type="button" disabled={sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(''); setSmsDraft('') }}>Cancel</button></div></div>}</td>
     </tr>{expandedDetailsId === String(row.id) && <tr className="subscriber-detail-row"><td colSpan={6}>{detailsLoadingId === String(row.id) ? <p className="subscriber-detail-loading" role="status">Loading secure subscriber details…</p> : detailsError ? <p className="subscriber-form-message is-error" role="alert">{detailsError}</p> : subscriberDetails && String(subscriberDetails.id) === String(row.id) ?
       <SubscriberProfile
         data={subscriberDetails}

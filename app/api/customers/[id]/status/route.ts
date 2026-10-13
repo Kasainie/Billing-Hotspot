@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { customers, radcheck } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 import { toFreeRadiusExpiration } from '@/lib/hotspot-products'
 
 export async function PATCH(request: NextRequest, context: RouteContext<'/api/customers/[id]/status'>) {
@@ -46,7 +47,7 @@ export async function PATCH(request: NextRequest, context: RouteContext<'/api/cu
         })
         const [row] = await tx.update(customers).set({ status: 'suspended' })
           .where(and(eq(customers.id, id), eq(customers.tenantId, session.tenantId))).returning()
-        return { row }
+        return { row, notify: customer.status !== 'suspended' }
       }
 
       const requestedExpiry = typeof input.expiresAt === 'string' ? new Date(input.expiresAt) : customer.expiresAt
@@ -84,10 +85,21 @@ export async function PATCH(request: NextRequest, context: RouteContext<'/api/cu
       }
       const [row] = await tx.update(customers).set({ status: 'active', expiresAt: requestedExpiry })
         .where(and(eq(customers.id, id), eq(customers.tenantId, session.tenantId))).returning()
-      return { row }
+      return { row, notify: customer.status !== 'active' || customer.expiresAt?.getTime() !== requestedExpiry?.getTime() }
     })
 
     if ('error' in updated) return NextResponse.json({ error: updated.error }, { status: updated.status })
+    if (updated.notify && updated.row.phone) {
+      const statusText = updated.row.status === 'active'
+        ? `Your internet service is active${updated.row.expiresAt ? ` until ${updated.row.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}` : ''}.`
+        : 'Your internet service has been suspended. Please contact customer care for help.'
+      await enqueueTenantSms(
+        session.tenantId,
+        `customer-status:${updated.row.id}:${updated.row.status}:${updated.row.expiresAt?.toISOString() || 'no-expiry'}`,
+        updated.row.phone,
+        `Hello ${updated.row.name}, ${statusText}`,
+      )
+    }
     return NextResponse.json(updated.row)
   } catch (error) {
     console.error('Failed to update subscriber service status', error)

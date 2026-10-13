@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/send-sms",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/expire-customers",
       "schedule": "0 0 * * *"
     }

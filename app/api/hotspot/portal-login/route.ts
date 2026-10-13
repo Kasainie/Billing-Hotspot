@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { tenants } from '@/lib/db/schema'
 import { resolvePublicTenantId } from '@/lib/db/tenant'
 import { prepareHotspotPortalHtml } from '@/lib/hotspot-portal-html'
 
@@ -13,13 +16,18 @@ export async function GET(request: NextRequest) {
   try {
     const tenantId = await resolvePublicTenantId(request)
     if (!tenantId) return new Response('Workspace not found.', { status: 404, headers: { 'cache-control': 'no-store' } })
+    const [tenant] = await db.select({ slug: tenants.slug }).from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1)
+    if (!tenant) return new Response('Workspace not found.', { status: 404, headers: { 'cache-control': 'no-store' } })
+
     const template = await readFile(join(process.cwd(), 'public', 'hotspot-assets', 'login.html'), 'utf8')
     const assetBaseUrl = process.env.PROVISIONING_BASE_URL || (
       ['localhost', '127.0.0.1', '::1'].includes(request.nextUrl.hostname)
         ? request.nextUrl.origin
         : 'https://billing.lktech.life'
     )
-    const html = prepareHotspotPortalHtml(template, tenantSlug, assetBaseUrl)
+    const html = prepareHotspotPortalHtml(template, tenant.slug, assetBaseUrl)
     return new Response(html, {
       headers: {
         'content-type': 'text/html; charset=utf-8',
