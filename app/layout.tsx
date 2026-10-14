@@ -3,9 +3,32 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'LKTECH | Hotspot Billing',
-  description: 'Centralized ISP and hotspot billing operations dashboard.',
-  generator: 'v0.app',
+  metadataBase: new URL('https://billing.lktech.life'),
+  title: {
+    default: 'LKTECH | Hotspot and ISP Billing',
+    template: '%s | LKTECH',
+  },
+  description: 'Manage hotspot and PPPoE billing, subscriber access, M-Pesa payments, and MikroTik network operations with LKTECH.',
+  applicationName: 'LKTECH',
+  keywords: [
+    'hotspot billing',
+    'ISP billing software',
+    'MikroTik billing',
+    'PPPoE billing',
+    'M-Pesa internet payments',
+  ],
+  openGraph: {
+    type: 'website',
+    locale: 'en_KE',
+    siteName: 'LKTECH',
+    title: 'LKTECH | Hotspot and ISP Billing',
+    description: 'Manage hotspot and PPPoE billing, subscriber access, M-Pesa payments, and MikroTik network operations with LKTECH.',
+  },
+  twitter: {
+    card: 'summary',
+    title: 'LKTECH | Hotspot and ISP Billing',
+    description: 'Manage hotspot and PPPoE billing, subscriber access, M-Pesa payments, and MikroTik network operations with LKTECH.',
+  },
   icons: {
     icon: [
       {
@@ -40,7 +63,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="antialiased">
         {children}
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {process.env.NODE_ENV === 'production' && process.env.VERCEL === '1' && <Analytics />}
       </body>
     </html>
   )

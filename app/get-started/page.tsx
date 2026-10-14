@@ -1,6 +1,12 @@
 import { redirect } from 'next/navigation'
 import GetStartedWizard from '@/components/get-started-wizard'
 import { getTenantSession } from '@/lib/db/tenant'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: 'Workspace setup',
+  robots: { index: false, follow: false },
+}
 
 export default async function GetStartedPage() {
   if (!process.env.DATABASE_URL?.trim() || !(await getTenantSession())) redirect('/login')

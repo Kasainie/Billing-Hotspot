@@ -1,7 +1,7 @@
 import { and, desc, eq, isNotNull, isNull, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { hotspotPurchases, radcheck, radreply } from '@/lib/db/schema'
+import { hotspotPurchases, radreply } from '@/lib/db/schema'
 import { resolvePublicTenantId } from '@/lib/db/tenant'
 
 const corsHeaders = {
@@ -37,13 +37,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ active: false }, { headers: corsHeaders })
     }
 
-    const [credential] = await db.select({ password: radcheck.value }).from(radcheck).where(and(
-      eq(radcheck.username, activePurchase.username),
-      eq(radcheck.tenantId, tenantId),
-      eq(radcheck.attribute, 'Cleartext-Password'),
-    )).limit(1)
-    if (!credential?.password) return NextResponse.json({ active: false }, { headers: corsHeaders })
-
     const expiresAt = new Date(activePurchase.paidAt.getTime() + activePurchase.durationSeconds * 1000)
     const remainingSeconds = Math.max(1, Math.ceil((expiresAt.getTime() - now) / 1000))
     await db.update(radreply).set({ value: String(remainingSeconds) }).where(and(
@@ -52,11 +45,7 @@ export async function GET(request: NextRequest) {
       eq(radreply.attribute, 'Session-Timeout'),
     ))
 
-    return NextResponse.json({
-      active: true,
-      username: activePurchase.username,
-      password: credential.password,
-    }, { headers: corsHeaders })
+    return NextResponse.json({ active: true }, { headers: corsHeaders })
   } catch {
     return NextResponse.json({ error: 'Unable to check this device package.' }, { status: 503, headers: corsHeaders })
   }
