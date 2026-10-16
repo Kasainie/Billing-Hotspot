@@ -12,6 +12,8 @@ export type RouterConnectorSession = {
   ipAddress: string | null
   callerId: string | null
   uptimeSeconds: number | null
+  downloadBytes: bigint | null
+  uploadBytes: bigint | null
 }
 
 export type RouterConnectorCommandResult = {
@@ -60,6 +62,22 @@ function nonNegativeInteger(value: unknown, maxValue = Number.MAX_SAFE_INTEGER) 
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= maxValue
     ? value
     : null
+}
+
+function optionalByteCounter(value: unknown) {
+  if (value === null || value === undefined) return null
+  const raw = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? String(value)
+    : typeof value === 'string' && /^\d+$/.test(value)
+      ? value
+      : null
+  if (raw === null) return undefined
+  try {
+    const parsed = BigInt(raw)
+    return parsed <= BigInt('9223372036854775807') ? parsed : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function optionalLabel(value: unknown) {
@@ -149,10 +167,12 @@ export function parseRouterConnectorSessions(value: unknown): RouterConnectorSes
           session.uptimeSeconds >= 0
         ? session.uptimeSeconds
         : Number.NaN
+    const downloadBytes = optionalByteCounter(session.downloadBytes)
+    const uploadBytes = optionalByteCounter(session.uploadBytes)
     if ((session.macAddress !== null && session.macAddress !== undefined && !macAddress) ||
         (session.ipAddress !== null && session.ipAddress !== undefined && (!rawIpAddress || !isIP(rawIpAddress))) ||
         (session.callerId !== null && session.callerId !== undefined && !callerId) ||
-        Number.isNaN(uptimeSeconds)) return null
+        Number.isNaN(uptimeSeconds) || downloadBytes === undefined || uploadBytes === undefined) return null
 
     sessions.push({
       sessionType,
@@ -162,6 +182,8 @@ export function parseRouterConnectorSessions(value: unknown): RouterConnectorSes
       ipAddress: rawIpAddress,
       callerId,
       uptimeSeconds,
+      downloadBytes,
+      uploadBytes,
     })
   }
 

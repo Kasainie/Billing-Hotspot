@@ -20,6 +20,8 @@ test('connector session reports accept valid Hotspot and PPPoE rows', () => {
       macAddress: 'AA:BB:CC:DD:EE:FF',
       ipAddress: '192.168.88.20',
       uptimeSeconds: 61,
+      downloadBytes: '9007199254740993',
+      uploadBytes: '123',
     },
     {
       sessionType: 'pppoe',
@@ -33,6 +35,9 @@ test('connector session reports accept valid Hotspot and PPPoE rows', () => {
 
   assert.equal(sessions?.length, 2)
   assert.equal(sessions?.[0].sessionType, 'hotspot')
+  assert.equal(sessions?.[0].downloadBytes, BigInt('9007199254740993'))
+  assert.equal(sessions?.[0].uploadBytes, BigInt('123'))
+  assert.equal(sessions?.[1].downloadBytes, null)
   assert.equal(sessions?.[1].ipAddress, '2001:db8::5')
 })
 
@@ -44,6 +49,9 @@ test('connector rejects malformed, duplicate, or oversized sessions', () => {
   ]), null)
   assert.equal(parseRouterConnectorSessions([
     { sessionType: 'pppoe', routerSessionId: '*1', username: 'user', ipAddress: 'not-an-ip' },
+  ]), null)
+  assert.equal(parseRouterConnectorSessions([
+    { sessionType: 'pppoe', routerSessionId: '*1', username: 'user', downloadBytes: '-1' },
   ]), null)
   assert.equal(parseRouterConnectorSessions(new Array(1001).fill({})), null)
   assert.equal(isRouterSessionId('1'), false)

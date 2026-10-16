@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, CalendarDays, Clock3, Copy, CreditCard, Router, Wifi } from 'lucide-react'
+import { calculateSubscriberUsageRate, type SubscriberUsageCounters, type SubscriberUsageRate } from '@/lib/subscriber-usage'
 
 export type SubscriberProfileData = {
   id: string
@@ -59,6 +60,10 @@ export type SubscriberProfileData = {
     terminateCause: string | null
   }>
   activity: Array<{ day: string; sessionCount: number }>
+  analytics: {
+    paymentTrend: Array<{ month: string; amount: string; paymentCount: number }>
+    hourlyUsage: Array<{ hour: number; sessionCount: number }>
+  }
 }
 
 function formatDate(value: string | null, options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' }) {
@@ -87,6 +92,305 @@ function formatDuration(seconds: number | null) {
   return [days ? `${days}d` : '', hours ? `${hours}h` : '', `${minutes}m`].filter(Boolean).join(' ')
 }
 
+type SubscriberLiveData = {
+  source: 'router' | 'radius' | 'unavailable'
+  connector: {
+    state: 'site-unassigned' | 'router-unavailable' | 'not-configured' | 'offline' | 'online'
+    routerNames: string[]
+    lastSeenAt: string | null
+  }
+  liveIssue: 'byte-counters-unavailable' | 'username-unassigned' | 'subscriber-session-not-found' |
+    'site-unassigned' | 'router-unavailable' | 'not-configured' | 'offline' | null
+  checkedAt: string
+  observedAt: string | null
+  lastAccountingAt: string | null
+  activeSessions: Array<{
+    id: string
+    ipAddress: string | null
+    routerName: string | null
+    nasIpAddress: string | null
+    macAddress: string | null
+    startedAt: string | null
+    lastAccountingAt: string | null
+    sessionSeconds: number | null
+    downloadBytes: string | null
+    uploadBytes: string | null
+  }>
+  downloadBytes: string | null
+  uploadBytes: string | null
+}
+
+type SubscriberUsagePoint = { at: string; rate: SubscriberUsageRate | null }
+
+function SubscriberLiveReports({ subscriberId, data }: { subscriberId: string; data: SubscriberProfileData }) {
+  const [liveData, setLiveData] = useState<SubscriberLiveData | null>(null)
+  const [currentRate, setCurrentRate] = useState<SubscriberUsageRate | null>(null)
+  const [points, setPoints] = useState<SubscriberUsagePoint[]>([])
+  const [error, setError] = useState('')
+  const previousCounters = useRef<SubscriberUsageCounters | null>(null)
+  const currentRateRef = useRef<SubscriberUsageRate | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    let loading = false
+    previousCounters.current = null
+    currentRateRef.current = null
+    setLiveData(null)
+    setCurrentRate(null)
+    setPoints([])
+    setError('')
+
+    const sample = async () => {
+      if (loading) return
+      loading = true
+      try {
+        const response = await fetch(`/api/customers/${encodeURIComponent(subscriberId)}/live`, { cache: 'no-store' })
+        const result = await response.json() as SubscriberLiveData & { error?: string }
+        if (!response.ok) throw new Error(result.error || 'Unable to load live subscriber usage.')
+        if (cancelled) return
+
+        let rate = currentRateRef.current
+        const previous = previousCounters.current
+        if (result.source !== 'router' || !result.observedAt ||
+            result.downloadBytes === null || result.uploadBytes === null) {
+          previousCounters.current = null
+          rate = null
+        } else if (!previous) {
+          previousCounters.current = {
+            observedAt: result.observedAt,
+            downloadBytes: result.downloadBytes,
+            uploadBytes: result.uploadBytes,
+          }
+          rate = null
+        } else if (result.observedAt !== previous.observedAt) {
+          const counters = {
+            observedAt: result.observedAt,
+            downloadBytes: result.downloadBytes,
+            uploadBytes: result.uploadBytes,
+          }
+          rate = calculateSubscriberUsageRate(previous, counters)
+          previousCounters.current = counters
+          if (rate) setPoints((current) =>
+            [...current, { at: result.observedAt!, rate }].slice(-30))
+        }
+        currentRateRef.current = rate
+        setLiveData(result)
+        setCurrentRate(rate)
+        setError('')
+      } catch (reason) {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : 'Unable to load live subscriber usage.')
+      } finally {
+        loading = false
+      }
+    }
+
+    void sample()
+    const timer = window.setInterval(() => void sample(), 1_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [subscriberId])
+
+  const maxRate = Math.max(
+    data.planDetails?.downloadMbps || 0,
+    data.planDetails?.uploadMbps || 0,
+    ...points.map(({ rate }) => Math.max(rate?.downloadMbps || 0, rate?.uploadMbps || 0)),
+    1,
+  )
+  const chartStart = points.length ? new Date(points[0].at).getTime() : 0
+  const chartDuration = points.length > 1 ? new Date(points[points.length - 1].at).getTime() - chartStart : 0
+  const chartPath = (direction: 'downloadMbps' | 'uploadMbps') => points.map(({ at, rate }, index) => {
+    const x = chartDuration > 0
+      ? (new Date(at).getTime() - chartStart) / chartDuration * 1000
+      : points.length > 1 ? index / (points.length - 1) * 1000 : 0
+    const y = 145 - Math.min(1, (rate?.[direction] || 0) / maxRate) * 125
+    return `${index ? 'L' : 'M'} ${x} ${y}`
+  }).join(' ')
+  const downloadRate = liveData?.source === 'router' ? currentRate?.downloadMbps : undefined
+  const uploadRate = liveData?.source === 'router' ? currentRate?.uploadMbps : undefined
+  const liveSourceLabel = liveData?.source === 'router'
+    ? liveData.liveIssue === 'byte-counters-unavailable' ? 'Counters unavailable' : 'Router live'
+    : liveData?.connector.state === 'online'
+      ? 'Router online'
+      : liveData?.source === 'radius' ? 'RADIUS snapshot' : 'No live data'
+  const liveHelp = !liveData
+    ? 'Checking router and subscriber session…'
+    : liveData.source === 'router' && liveData.liveIssue === 'byte-counters-unavailable'
+      ? 'The router sees this session but did not report its byte counters. Update and restart the router connector, then confirm RouterOS exposes bytes-in and bytes-out for the session.'
+      : liveData.source === 'router'
+        ? null
+        : liveData.connector.state === 'site-unassigned'
+          ? 'Assign this subscriber to the network site that contains their router.'
+          : liveData.connector.state === 'router-unavailable'
+            ? 'No enabled, monitored router is assigned to this subscriber’s site.'
+            : liveData.connector.state === 'not-configured'
+              ? 'The router API connector is not enabled. Enable it from the router’s Users tab, then install and start the connector service.'
+              : liveData.connector.state === 'offline'
+                ? `The router connector is offline. Start its service and check its APP_URL, router REST connection, credentials, and network access.${liveData.connector.lastSeenAt ? ` Last report: ${formatDate(liveData.connector.lastSeenAt)}.` : ''}`
+                : liveData.liveIssue === 'username-unassigned'
+                  ? 'This subscriber has no RADIUS username, so their router session cannot be matched.'
+                  : liveData.liveIssue === 'subscriber-session-not-found'
+                    ? 'The connector is online, but no active session with this subscriber’s exact RADIUS username was found on the assigned router. Confirm the username and active router session.'
+                    : 'The router connector has not reported a subscriber session yet.'
+
+  return (
+    <section className="subscriber-profile-panel subscriber-live-reports">
+      <div className="subscriber-live-reports-heading">
+        <div>
+          <h4><Activity size={16} /> Live subscriber usage</h4>
+          <p>Page checks every second; router counters are sampled about every 5 seconds.</p>
+        </div>
+        <span className={`subscriber-live-indicator ${liveData?.connector.state === 'online' ? 'is-live' : ''}`}>
+          <i />{liveSourceLabel}
+        </span>
+      </div>
+      {error && <p className="subscriber-live-error" role="alert">{error}</p>}
+      {liveHelp && <p className="subscriber-live-status-note">{liveHelp}</p>}
+      <div className="subscriber-live-stats">
+        <article><span>DOWNLOAD SPEED</span><strong>{downloadRate === undefined ? '—' : downloadRate.toFixed(2)} <small>Mbps</small></strong><p>{liveData?.downloadBytes ? `${formatBytes(liveData.downloadBytes)} total in active sessions` : 'Router byte counters unavailable'}</p></article>
+        <article><span>UPLOAD SPEED</span><strong>{uploadRate === undefined ? '—' : uploadRate.toFixed(2)} <small>Mbps</small></strong><p>{liveData?.uploadBytes ? `${formatBytes(liveData.uploadBytes)} total in active sessions` : 'Router byte counters unavailable'}</p></article>
+      </div>
+      <div className="subscriber-live-chart" role="img" aria-label="Router-measured subscriber download and upload rates over recent samples">
+        <div className="subscriber-live-chart-scale"><span>Scale: 0–{maxRate.toFixed(maxRate < 10 ? 1 : 0)} Mbps</span><span>{points.length} router samples</span></div>
+        <svg viewBox="0 0 1000 160" preserveAspectRatio="none" aria-hidden="true">
+          {[20, 62, 103, 145].map((y) => <line key={y} x1="0" x2="1000" y1={y} y2={y} />)}
+          {points.length > 1 && <>
+            <path className="subscriber-live-download-line" d={chartPath('downloadMbps')} />
+            <path className="subscriber-live-upload-line" d={chartPath('uploadMbps')} />
+          </>}
+        </svg>
+        {points.length < 2 && <p>{liveData?.source === 'router' ? 'Waiting for a second router sample to calculate speed…' : liveHelp}</p>}
+      </div>
+      <div className="subscriber-live-legend"><span className="download">Download</span><span className="upload">Upload</span><span>Plan limit: {data.planDetails ? `${data.planDetails.downloadMbps}/${data.planDetails.uploadMbps} Mbps` : 'Not assigned'}</span></div>
+      {points.length > 1 && <div className="subscriber-live-time-axis"><span>{formatDate(points[0].at, { timeStyle: 'short' })}</span><span>Most recent: {formatDate(points[points.length - 1].at, { timeStyle: 'short' })}</span></div>}
+      <div className="subscriber-live-footnote">
+        <span>{liveData?.source === 'router' ? 'Router sample' : 'Last RADIUS accounting update'}: {liveData?.observedAt ? formatDate(liveData.observedAt) : 'Not received yet'}</span>
+        <span>Page checked: {liveData ? formatDate(liveData.checkedAt, { timeStyle: 'medium' }) : 'Loading…'}</span>
+      </div>
+      {liveData?.activeSessions.length ? <div className="subscriber-profile-table-scroll">
+        <table><thead><tr><th>STARTED</th><th>IP ADDRESS</th><th>DEVICE</th><th>SESSION TIME</th><th>DOWNLOAD</th><th>UPLOAD</th><th>ROUTER</th></tr></thead><tbody>
+          {liveData.activeSessions.map((session) => <tr key={session.id}><td>{formatDate(session.startedAt)}</td><td>{session.ipAddress || '—'}</td><td>{session.macAddress || '—'}</td><td>{formatDuration(session.sessionSeconds)}</td><td>{session.downloadBytes ? formatBytes(session.downloadBytes) : '—'}</td><td>{session.uploadBytes ? formatBytes(session.uploadBytes) : '—'}</td><td>{session.routerName || session.nasIpAddress || '—'}</td></tr>)}
+        </tbody></table>
+      </div> : null}
+    </section>
+  )
+}
+
+function SubscriberHistoricalReports({ data }: { data: SubscriberProfileData }) {
+  const paymentsByMonth = new Map(data.analytics.paymentTrend.map((entry) => [entry.month, entry]))
+  const today = new Date()
+  const paymentMonths = Array.from({ length: 12 }, (_, index) => {
+    const monthDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 11 + index, 1))
+    const month = monthDate.toISOString().slice(0, 7)
+    const entry = paymentsByMonth.get(month)
+    return {
+      month,
+      label: monthDate.toLocaleString('en-KE', { month: 'short', timeZone: 'UTC' }),
+      amount: Number(entry?.amount || 0),
+      paymentCount: entry?.paymentCount || 0,
+    }
+  })
+  const maxPayment = Math.max(...paymentMonths.map((month) => month.amount), 1)
+  const paidMonths = paymentMonths.filter((month) => month.amount > 0)
+  const averageMonthlyPayment = paidMonths.length
+    ? paidMonths.reduce((sum, month) => sum + month.amount, 0) / paidMonths.length
+    : 0
+  const latestPayment = [...data.billing.payments]
+    .filter((payment) => payment.status === 'paid')
+    .sort((left, right) => right.paidAt.localeCompare(left.paidAt))[0]
+
+  const monthStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)
+  const daysInMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).getUTCDate()
+  const startsByDay = new Map(data.activity.map((entry) => [entry.day, entry.sessionCount]))
+  const usageDays = Array.from({ length: daysInMonth }, (_, index) => {
+    const date = new Date(monthStart + index * 86400000)
+    const day = date.toISOString().slice(0, 10)
+    const sessionStarts = startsByDay.get(day) || 0
+    return { day, date: date.getUTCDate(), sessionStarts }
+  })
+  const monthSessionStarts = usageDays.reduce((sum, day) => sum + day.sessionStarts, 0)
+  const activeUsageDays = usageDays.filter((day) => day.sessionStarts > 0)
+  const peakDay = [...activeUsageDays].sort((left, right) => right.sessionStarts - left.sessionStarts)[0]
+  const averageDailySessions = activeUsageDays.length
+    ? monthSessionStarts / activeUsageDays.length
+    : 0
+  const maxDailySessions = Math.max(...usageDays.map((day) => day.sessionStarts), 1)
+
+  const usageByHour = new Map(data.analytics.hourlyUsage.map((entry) => [entry.hour, entry]))
+  const hours = Array.from({ length: 24 }, (_, hour) => {
+    const entry = usageByHour.get(hour)
+    return {
+      hour,
+      sessionCount: entry?.sessionCount || 0,
+    }
+  })
+  const peakHour = [...hours].sort((left, right) => right.sessionCount - left.sessionCount)[0]
+  const totalHourlySessions = hours.reduce((sum, hour) => sum + hour.sessionCount, 0)
+  const eveningSessions = hours.filter((hour) => hour.hour >= 17).reduce((sum, hour) => sum + hour.sessionCount, 0)
+  const eveningShare = totalHourlySessions > 0 ? Math.round(eveningSessions / totalHourlySessions * 100) : 0
+  const maxHourlySessions = Math.max(...hours.map((hour) => hour.sessionCount), 1)
+  const peakPeriod = peakHour?.sessionCount
+    ? peakHour.hour < 12 ? 'Morning' : peakHour.hour < 17 ? 'Afternoon' : 'Evening'
+    : 'Not enough data'
+
+  return (
+    <div className="subscriber-analytics-grid">
+      <section className="subscriber-profile-panel subscriber-analytics-card">
+        <div className="subscriber-analytics-heading"><div><h4><CreditCard size={16} /> Payment trend</h4><p>Paid subscriber transactions · last 12 months</p></div></div>
+        <div className="subscriber-analytics-chart subscriber-payment-chart" role="img" aria-label="Monthly payments for the last 12 months">
+          {paymentMonths.map((month) => <div className="subscriber-payment-column" key={month.month} title={`${month.label}: ${formatMoney(month.amount)} · ${month.paymentCount} payment${month.paymentCount === 1 ? '' : 's'}`}>
+            <span className={month.amount > 0 ? 'has-value' : ''} style={{ height: `${Math.max(month.amount > 0 ? 3 : 0, month.amount / maxPayment * 100)}%` }} />
+            <small>{month.label}</small>
+          </div>)}
+        </div>
+        <div className="subscriber-analytics-summary">
+          <div><span>LIFETIME</span><strong>{formatMoney(data.billing.lifetimeValue)}</strong></div>
+          <div><span>AVG / PAID MONTH</span><strong>{formatMoney(averageMonthlyPayment)}</strong></div>
+          <div><span>PAID MONTHS</span><strong>{paidMonths.length} / 12</strong></div>
+          <div><span>LAST PAYMENT</span><strong>{latestPayment ? formatDate(latestPayment.paidAt, { dateStyle: 'medium' }) : '—'}</strong></div>
+        </div>
+      </section>
+
+      <section className="subscriber-profile-panel subscriber-analytics-card">
+        <div className="subscriber-analytics-heading"><div><h4><Activity size={16} /> Daily connections</h4><p>RADIUS sessions started each day this month</p></div></div>
+        <div className="subscriber-analytics-chart subscriber-data-chart" role="img" aria-label="Daily RADIUS session starts this month">
+          {usageDays.map((day) => <div className="subscriber-data-column" key={day.day} title={`${day.day}: ${day.sessionStarts} session starts`}>
+            <span className="session-start-bar" style={{ height: `${day.sessionStarts / maxDailySessions * 100}%` }} />
+            {(day.date === 1 || day.date === daysInMonth || day.date % 5 === 0) && <small>{day.date}</small>}
+          </div>)}
+        </div>
+        <div className="subscriber-analytics-summary">
+          <div><span>STARTED THIS MONTH</span><strong>{monthSessionStarts}</strong></div>
+          <div><span>BUSIEST DAY</span><strong>{peakDay ? `${peakDay.date} · ${peakDay.sessionStarts}` : '—'}</strong></div>
+          <div><span>AVG / ACTIVE DAY</span><strong>{averageDailySessions.toFixed(1)} sessions</strong></div>
+          <div><span>ALL-TIME SESSIONS</span><strong>{data.sessionSummary.sessionCount.toLocaleString('en-KE')}</strong></div>
+        </div>
+      </section>
+
+      <section className="subscriber-profile-panel subscriber-analytics-card subscriber-peak-usage">
+        <div className="subscriber-analytics-heading">
+          <div><h4><Clock3 size={16} /> Connection start times</h4><p>RADIUS sessions started during each hour · last 30 days</p></div>
+          <span className="subscriber-peak-scale">Fewer starts → more starts</span>
+        </div>
+        <div className="subscriber-hour-chart" role="img" aria-label="RADIUS session starts by hour over the last 30 days">
+          {hours.map((hour) => <div key={hour.hour} className="subscriber-hour-column" title={`${String(hour.hour).padStart(2, '0')}:00: ${hour.sessionCount} session starts`}>
+            <span className={hour.sessionCount > 0 ? 'has-value' : ''} style={{ height: `${hour.sessionCount / maxHourlySessions * 100}%` }} />
+            {(hour.hour % 6 === 0 || hour.hour === 23) && <small>{String(hour.hour).padStart(2, '0')}</small>}
+          </div>)}
+        </div>
+        <div className="subscriber-analytics-summary subscriber-peak-summary">
+          <div><span>PEAK HOUR</span><strong>{peakHour?.sessionCount ? `${String(peakHour.hour).padStart(2, '0')}:00 – ${String((peakHour.hour + 1) % 24).padStart(2, '0')}:00` : '—'}</strong></div>
+          <div><span>SESSIONS (30 DAYS)</span><strong>{totalHourlySessions}</strong></div>
+          <div><span>BUSIEST PERIOD</span><strong>{peakPeriod}</strong></div>
+          <div><span>STARTED AFTER 17:00</span><strong>{eveningShare}%</strong></div>
+        </div>
+        <small className="subscriber-analytics-note">These charts count when sessions began; they do not represent data transferred or online time during each hour.</small>
+      </section>
+    </div>
+  )
+}
+
 export function SubscriberProfile({
   data,
   onClose,
@@ -102,7 +406,7 @@ export function SubscriberProfile({
   showPassword: boolean
   onTogglePassword: () => void
 }) {
-  const [tab, setTab] = useState<'Overview' | 'Sessions' | 'Payments'>('Overview')
+  const [tab, setTab] = useState<'Overview' | 'Reports' | 'Sessions' | 'Payments'>('Overview')
   const activityByDay = useMemo(() => new Map(data.activity.map((entry) => [entry.day, entry.sessionCount])), [data.activity])
   const activityDays = useMemo(() => Array.from({ length: 365 }, (_, index) => {
     const date = new Date()
@@ -147,7 +451,7 @@ export function SubscriberProfile({
       </div>
 
       <nav className="subscriber-profile-tabs" aria-label="Subscriber profile sections">
-        {(['Overview', 'Sessions', 'Payments'] as const).map((item) => (
+        {(['Overview', 'Reports', 'Sessions', 'Payments'] as const).map((item) => (
           <button key={item} type="button" className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)}>
             {item}{item === 'Sessions' ? <span>{data.sessionSummary.sessionCount}</span> : item === 'Payments' ? <span>{data.billing.payments.length}</span> : null}
           </button>
@@ -206,6 +510,11 @@ export function SubscriberProfile({
             </section>
           </aside>
         </div>
+      </>}
+
+      {tab === 'Reports' && <>
+        <SubscriberLiveReports subscriberId={data.id} data={data} />
+        <SubscriberHistoricalReports data={data} />
       </>}
 
       {tab === 'Sessions' && <section className="subscriber-profile-panel subscriber-profile-table-panel">

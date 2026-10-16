@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     init: true
     network_mode: host
+    extra_hosts:
+      - "login.lktech.life:10.77.0.2"
     env_file:
       - .env
     volumes:

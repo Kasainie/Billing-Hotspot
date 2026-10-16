@@ -142,6 +142,8 @@ async function report(request: NextRequest, routerId: string) {
           ipAddress: item.ipAddress,
           callerId: item.callerId,
           uptimeSeconds: item.uptimeSeconds,
+          downloadBytes: item.downloadBytes,
+          uploadBytes: item.uploadBytes,
           observedAt,
         }))).onConflictDoUpdate({
           target: [
@@ -155,6 +157,8 @@ async function report(request: NextRequest, routerId: string) {
             ipAddress: sql`excluded.ip_address`,
             callerId: sql`excluded.caller_id`,
             uptimeSeconds: sql`excluded.uptime_seconds`,
+            downloadBytes: sql`excluded.download_bytes`,
+            uploadBytes: sql`excluded.upload_bytes`,
             observedAt: sql`excluded.observed_at`,
           },
         }).returning({ id: routerRemoteSessions.id })

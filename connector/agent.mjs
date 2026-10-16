@@ -71,6 +71,19 @@ function text(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
+function byteCounter(value) {
+  if (value === null || value === undefined || value === '') return null
+  const raw = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? String(value)
+    : typeof value === 'string' && /^\d+$/.test(value)
+      ? value
+      : null
+  if (raw === null || BigInt(raw) > 9_223_372_036_854_775_807n) {
+    throw new Error('RouterOS returned an invalid active-session byte counter.')
+  }
+  return raw
+}
+
 async function routerRequest(path, method = 'GET', body, parseResponse = true) {
   const response = await fetch(`${routerBase}${path}`, {
     method,
@@ -165,6 +178,8 @@ function mapSessions(value, sessionType) {
       ipAddress: rawAddress,
       callerId: sessionType === 'pppoe' ? text(item['caller-id']) : null,
       uptimeSeconds: uptime,
+      downloadBytes: byteCounter(item['bytes-out'] ?? item['tx-byte']),
+      uploadBytes: byteCounter(item['bytes-in'] ?? item['rx-byte']),
     }
   })
 }

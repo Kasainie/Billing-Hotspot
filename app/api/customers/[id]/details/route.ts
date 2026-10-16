@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { customers, hotspotPurchases, packages, payments, pppoeAccounts, radcheck, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { serializeDatabaseTimestamp } from '@/lib/database-timestamp'
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await getTenantSession(_request)
@@ -32,7 +33,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     )).limit(1)
 
     if (!customer) return NextResponse.json({ error: 'Subscriber was not found.' }, { status: 404 })
-    const [account, credential, plan, site, paidSummary, paidThisMonth, paymentRows, hotspotPaidSummary, hotspotPaidThisMonth, hotspotPaymentRows, sessionSummary, sessionRows, activityRows] = await Promise.all([
+    const [account, credential, plan, site, paidSummary, paidThisMonth, paymentRows, hotspotPaidSummary, hotspotPaidThisMonth, hotspotPaymentRows, sessionSummary, sessionRows, activityRows, paymentTrendRows, hourlyUsageRows] = await Promise.all([
       db.select({ accountNumber: pppoeAccounts.accountNumber })
         .from(pppoeAccounts).where(and(
           eq(pppoeAccounts.customerId, customer.id),
@@ -123,8 +124,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         ? db.execute<{
           sessionCount: number
           activeSessions: number
-          firstSessionAt: Date | null
-          lastSessionAt: Date | null
+          firstSessionAt: Date | string | null
+          lastSessionAt: Date | string | null
           bytesIn: string | null
           bytesOut: string | null
         }>(sql`
@@ -152,8 +153,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
           nasIpAddress: string | null
           ipAddress: string | null
           macAddress: string | null
-          startedAt: Date | null
-          stoppedAt: Date | null
+          startedAt: Date | string | null
+          stoppedAt: Date | string | null
           sessionSeconds: number | null
           bytesIn: string | null
           bytesOut: string | null
@@ -178,11 +179,48 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         : Promise.resolve({ rows: [] }),
       customer.radiusUsername
         ? db.execute<{ day: string; sessionCount: number }>(sql`
-          select to_char(date_trunc('day', acctstarttime), 'YYYY-MM-DD') as day, count(*)::int as "sessionCount"
+          select to_char(date_trunc('day', acctstarttime), 'YYYY-MM-DD') as "day", count(*)::int as "sessionCount"
           from public.radacct
           where username = ${customer.radiusUsername}
             and acctstarttime >= now() - interval '364 days'
           group by date_trunc('day', acctstarttime)
+        `)
+        : Promise.resolve({ rows: [] }),
+      db.execute<{ month: string; amount: string; paymentCount: number }>(sql`
+        with subscriber_payments as (
+          select date_trunc('month', paid_at) as month, amount::numeric as amount
+          from public.payments
+          where tenant_id = ${session.tenantId}
+            and customer_id = ${customer.id}
+            and status = 'paid'
+            and paid_at >= date_trunc('month', now()) - interval '11 months'
+          union all
+          select date_trunc('month', coalesce(paid_at, created_at)) as month, amount::numeric as amount
+          from public.hotspot_purchases
+          where ${customer.radiusUsername ? sql`tenant_id = ${session.tenantId} and radius_username = ${customer.radiusUsername}` : sql`false`}
+            and status = 'completed'
+            and coalesce(paid_at, created_at) >= date_trunc('month', now()) - interval '11 months'
+        )
+        select to_char(month, 'YYYY-MM') as "month",
+          coalesce(sum(amount), 0)::text as amount,
+          count(*)::int as "paymentCount"
+        from subscriber_payments
+        group by month
+        order by month
+      `),
+      customer.radiusUsername
+        ? db.execute<{
+          hour: number
+          sessionCount: number
+        }>(sql`
+          select extract(hour from acctstarttime)::int as hour,
+            count(*)::int as "sessionCount"
+          from public.radacct
+          where username = ${customer.radiusUsername}
+            and acctstarttime >= now() - interval '30 days'
+            and acctstarttime is not null
+          group by extract(hour from acctstarttime)
+          order by hour
         `)
         : Promise.resolve({ rows: [] }),
     ])
@@ -220,17 +258,21 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       sessionSummary: {
         sessionCount: sessionTotals?.sessionCount || 0,
         activeSessions: sessionTotals?.activeSessions || 0,
-        firstSessionAt: sessionTotals?.firstSessionAt?.toISOString() || null,
-        lastSessionAt: sessionTotals?.lastSessionAt?.toISOString() || null,
+        firstSessionAt: serializeDatabaseTimestamp(sessionTotals?.firstSessionAt ?? null),
+        lastSessionAt: serializeDatabaseTimestamp(sessionTotals?.lastSessionAt ?? null),
         bytesIn: sessionTotals?.bytesIn || '0',
         bytesOut: sessionTotals?.bytesOut || '0',
       },
       sessions: sessionRows.rows.map((row) => ({
         ...row,
-        startedAt: row.startedAt?.toISOString() || null,
-        stoppedAt: row.stoppedAt?.toISOString() || null,
+        startedAt: serializeDatabaseTimestamp(row.startedAt),
+        stoppedAt: serializeDatabaseTimestamp(row.stoppedAt),
       })),
       activity: activityRows.rows,
+      analytics: {
+        paymentTrend: paymentTrendRows.rows,
+        hourlyUsage: hourlyUsageRows.rows,
+      },
     }, { headers: { 'cache-control': 'no-store, private' } })
   } catch (error) {
     console.error('Failed to load tenant subscriber details', error)
