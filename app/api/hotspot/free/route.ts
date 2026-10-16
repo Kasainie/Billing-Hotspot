@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { and, count, eq, gt, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { hotspotPurchases, packages, radcheck, radreply } from '@/lib/db/schema'
@@ -57,14 +57,79 @@ export async function POST(request: NextRequest) {
       if (!plan) return { error: 'This free offer is no longer available. Refresh the hotspot page.' }
 
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const [recent] = await tx.select({ total: count() }).from(hotspotPurchases).where(and(
+      const [recent] = await tx.select({
+        id: hotspotPurchases.id,
+        username: hotspotPurchases.radiusUsername,
+        durationSeconds: hotspotPurchases.durationSeconds,
+        paidAt: hotspotPurchases.paidAt,
+        createdAt: hotspotPurchases.createdAt,
+      }).from(hotspotPurchases).where(and(
         eq(hotspotPurchases.clientMac, clientMac),
         eq(hotspotPurchases.tenantId, tenantId),
         eq(hotspotPurchases.productId, plan.id),
         eq(hotspotPurchases.status, 'completed'),
         gt(hotspotPurchases.createdAt, since),
-      ))
-      if ((recent?.total || 0) >= 1) return { error: 'This device has already claimed today’s free offer.' }
+      )).orderBy(desc(hotspotPurchases.createdAt)).limit(1)
+      if (recent) {
+        const activatedAt = recent.paidAt || recent.createdAt
+        const now = new Date()
+        const offerExpiresAt = activatedAt.getTime() + recent.durationSeconds * 1000
+        if (recent.username && offerExpiresAt > now.getTime()) {
+          const [credentials] = await tx.select({ password: radcheck.value }).from(radcheck).where(and(
+            eq(radcheck.tenantId, tenantId),
+            eq(radcheck.username, recent.username),
+            eq(radcheck.attribute, 'Cleartext-Password'),
+          )).limit(1)
+          if (credentials) return { purchaseId: recent.id, username: recent.username, password: credentials.password, reused: true }
+          return { error: 'This device has already claimed today’s free offer, but its sign-in details could not be recovered. Contact your network operator.' }
+        }
+
+        const retryWindowOpen = now.getTime() - recent.createdAt.getTime() < 24 * 60 * 60 * 1000
+        if (recent.username && retryWindowOpen) {
+          const sessionResult = await tx.execute(sql`
+            select exists (
+              select 1
+              from public.radacct
+              where username = ${recent.username}
+                and acctstarttime is not null
+            ) as connected
+          `)
+          const hasConnected = sessionResult.rows[0]?.connected === true
+          if (!hasConnected) {
+            const [credentials] = await tx.select({ password: radcheck.value }).from(radcheck).where(and(
+              eq(radcheck.tenantId, tenantId),
+              eq(radcheck.username, recent.username),
+              eq(radcheck.attribute, 'Cleartext-Password'),
+            )).limit(1)
+            if (credentials) {
+              const retryExpiresAt = new Date(now.getTime() + recent.durationSeconds * 1000)
+              await tx.update(hotspotPurchases).set({ paidAt: now }).where(and(
+                eq(hotspotPurchases.id, recent.id),
+                eq(hotspotPurchases.tenantId, tenantId),
+              ))
+              const [expirationCheck] = await tx.select({ id: radcheck.id }).from(radcheck).where(and(
+                eq(radcheck.tenantId, tenantId),
+                eq(radcheck.username, recent.username),
+                eq(radcheck.attribute, 'Expiration'),
+              )).limit(1)
+              const expirationValue = toFreeRadiusExpiration(retryExpiresAt)
+              if (expirationCheck) {
+                await tx.update(radcheck).set({ op: ':=', value: expirationValue }).where(eq(radcheck.id, expirationCheck.id))
+              } else {
+                await tx.insert(radcheck).values({
+                  tenantId,
+                  username: recent.username,
+                  attribute: 'Expiration',
+                  op: ':=',
+                  value: expirationValue,
+                })
+              }
+              return { purchaseId: recent.id, username: recent.username, password: credentials.password, reused: true }
+            }
+          }
+        }
+        return { error: 'This device has already claimed today’s free offer.' }
+      }
 
       const username = `free${randomBytes(6).toString('hex')}`
       const password = randomBytes(12).toString('hex')
@@ -113,11 +178,14 @@ export async function POST(request: NextRequest) {
       const replies = toHotspotRadiusReplies(username, plan).map((reply) => ({ ...reply, tenantId }))
       await tx.insert(radreply).values(replies)
 
-      return { purchaseId: purchase.id, username, password }
+      return { purchaseId: purchase.id, username, password, reused: false }
     })
 
-    if ('error' in result)     return publicJson({ error: result.error }, 409)
-    return publicJson({ id: result.purchaseId, username: result.username, password: result.password }, 201)
+    if ('error' in result) return publicJson({ error: result.error }, 409)
+    return publicJson(
+      { id: result.purchaseId, username: result.username, password: result.password },
+      result.reused ? 200 : 201,
+    )
   } catch (error) {
     console.error('Failed to activate free hotspot offer', error)
     return publicJson({ error: 'Unable to activate the free offer. Please try again or contact customer care.' }, 503)

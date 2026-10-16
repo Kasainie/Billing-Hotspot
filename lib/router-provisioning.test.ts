@@ -57,6 +57,8 @@ test('router monitor reports its configured management ports rather than assumin
   assert.match(script, /"webEnabled"=\$webEnabled/)
   assert.match(script, /"webScheme"=\$webScheme/)
   assert.match(script, /"webPort"=\$webPort/)
+  assert.match(script, /comment="LKTech WireGuard hub"/)
+  assert.match(script, /"wireguardIp"=\$wireguardIp/)
 })
 
 test('detected LKTech bridge is preferred over the legacy Centipid bridge', () => {
@@ -124,9 +126,13 @@ test('hotspot file bundle downloads portal pages and assets to RouterOS hotspot 
   for (const assetName of ['api.json', 'style.css', 'md5.js']) {
     assert.ok(script!.includes(`/hotspot-assets/${assetName}`), `${assetName} is included in the portal installer`)
   }
+  assert.ok(script!.includes('/hotspot/redirect.html"'), 'the captive redirect page is included in the portal installer')
   for (const assetName of ['status.html', 'logout.html', 'error.html', 'alogin.html']) {
     assert.ok(script!.includes(`/hotspot/${assetName}"`), `${assetName} is served with workspace branding`)
   }
+  const redirectPage = readFileSync(new URL('../public/hotspot-assets/redirect.html', import.meta.url), 'utf8')
+  assert.match(redirectPage, /\$\(if http-status == 302\)/)
+  assert.match(redirectPage, /\$\(if http-header == "Location"\)\$\(link-redirect\)\$\(endif\)/)
 })
 
 test('tenant-aware router provisioning carries the workspace slug into downloaded captive portal files', () => {
@@ -140,6 +146,7 @@ test('tenant-aware router provisioning carries the workspace slug into downloade
   assert.match(provisioning, /\/hotspot\/hotspot-files\.rsc\?tenant=acme-network/)
   const portalBundle = getHotspotBundleScript('hotspot-files.rsc', 'https://billing.example.com', 'acme-network')
   assert.match(portalBundle!, /\/api\/hotspot\/portal-login\?tenant=acme-network/)
+  assert.match(portalBundle!, /\/hotspot\/redirect\.html"/)
   for (const assetName of ['status.html', 'logout.html', 'error.html', 'alogin.html']) {
     assert.match(portalBundle!, new RegExp(`/hotspot/${assetName}\\?tenant=acme-network`))
   }
@@ -203,7 +210,9 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
     assert.match(portalStyles, new RegExp(`data-portal-template="${templateId}"`))
   }
   assert.match(loginPage, /name="dst" value="\$\(link-orig\)"/)
-  assert.match(loginPage, /hexMD5\('\$\(chap-id\)' \+ form\.elements\.password\.value \+ '\$\(chap-challenge\)'\)/)
+  assert.match(loginPage, /loginUrl\.protocol !== 'https:'/)
+  assert.match(loginPage, /hexMD5\(chapId \+ password \+ chapChallenge\)/)
+  assert.match(loginPage, /if \(!chapId \|\| !chapChallenge\)/)
   assert.match(loginPage, /name="username"/)
   assert.match(loginPage, /name="password"/)
   assert.match(loginPage, /var portalClientMac = '\$\(mac\)'/)
@@ -230,6 +239,66 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
     assert.match(page, /class="portal-header"/, `${pageName} uses the shared portal header`)
     assert.match(page, /--portal-wallpaper/, `${pageName} uses the portal background`)
   }
+})
+
+test('captive portal upgrades secure login actions and hashes HTTP CHAP passwords', () => {
+  const loginPage = readFileSync(new URL('../public/hotspot-assets/login.html', import.meta.url), 'utf8')
+  const script = loginPage.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1]
+  assert.ok(script)
+
+  function submitLogin(action: string, chapId: string, chapChallenge: string, pageUrl = 'http://172.31.0.1/login') {
+    const submitted = { called: false }
+    const status = { textContent: '', classList: { add: (_className: string) => undefined } }
+    const sendin = {
+      action,
+      elements: { dst: { value: '' } },
+      submit: () => { submitted.called = true },
+    }
+    const username = { value: '' }
+    const password = { value: '' }
+    const sandbox = {
+      URL,
+      window: { location: { href: pageUrl, protocol: new URL(pageUrl).protocol } },
+      document: {
+        getElementById: (id: string) => ({
+          sendin,
+          'sendin-username': username,
+          'sendin-password': password,
+          'package-status': status,
+        }[id]),
+      },
+      hexMD5: (input: string) => `chap:${input}`,
+    }
+    const routerScript = script!
+      .replace("'$(chap-id)'", JSON.stringify(chapId))
+      .replace("'$(chap-challenge)'", JSON.stringify(chapChallenge))
+    runInNewContext(routerScript, sandbox)
+    const result = (sandbox as typeof sandbox & { doLogin: (form: unknown) => boolean }).doLogin({
+      elements: {
+        username: { value: 'free-user' },
+        password: { value: 'secret' },
+        dst: { value: 'http://example.com' },
+      },
+    })
+    return { result, submitted, username, password, sendin, status }
+  }
+
+  const securePage = submitLogin('http://172.31.0.1/login', '', '', 'https://172.31.0.1/login')
+  assert.equal(securePage.sendin.action, 'https://172.31.0.1/login')
+  assert.equal(securePage.password.value, 'secret')
+  assert.equal(securePage.submitted.called, true)
+
+  const httpsAction = submitLogin('https://172.31.0.1/login', '', '')
+  assert.equal(httpsAction.password.value, 'secret')
+  assert.equal(httpsAction.submitted.called, true)
+
+  const httpChap = submitLogin('http://172.31.0.1/login', 'id', 'challenge')
+  assert.equal(httpChap.password.value, 'chap:idsecretchallenge')
+  assert.equal(httpChap.submitted.called, true)
+
+  const insecureHttp = submitLogin('http://172.31.0.1/login', '', '')
+  assert.equal(insecureHttp.submitted.called, false)
+  assert.match(insecureHttp.status.textContent, /Secure sign-in is unavailable/)
 })
 
 test('captive portal uses absolute stylesheet and CHAP script URLs', () => {
@@ -325,7 +394,13 @@ test('FUP accounting migration configures throttled upload and download rates fo
 })
 
 test('package expiry is formatted for the FreeRADIUS expiration module', () => {
-  assert.equal(toFreeRadiusExpiration(new Date('2026-10-01T17:12:47.000Z')), 'Thu 01 Oct 2026 17:12:47 UTC')
+  assert.equal(toFreeRadiusExpiration(new Date('2026-10-01T17:12:47.000Z')), '01 Oct 2026 17:12')
+})
+
+test('expiration migration repairs legacy values and updates voucher expiry generation', () => {
+  const migration = readFileSync(new URL('../supabase/migrations/20261015190000_fix_freeradius_expiration_format.sql', import.meta.url), 'utf8')
+  assert.match(migration, /update public\.radcheck[\s\S]*?attribute = 'Expiration'[\s\S]*?UTC\$/)
+  assert.match(migration, /expiration_value := to_char\([\s\S]*?'DD Mon YYYY HH24:MI'\s*\)/)
 })
 
 test('portal design catalog has a stylesheet for every non-default template', () => {

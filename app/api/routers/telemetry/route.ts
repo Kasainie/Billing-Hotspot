@@ -24,6 +24,7 @@ type TelemetryInput = {
   webEnabled?: unknown
   webScheme?: unknown
   webPort?: unknown
+  wireguardIp?: unknown
 }
 
 function nonNegativeInteger(value: unknown, maxValue = Number.MAX_SAFE_INTEGER) {
@@ -80,6 +81,9 @@ export async function POST(request: NextRequest) {
   const webEnabled = typeof input.webEnabled === 'boolean' ? input.webEnabled : null
   const webPort = optionalPort(input.webPort)
   const webScheme = input.webScheme === 'http' || input.webScheme === 'https' ? input.webScheme : null
+  const wireguardIp = typeof input.wireguardIp === 'string' && isIP(input.wireguardIp) === 4
+    ? input.wireguardIp
+    : null
 
   const diskMetricsInvalid = (freeDiskBytes === null) !== (totalDiskBytes === null) ||
     (freeDiskBytes !== null && totalDiskBytes !== null &&
@@ -134,6 +138,7 @@ export async function POST(request: NextRequest) {
         webEnabled,
         webScheme: webEnabled && webScheme && webPort ? webScheme : null,
         webPort: webEnabled ? webPort : null,
+        wireguardIp,
       })
       await tx.update(routerMonitors).set({
         lastSeenAt: sampledAt,

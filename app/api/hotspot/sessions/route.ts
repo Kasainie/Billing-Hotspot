@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTenantSession } from '@/lib/db/tenant'
+import { parseRouterTimestamp } from '@/lib/router-monitoring'
 
 function tenantSessionUserFilter(tenantId: string) {
   return sql`(
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest) {
         username: string | null
         mac: string | null
         ipAddress: string | null
-        startedAt: Date | null
+        startedAt: Date | string | null
         phone: string | null
         customerName: string | null
         serviceType: 'PPPoE' | 'Hotspot'
@@ -114,7 +115,7 @@ export async function GET(request: NextRequest) {
       totalBytes: summary.rows[0]?.totalBytes ?? '0',
       sessions: sessionRows.rows.map((row) => ({
         ...row,
-        startedAt: row.startedAt?.toISOString() ?? null,
+        startedAt: parseRouterTimestamp(row.startedAt)?.toISOString() ?? null,
       })),
     }, { headers: { 'cache-control': 'no-store' } })
   } catch (error) {

@@ -34,6 +34,7 @@ export type RouterMonitorRecord = {
   webEnabled: boolean | null
   webScheme: 'http' | 'https' | null
   webPort: number | null
+  wireguardIp: string | null
   health: number | null
 }
 

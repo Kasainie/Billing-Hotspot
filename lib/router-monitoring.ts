@@ -6,6 +6,30 @@ export function hashRouterMonitorToken(token: string) {
   return createHash('sha256').update(token).digest('hex')
 }
 
+export function getRouterWebConsoleUrl({
+  webEnabled,
+  webScheme,
+  webPort,
+  wireguardIp,
+}: {
+  webEnabled: boolean | null
+  webScheme: 'http' | 'https' | null
+  webPort: number | null
+  wireguardIp: string | null
+}) {
+  if (webEnabled !== true || !webScheme || !webPort || !wireguardIp) return null
+  const octets = wireguardIp.split('.')
+  if (octets.length !== 4 ||
+      octets.some((octet) => !/^\d{1,3}$/.test(octet) || Number(octet) > 255 || String(Number(octet)) !== octet)) return null
+  const [firstOctet, secondOctet] = octets.map(Number)
+  const isPrivateAddress = firstOctet === 10 ||
+    (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) ||
+    (firstOctet === 192 && secondOctet === 168)
+  if (!isPrivateAddress) return null
+  if (!Number.isSafeInteger(webPort) || webPort < 1 || webPort > 65535) return null
+  return `${webScheme}://${wireguardIp}:${webPort}`
+}
+
 export function parseRouterTimestamp(value: Date | string | null) {
   if (value === null) return null
   const timestamp = value instanceof Date ? value : new Date(value)

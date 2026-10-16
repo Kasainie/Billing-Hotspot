@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { and, desc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { customers, packages, payments, pppoeAccounts, radcheck, radreply, sites } from '@/lib/db/schema'
+import { customers, invoices, mobileMoneyTransactions, packages, payments, pppoeAccounts, radcheck, radreply, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 import { normalizeKenyanPhone } from '@/lib/daraja'
@@ -316,13 +316,13 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const { entity } = await context.params
   const table = getTable(entity)
   if (!table) return NextResponse.json({ error: 'Unknown entity' }, { status: 404 })
-  if (entity === 'customers' && process.env.NODE_ENV !== 'development') {
-    return NextResponse.json({ error: 'Subscriber provisioning is disabled outside local development' }, { status: 403 })
-  }
   const session = await getTenantSession(request)
   if (!session) return NextResponse.json({ error: 'Sign in to delete records.' }, { status: 401 })
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
+  if (entity === 'customers' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: 'Subscriber id is invalid.' }, { status: 400 })
+  }
   const tenantId = session.tenantId
 
   const hasDatabase = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim())
@@ -333,13 +333,35 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   try {
     if (entity === 'customers') {
       const deleted = await db.transaction(async (tx) => {
-        const [customer] = await tx.select({ radiusUsername: customers.radiusUsername }).from(customers).where(and(eq(customers.id, id), eq(customers.tenantId, tenantId))).limit(1)
-        if (!customer) return false
-        if (customer.radiusUsername) await tx.delete(radcheck).where(and(eq(radcheck.username, customer.radiusUsername), eq(radcheck.tenantId, tenantId)))
+        const [customer] = await tx.select({ id: customers.id, radiusUsername: customers.radiusUsername })
+          .from(customers)
+          .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
+          .for('update')
+          .limit(1)
+        if (!customer) return { deleted: false as const }
+        const [invoice] = await tx.select({ id: invoices.id }).from(invoices)
+          .where(and(eq(invoices.customerId, id), eq(invoices.tenantId, tenantId)))
+          .limit(1)
+        if (invoice) return { invoiceConflict: true as const }
+        if (customer.radiusUsername) {
+          await tx.delete(radcheck).where(and(eq(radcheck.username, customer.radiusUsername), eq(radcheck.tenantId, tenantId)))
+          await tx.delete(radreply).where(and(eq(radreply.username, customer.radiusUsername), eq(radreply.tenantId, tenantId)))
+        }
+        await tx.update(mobileMoneyTransactions).set({ customerId: null }).where(and(
+          eq(mobileMoneyTransactions.customerId, id),
+          eq(mobileMoneyTransactions.tenantId, tenantId),
+        ))
+        await tx.update(pppoeAccounts).set({ customerId: null }).where(and(
+          eq(pppoeAccounts.customerId, id),
+          eq(pppoeAccounts.tenantId, tenantId),
+        ))
         await tx.delete(customers).where(and(eq(customers.id, id), eq(customers.tenantId, tenantId)))
-        return true
+        return { deleted: true as const }
       })
-      if (!deleted) return NextResponse.json({ error: 'Subscriber not found' }, { status: 404 })
+      if ('invoiceConflict' in deleted) {
+        return NextResponse.json({ error: 'This subscriber has invoices and cannot be deleted. Suspend the account to preserve its billing history.' }, { status: 409 })
+      }
+      if (!deleted.deleted) return NextResponse.json({ error: 'Subscriber not found' }, { status: 404 })
       return NextResponse.json({ ok: true })
     }
 

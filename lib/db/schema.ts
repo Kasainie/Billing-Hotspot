@@ -432,6 +432,7 @@ export const routerMetricSamples = pgTable('router_metric_samples', {
   webEnabled: boolean('web_enabled'),
   webScheme: text('web_scheme'),
   webPort: integer('web_port'),
+  wireguardIp: text('wireguard_ip'),
 }, (table) => [
   index('router_metric_samples_router_sampled_idx').on(table.routerId, table.sampledAt),
 ])

@@ -31,6 +31,7 @@ type RouterRow = {
   webEnabled: boolean | null
   webScheme: string | null
   webPort: number | null
+  wireguardIp: string | null
 }
 
 export async function GET(request: NextRequest) {
@@ -65,7 +66,8 @@ export async function GET(request: NextRequest) {
         latest.winbox_port as "winboxPort",
         latest.web_enabled as "webEnabled",
         latest.web_scheme as "webScheme",
-        latest.web_port as "webPort"
+        latest.web_port as "webPort",
+        latest.wireguard_ip as "wireguardIp"
       from public.router_monitors as monitor
       inner join public.sites as site
         on site.id = monitor.site_id and site.tenant_id = monitor.tenant_id

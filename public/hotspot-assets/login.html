@@ -18,10 +18,30 @@
   <script src="md5.js"></script>
   <script>
     function doLogin(form) {
+      var sendin = document.getElementById('sendin');
+      var loginUrl = new URL(sendin.action, window.location.href);
+      var password = form.elements.password.value;
+      if (window.location.protocol === 'https:' && loginUrl.protocol !== 'https:') {
+        loginUrl.protocol = 'https:';
+        sendin.action = loginUrl.toString();
+      }
+      if (loginUrl.protocol !== 'https:') {
+        var chapId = '$(chap-id)';
+        var chapChallenge = '$(chap-challenge)';
+        if (!chapId || !chapChallenge) {
+          var status = document.getElementById('package-status');
+          if (status) {
+            status.textContent = 'Secure sign-in is unavailable. Reopen the hotspot login page and try again.';
+            status.classList.add('is-error');
+          }
+          return false;
+        }
+        password = hexMD5(chapId + password + chapChallenge);
+      }
       document.getElementById('sendin-username').value = form.elements.username.value;
-      document.getElementById('sendin-password').value = hexMD5('$(chap-id)' + form.elements.password.value + '$(chap-challenge)');
-      document.getElementById('sendin').elements.dst.value = form.elements.dst.value;
-      document.getElementById('sendin').submit();
+      document.getElementById('sendin-password').value = password;
+      sendin.elements.dst.value = form.elements.dst.value;
+      sendin.submit();
       return false;
     }
 

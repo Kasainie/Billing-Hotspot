@@ -7,6 +7,7 @@ import { getHotspotBundleScript } from '@/lib/router-provisioning'
 
 const hotspotAssetContentTypes: Record<string, string> = {
   'login.html': 'text/html; charset=utf-8',
+  'redirect.html': 'text/html; charset=utf-8',
   'status.html': 'text/html; charset=utf-8',
   'logout.html': 'text/html; charset=utf-8',
   'error.html': 'text/html; charset=utf-8',

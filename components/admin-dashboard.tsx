@@ -57,6 +57,7 @@ import { PaymentReconciliation } from '@/components/payment-reconciliation'
 import { OperationsWorkspace } from '@/components/operations-workspace'
 import { LiveHotspotSessions } from '@/components/live-hotspot-sessions'
 import { RouterMonitorDetail, type RouterConnectorEnrollment, type RouterMonitorRecord, type RouterMonitorTab } from '@/components/router-monitor-detail'
+import { getRouterWebConsoleUrl } from '@/lib/router-monitoring'
 import { SubscriberProfile, type SubscriberProfileData } from '@/components/subscriber-profile'
 import { escapeCsvField as escapeSubscriberCsvField, parseCsv } from '@/lib/subscriber-csv'
 
@@ -1159,12 +1160,6 @@ type RouterListResponse = {
 type RouterInstallScript = { script: string; routerName: string }
 type RouterFilter = 'all' | 'online' | 'offline'
 
-function getRouterWebConsoleUrl(router: RouterMonitorRecord) {
-  if (router.webEnabled !== true || !router.webScheme || !router.webPort || !router.lastSourceIp) return null
-  const host = router.lastSourceIp.includes(':') ? `[${router.lastSourceIp}]` : router.lastSourceIp
-  return `${router.webScheme}://${host}:${router.webPort}`
-}
-
 function RouterManagement() {
   const [routers, setRouters] = useState<RouterMonitorRecord[]>([])
   const [summary, setSummary] = useState({ total: 0, online: 0, offline: 0 })
@@ -1464,12 +1459,14 @@ function RouterManagement() {
                 const webConsoleUrl = getRouterWebConsoleUrl(router)
                 return (
                 <tr key={router.id}>
-                  <td><button type="button" className="router-name-open" onClick={() => { setRouterDetailTab('System'); setSelectedRouterId(router.id) }}>{router.routerName}</button><span>{router.lastSourceIp ? `${router.location} · ${router.lastSourceIp}` : router.location}</span></td>
+                  <td><button type="button" className="router-name-open" onClick={() => { setRouterDetailTab('System'); setSelectedRouterId(router.id) }}>{router.routerName}</button><span>{router.boardName && router.routerOsVersion
+                    ? `${router.boardName} · RouterOS ${router.routerOsVersion}`
+                    : router.boardName || (router.routerOsVersion ? `RouterOS ${router.routerOsVersion}` : router.location)}</span></td>
                   <td><span className={`router-monitoring-status ${router.status}`}>{router.status === 'not_configured' ? 'Setup needed' : router.status === 'online' ? 'Online' : 'Offline'}</span></td>
                   <td>
                     {router.activeHotspotUsers === null || router.activePppoeUsers === null
                       ? <span className="router-unknown-value">Not reported</span>
-                      : <><strong>{router.activeHotspotUsers + router.activePppoeUsers}</strong><small className="router-session-breakdown">Hotspot {router.activeHotspotUsers} · PPPoE {router.activePppoeUsers}</small></>}
+                      : <strong>{router.activeHotspotUsers + router.activePppoeUsers}</strong>}
                   </td>
                   <td>{router.winboxEnabled === false
                     ? <span className="router-unknown-value">Disabled</span>
@@ -1477,10 +1474,10 @@ function RouterManagement() {
                       ? <code>:{router.winboxPort}</code>
                       : <span className="router-unknown-value">Not reported</span>}</td>
                   <td>{webConsoleUrl
-                    ? <a className="router-web-console" href={webConsoleUrl} target="_blank" rel="noopener noreferrer">Open <ArrowRight size={11} /></a>
+                    ? <a className="router-web-console" href={webConsoleUrl} target="_blank" rel="noopener noreferrer"><Globe2 size={11} /> Open <ArrowRight size={11} /></a>
                     : router.webEnabled === false
                       ? <span className="router-unknown-value">Disabled</span>
-                      : <span className="router-unknown-value">Not reported</span>}</td>
+                      : <span className="router-unknown-value">{router.webEnabled === true ? 'VPN details not reported' : 'Not reported'}</span>}</td>
                   <td>{router.lastSeenAt
                     ? <time dateTime={router.lastSeenAt} title={router.metricsUpdatedAt ? `Metrics sampled ${new Date(router.metricsUpdatedAt).toLocaleString()}` : 'Heartbeat received'}>{new Date(router.lastSeenAt).toLocaleString()}</time>
                     : <span className="router-unknown-value">Never reported</span>}</td>
@@ -1509,7 +1506,7 @@ function RouterManagement() {
             </tbody>
           </table>
         </div>
-        <div className="router-table-footer">Session counts, service ports, and last-online times come from RouterOS monitoring reports. New service-port fields appear after the router receives the refreshed monitor script and checks in.</div>
+        <div className="router-table-footer">Session counts and management service details come from RouterOS monitoring reports. Secure web-console links use the router’s WireGuard address, never its public heartbeat address. To report the console and VPN details, regenerate and install the monitor script, then wait for the next check-in.</div>
       </div>
       <div className="router-management-footer"><button type="button" className="router-refresh-button" onClick={() => void load()} disabled={refreshing}><RefreshCw size={13} className={refreshing ? 'is-spinning' : undefined} />{refreshing ? 'Refreshing…' : 'Refresh routers'}</button></div>
     </section>
@@ -1519,7 +1516,7 @@ function RouterManagement() {
         <button type="button" role="menuitem" disabled={!routerMenu.router.monitored} onClick={() => { closeRouterMenu(); setRouterDetailTab('Diagnosis'); setSelectedRouterId(routerMenu.router.id) }}>Diagnose</button>
         {routerMenu.webConsoleUrl
           ? <a role="menuitem" href={routerMenu.webConsoleUrl} target="_blank" rel="noopener noreferrer" onClick={closeRouterMenu}>Open web console</a>
-          : <button type="button" role="menuitem" disabled>Open web console · not reported</button>}
+          : <button type="button" role="menuitem" disabled>Open web console · {routerMenu.router.webEnabled === false ? 'disabled' : 'VPN details not reported'}</button>}
         <button type="button" role="menuitem" disabled={scriptBusy} onClick={() => { closeRouterMenu(); void generateMonitorScript(routerMenu.router) }}>{routerMenu.router.monitored ? 'Regenerate monitor script' : 'Set up monitoring'}</button>
         <button type="button" role="menuitem" onClick={() => { closeRouterMenu(); beginReprovision(routerMenu.router) }}>Reprovision router</button>
         <button type="button" role="menuitem" className="router-menu-delete" onClick={() => { closeRouterMenu(); void confirmRemoveRouter(routerMenu.router) }}>Delete router…</button>
@@ -1894,6 +1891,10 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
   const [expandedDetailsId, setExpandedDetailsId] = useState('')
   const [subscriberDetails, setSubscriberDetails] = useState<SubscriberProfileData | null>(null)
   const [detailsError, setDetailsError] = useState('')
+  const [subscriberToDelete, setSubscriberToDelete] = useState<{ id: string; name: string } | null>(null)
+  const [subscriberDeleteError, setSubscriberDeleteError] = useState('')
+  const subscriberDeleteConfirmRef = useRef<HTMLButtonElement>(null)
+  const subscriberDeleteTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [smsSubscriberId, setSmsSubscriberId] = useState('')
   const [smsDraft, setSmsDraft] = useState('')
   const [sendingSmsId, setSendingSmsId] = useState('')
@@ -2006,6 +2007,19 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
   })
   useEffect(() => { load().catch(() => setMessage('Could not load live records')) }, [entity])
   useEffect(() => { setRecordFilter(initialFilter) }, [initialFilter])
+  useEffect(() => {
+    if (!subscriberToDelete) return
+    subscriberDeleteConfirmRef.current?.focus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) {
+        setSubscriberToDelete(null)
+        setSubscriberDeleteError('')
+        subscriberDeleteTriggerRef.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [subscriberToDelete, saving])
   const filteredRows = useMemo(() => {
     const normalizedFilter = recordFilter.trim().toLowerCase()
     if (!normalizedFilter) return rows
@@ -2217,6 +2231,7 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
     setSaving(true)
     setMessage('')
     setMessageIsError(false)
+    setSubscriberDeleteError('')
     try {
       const response = await fetch(`/api/${entity}?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       const result = await response.json() as { error?: string }
@@ -2224,11 +2239,23 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       await load()
       if (entity === 'sites') window.dispatchEvent(new Event('workspace-data-changed'))
       setMessage('Record deleted.')
+      return true
     } catch (reason) {
       setMessageIsError(true)
-      setMessage(reason instanceof Error ? reason.message : 'Unable to delete record.')
+      const errorMessage = reason instanceof Error ? reason.message : 'Unable to delete record.'
+      setMessage(errorMessage)
+      if (entity === 'customers') setSubscriberDeleteError(errorMessage)
+      return false
     } finally {
       setSaving(false)
+    }
+  }
+  const confirmDeleteSubscriber = async () => {
+    if (!subscriberToDelete) return
+    if (await remove(subscriberToDelete.id)) {
+      setSubscriberToDelete(null)
+      setSubscriberDeleteError('')
+      subscriberDeleteTriggerRef.current?.focus()
     }
   }
   const changeSubscriberStatus = async (row: Record<string, unknown>, nextStatus: 'active' | 'suspended') => {
@@ -2299,7 +2326,7 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       <td><strong>{String(row.plan || 'No plan assigned')}</strong>{Number(row.monthlyRate) > 0 && <span>KSh {Number(row.monthlyRate).toLocaleString('en-KE')} / month</span>}</td>
       <td><span className={`subscriber-status subscriber-status-${status.replace(/[^a-z0-9-]/g, '-')}`}>{status === 'active' ? 'Active' : status === 'suspended' ? 'Suspended' : status === 'expired' ? 'Expired' : status}</span></td>
       <td>{expiry && Number.isFinite(expiry.getTime()) ? <><strong>{expiry.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span>{expiry.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit' })}</span></> : <span className="subscriber-no-expiry">No expiry set</span>}</td>
-      <td><div className="subscriber-actions">{row.radiusUsername ? <><button className="subscriber-details-toggle" type="button" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={() => void toggleSubscriberDetails(String(row.id))}>{detailsLoadingId === String(row.id) ? 'Loading…' : expandedDetailsId === String(row.id) ? 'Hide details' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></> : <span>Login unavailable</span>}<button className="text-button" type="button" disabled={!row.phone || sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(smsSubscriberId === String(row.id) ? '' : String(row.id)); setSmsDraft(''); setMessage(''); setMessageIsError(false) }}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send SMS'}</button></div>{smsSubscriberId === String(row.id) && <div className="subscriber-sms-compose"><label htmlFor={`subscriber-sms-${String(row.id)}`}>Message to {String(row.name || 'subscriber')}</label><textarea id={`subscriber-sms-${String(row.id)}`} value={smsDraft} onChange={(event) => setSmsDraft(event.target.value)} maxLength={500} rows={3} placeholder="Type your message..." /><span>{smsDraft.length}/500 characters</span><div><button className="text-button" type="button" disabled={!smsDraft.trim() || sendingSmsId === String(row.id)} onClick={() => void sendSubscriberSms(String(row.id))}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send message'}</button><button className="text-button" type="button" disabled={sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(''); setSmsDraft('') }}>Cancel</button></div></div>}</td>
+      <td><div className="subscriber-actions">{row.radiusUsername ? <><button className="subscriber-details-toggle" type="button" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={() => void toggleSubscriberDetails(String(row.id))}>{detailsLoadingId === String(row.id) ? 'Loading…' : expandedDetailsId === String(row.id) ? 'Hide details' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={(event) => { subscriberDeleteTriggerRef.current = event.currentTarget; setSubscriberDeleteError(''); setSubscriberToDelete({ id: String(row.id), name: String(row.name || 'this subscriber') }) }}>Delete</button></> : <span>Login unavailable</span>}<button className="text-button" type="button" disabled={!row.phone || sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(smsSubscriberId === String(row.id) ? '' : String(row.id)); setSmsDraft(''); setMessage(''); setMessageIsError(false) }}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send SMS'}</button></div>{smsSubscriberId === String(row.id) && <div className="subscriber-sms-compose"><label htmlFor={`subscriber-sms-${String(row.id)}`}>Message to {String(row.name || 'subscriber')}</label><textarea id={`subscriber-sms-${String(row.id)}`} value={smsDraft} onChange={(event) => setSmsDraft(event.target.value)} maxLength={500} rows={3} placeholder="Type your message..." /><span>{smsDraft.length}/500 characters</span><div><button className="text-button" type="button" disabled={!smsDraft.trim() || sendingSmsId === String(row.id)} onClick={() => void sendSubscriberSms(String(row.id))}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send message'}</button><button className="text-button" type="button" disabled={sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(''); setSmsDraft('') }}>Cancel</button></div></div>}</td>
     </tr>{expandedDetailsId === String(row.id) && <tr className="subscriber-detail-row"><td colSpan={6}>{detailsLoadingId === String(row.id) ? <p className="subscriber-detail-loading" role="status">Loading secure subscriber details…</p> : detailsError ? <p className="subscriber-form-message is-error" role="alert">{detailsError}</p> : subscriberDetails && String(subscriberDetails.id) === String(row.id) ?
       <SubscriberProfile
         data={subscriberDetails}
@@ -2310,7 +2337,16 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
         onTogglePassword={() => setShowSubscriberPassword((visible) => !visible)}
       /> : null}</td></tr>}</Fragment>
     return <tr key={String(row.id)}><td><strong>{String(row.name || row.reference || row.id).slice(0, 34)}</strong></td><td><span className="table-status">{status}</span></td><td className="mono">{String(row.radiusUsername || row.location || row.email || row.monthlyPrice || row.amount || '')}</td><td><button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></td></tr>
-  })}{filteredRows.length === 0 && <tr><td colSpan={4}>{rows.length === 0 && entity === 'customers' ? 'No subscribers yet. Add your first subscriber to this workspace.' : 'No matching records.'}</td></tr>}</tbody></table></div></div></section>
+  })}{filteredRows.length === 0 && <tr><td colSpan={4}>{rows.length === 0 && entity === 'customers' ? 'No subscribers yet. Add your first subscriber to this workspace.' : 'No matching records.'}</td></tr>}</tbody></table></div></div>
+    {entity === 'customers' && subscriberToDelete && <div className="subscriber-delete-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) { setSubscriberToDelete(null); setSubscriberDeleteError(''); subscriberDeleteTriggerRef.current?.focus() } }}>
+      <section className="subscriber-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="subscriber-delete-title" aria-describedby="subscriber-delete-description">
+        <div className="subscriber-delete-heading"><span className="subscriber-delete-icon"><Trash2 size={18} /></span><div><h2 id="subscriber-delete-title">Delete subscriber?</h2><p id="subscriber-delete-description">Delete <strong>{subscriberToDelete.name}</strong> and remove their RADIUS login? Their active internet access will be revoked. This cannot be undone.</p></div></div>
+        <p className="subscriber-delete-history-note">Subscribers with invoices cannot be deleted. Suspend the account instead to preserve billing history.</p>
+        {subscriberDeleteError && <p className="subscriber-delete-error" role="alert">{subscriberDeleteError}</p>}
+        <div className="subscriber-delete-actions"><button type="button" className="outline-button" disabled={saving} onClick={() => { setSubscriberToDelete(null); setSubscriberDeleteError(''); subscriberDeleteTriggerRef.current?.focus() }}>Cancel</button><button ref={subscriberDeleteConfirmRef} type="button" className="subscriber-delete-confirm" disabled={saving} onClick={() => void confirmDeleteSubscriber()}>{saving ? 'Deleting…' : 'Delete subscriber'}</button></div>
+      </section>
+    </div>}
+  </section>
 }
 
 export default AdminDashboard

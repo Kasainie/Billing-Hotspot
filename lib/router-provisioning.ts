@@ -204,7 +204,7 @@ const hotspotBundleScripts: Record<string, string> = {
   ].join('\n'),
 }
 
-const hotspotAssetNames = ['login.html', 'status.html', 'logout.html', 'error.html', 'alogin.html', 'api.json', 'style.css', 'md5.js']
+const hotspotAssetNames = ['login.html', 'redirect.html', 'status.html', 'logout.html', 'error.html', 'alogin.html', 'api.json', 'style.css', 'md5.js']
 
 export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https://billing.lktech.life', tenantSlug = ''): string | null {
   const normalizedName = String(fileName || '').trim().toLowerCase()
@@ -214,7 +214,7 @@ export function getHotspotBundleScript(fileName: string, assetBaseUrl = 'https:/
     const fetchAssets = (directory: string) => hotspotAssetNames.map((assetName) => {
       const assetUrl = assetName === 'login.html'
         ? new URL('/api/hotspot/portal-login', assetBaseUrl)
-        : ['status.html', 'logout.html', 'error.html', 'alogin.html'].includes(assetName)
+        : ['redirect.html', 'status.html', 'logout.html', 'error.html', 'alogin.html'].includes(assetName)
           ? new URL(`/hotspot/${assetName}`, assetBaseUrl)
         : new URL(assetName, assetBase)
       if (assetName === 'login.html' && validTenantSlug) assetUrl.searchParams.set('tenant', validTenantSlug)

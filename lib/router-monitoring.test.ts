@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildProvisioningScript } from './router-provisioning.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { calculateRouterHealth, getLiveRouterUptimeSeconds, isRouterOnline, parseRouterTimestamp, parseRouterUptime, ROUTER_ONLINE_TIMEOUT_MS } from './router-monitoring.ts'
+import { calculateRouterHealth, getLiveRouterUptimeSeconds, getRouterWebConsoleUrl, isRouterOnline, parseRouterTimestamp, parseRouterUptime, ROUTER_ONLINE_TIMEOUT_MS } from './router-monitoring.ts'
 
 test('the provisioning builder can include the optional legacy monitoring script', () => {
   const script = buildProvisioningScript({
@@ -71,6 +71,21 @@ test('router timestamps accept Date and database string values and reject invali
   assert.equal(parseRouterTimestamp(new Date(timestamp))?.toISOString(), timestamp)
   assert.equal(parseRouterTimestamp(null), null)
   assert.equal(parseRouterTimestamp('not-a-timestamp'), null)
+})
+
+test('router web console links require reported WebFig and WireGuard details', () => {
+  const router = {
+    webEnabled: true,
+    webScheme: 'http' as const,
+    webPort: 80,
+    wireguardIp: '10.77.0.2',
+  }
+  assert.equal(getRouterWebConsoleUrl(router), 'http://10.77.0.2:80')
+  assert.equal(getRouterWebConsoleUrl({ ...router, wireguardIp: null }), null)
+  assert.equal(getRouterWebConsoleUrl({ ...router, wireguardIp: 'https://attacker.example' }), null)
+  assert.equal(getRouterWebConsoleUrl({ ...router, wireguardIp: '203.0.113.15' }), null)
+  assert.equal(getRouterWebConsoleUrl({ ...router, webEnabled: false }), null)
+  assert.equal(getRouterWebConsoleUrl({ ...router, webPort: 65536 }), null)
 })
 
 test('router uptime advances from the latest heartbeat and stays fixed when offline', () => {

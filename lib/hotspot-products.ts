@@ -73,5 +73,12 @@ export function toHotspotRadiusReplies(username: string, policy: Pick<BillingPac
 }
 
 export function toFreeRadiusExpiration(expiresAt: Date) {
-  return expiresAt.toUTCString().replace(',', '').replace(' GMT', ' UTC')
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const day = String(expiresAt.getUTCDate()).padStart(2, '0')
+  const month = months[expiresAt.getUTCMonth()]
+  const year = expiresAt.getUTCFullYear()
+  const hours = String(expiresAt.getUTCHours()).padStart(2, '0')
+  const minutes = String(expiresAt.getUTCMinutes()).padStart(2, '0')
+
+  return `${day} ${month} ${year} ${hours}:${minutes}`
 }
