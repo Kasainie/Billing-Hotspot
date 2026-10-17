@@ -66,6 +66,8 @@ test('RouterOS compact and clock-form uptime values convert to seconds', () => {
   assert.equal(parseRouterUptime('1w2d3h4m5s'), 788645)
   assert.equal(parseRouterUptime('2d03:04:05'), 183845)
   assert.equal(parseRouterUptime('00:01:00'), 60)
+  assert.equal(parseRouterUptime('1970-01-02 15:06:41'), 140801)
+  assert.equal(parseRouterUptime('1970-02-30 15:06:41'), null)
   assert.equal(parseRouterUptime('not-uptime'), null)
 })
 

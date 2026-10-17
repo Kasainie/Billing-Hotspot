@@ -58,6 +58,15 @@ export function getLiveRouterUptimeSeconds(
 }
 
 export function parseRouterUptime(value: string) {
+  const serializedTime = value.match(/^1970-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/)
+  if (serializedTime) {
+    const [, month, day, hours, minutes, seconds] = serializedTime
+    const elapsed = Date.UTC(1970, Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds)) / 1_000
+    const date = new Date(elapsed * 1_000)
+    if (date.toISOString().slice(0, 19).replace('T', ' ') === value) return elapsed
+    return null
+  }
+
   const compact = value.match(/^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/i)
   if (compact && compact.slice(1).some(Boolean)) {
     const [, weeks = '0', days = '0', hours = '0', minutes = '0', seconds = '0'] = compact
