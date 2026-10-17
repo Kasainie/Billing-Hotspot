@@ -2,7 +2,9 @@ import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { hotspotPortalSettings } from '@/lib/db/schema'
-import { getTenantSession, resolvePublicTenantId } from '@/lib/db/tenant'
+import { resolvePublicTenantId } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
+import { getTenantSession } from '@/lib/db/tenant'
 import { defaultHotspotPortalBranding, isHotspotPortalTemplateId } from '@/lib/hotspot-templates'
 import { resolveHotspotCompanyName } from '@/lib/hotspot-portal-branding'
 
@@ -45,8 +47,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to update portal settings.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   let input: { template?: unknown; companyName?: unknown; welcomeHeadline?: unknown; welcomeMessage?: unknown; supportMessage?: unknown }
   try {
     input = await request.json() as typeof input

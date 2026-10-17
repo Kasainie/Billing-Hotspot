@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { getTenantSmsOverview, saveTenantSmsSettings, sendTestTenantSms, validateTenantSmsInput } from '@/lib/db/tenant-sms'
 
 export async function GET(request: NextRequest) {
@@ -14,8 +15,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to update SMS settings.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   let input: Record<string, unknown>
   try {
     input = await request.json() as Record<string, unknown>
@@ -39,8 +41,9 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to test SMS settings.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   let input: { phone?: unknown }
   try {
     input = await request.json() as typeof input

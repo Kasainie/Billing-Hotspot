@@ -3,6 +3,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { customers, invoices, mobileMoneyTransactions, packages, payments, pppoeAccounts, radcheck, radreply, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 import { normalizeKenyanPhone } from '@/lib/daraja'
 import { toHotspotRadiusReplies } from '@/lib/hotspot-products'
@@ -101,8 +102,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
   const { entity } = await context.params
   const table = getTable(entity)
   if (!table) return NextResponse.json({ error: 'Unknown entity' }, { status: 404 })
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to create records.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   let input: Record<string, unknown>
   try {
     input = await request.json() as Record<string, unknown>
@@ -295,8 +297,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
   if (!packageAvailabilities.includes(String(input.availability))) return NextResponse.json({ error: 'Select a valid package availability' }, { status: 400 })
   if (!process.env.DATABASE_URL?.trim()) return NextResponse.json({ error: 'Package updates require a configured database' }, { status: 503 })
 
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to update records.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   const tenantId = session.tenantId
 
   try {
@@ -316,8 +319,9 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const { entity } = await context.params
   const table = getTable(entity)
   if (!table) return NextResponse.json({ error: 'Unknown entity' }, { status: 404 })
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to delete records.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
   if (entity === 'customers' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {

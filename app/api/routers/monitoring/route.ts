@@ -3,13 +3,14 @@ import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { routerMonitors, sites } from '@/lib/db/schema'
-import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { buildRouterMonitorScript } from '@/lib/router-monitor-script'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
 
 export async function POST(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to enable router monitoring.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
 
   let input: { siteId?: unknown; routerName?: unknown; mode?: unknown }
   try {

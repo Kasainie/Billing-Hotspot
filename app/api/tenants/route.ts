@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { tenantMemberships, tenantSessions, tenants } from '@/lib/db/schema'
 import { getTenantMemberships, getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 
 function slugify(value: string) {
   return value.normalize('NFKD').toLowerCase().replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 63)
@@ -21,8 +22,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to create a workspace.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
 
   let input: { name?: unknown; slug?: unknown }
   try {

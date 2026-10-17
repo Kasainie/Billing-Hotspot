@@ -3,13 +3,21 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { routerConnectorCommands, routerMonitors, routerRemoteSessions } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { isRouterSessionId, isRouterSessionType } from '@/lib/router-connector'
 
 type RouteContext = { params: Promise<{ id: string }> }
 const routerIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-async function getAccess(request: NextRequest, routerId: string) {
-  const session = await getTenantSession(request)
+async function getAccess(request: NextRequest, routerId: string, requireAdmin = false) {
+  let session
+  if (requireAdmin) {
+    const access = await requireTenantAdmin(request)
+    if ('response' in access) return { response: access.response }
+    session = access.session
+  } else {
+    session = await getTenantSession(request)
+  }
   if (!session) return { response: NextResponse.json({ error: 'Sign in to manage router sessions.' }, { status: 401 }) }
   if (!routerIdPattern.test(routerId)) {
     return { response: NextResponse.json({ error: 'Router id is invalid.' }, { status: 400 }) }
@@ -70,7 +78,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   const { id } = await context.params
-  const access = await getAccess(request, id)
+  const access = await getAccess(request, id, true)
   if ('response' in access) return access.response
 
   let input: { sessionType?: unknown; routerSessionId?: unknown }

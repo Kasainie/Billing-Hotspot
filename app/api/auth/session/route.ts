@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantMemberships, getTenantSession } from '@/lib/db/tenant'
+import { isPlatformAdminEmail } from '@/lib/platform-admin'
 
 export async function GET(request: NextRequest) {
   if (!process.env.DATABASE_URL?.trim()) return NextResponse.json({ error: 'Database not configured.' }, { status: 503 })
@@ -9,6 +10,7 @@ export async function GET(request: NextRequest) {
     const memberships = await getTenantMemberships(session.userId)
     return NextResponse.json({
       user: { id: session.userId, name: session.name, email: session.email },
+      platformAdmin: isPlatformAdminEmail(session.email),
       tenant: { id: session.tenantId, name: session.tenantName, slug: session.tenantSlug, role: session.role },
       memberships,
     }, { headers: { 'cache-control': 'no-store' } })

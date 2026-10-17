@@ -2,11 +2,12 @@ import { and, eq, ne } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { hotspotPortalSettings, tenants } from '@/lib/db/schema'
-import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 
 export async function PATCH(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to update this workspace.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
 
   let input: { name?: unknown; slug?: unknown; portalName?: unknown }
   try {

@@ -4,6 +4,7 @@ import { and, count, desc, eq, gte, lt, sum } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { customers, equipment, expenses, invoices, leads, packages, radcheck, radreply, sites, supportTickets, tr069Devices, vouchers } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 
 const entities = ['leads', 'tickets', 'expenses', 'vouchers', 'equipment', 'tr069', 'invoices'] as const
 type Entity = typeof entities[number]
@@ -21,10 +22,17 @@ function invalid(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status })
 }
 
-async function getAuthorizedEntity(request: NextRequest, context: { params: Promise<{ entity: string }> }) {
+async function getAuthorizedEntity(request: NextRequest, context: { params: Promise<{ entity: string }> }, requireAdmin = false) {
   const { entity } = await context.params
   if (!entities.includes(entity as Entity)) return { response: invalid('Unknown operations module.', 404) } as const
-  const session = await getTenantSession(request)
+  let session
+  if (requireAdmin) {
+    const access = await requireTenantAdmin(request)
+    if ('response' in access) return { response: access.response } as const
+    session = access.session
+  } else {
+    session = await getTenantSession(request)
+  }
   if (!session) return { response: invalid('Sign in to access workspace operations.', 401) } as const
   if (!process.env.DATABASE_URL?.trim()) return { response: invalid('Operations modules require a configured database.', 503) } as const
   return { entity: entity as Entity, tenantId: session.tenantId } as const
@@ -153,7 +161,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ entity: string }> }) {
-  const access = await getAuthorizedEntity(request, context)
+  const access = await getAuthorizedEntity(request, context, true)
   if ('response' in access) return access.response
 
   let input: Record<string, unknown>
@@ -371,7 +379,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
 }
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ entity: string }> }) {
-  const access = await getAuthorizedEntity(request, context)
+  const access = await getAuthorizedEntity(request, context, true)
   if ('response' in access) return access.response
   const id = request.nextUrl.searchParams.get('id') || ''
   if (!uuidPattern.test(id)) return invalid('Record id is invalid.')
@@ -460,7 +468,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
 }
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ entity: string }> }) {
-  const access = await getAuthorizedEntity(request, context)
+  const access = await getAuthorizedEntity(request, context, true)
   if ('response' in access) return access.response
   const id = request.nextUrl.searchParams.get('id') || ''
   if (!uuidPattern.test(id)) return invalid('Record id is invalid.')

@@ -184,6 +184,7 @@ export function AdminDashboard() {
   const [currentTenantName, setCurrentTenantName] = useState('Loading workspace…')
   const [currentUser, setCurrentUser] = useState('')
   const [currentEmail, setCurrentEmail] = useState('')
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false)
   const [timeGreeting, setTimeGreeting] = useState('')
   const [memberships, setMemberships] = useState<WorkspaceMembership[]>([])
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -281,6 +282,7 @@ export function AdminDashboard() {
         setCurrentTenantName(data.tenant.name)
         setCurrentUser(data.user.name)
         setCurrentEmail(data.user.email)
+        setIsPlatformAdmin(data.platformAdmin === true)
         setMemberships(data.memberships)
       })
       .catch((error) => {
@@ -564,7 +566,7 @@ export function AdminDashboard() {
             {memberships.filter((membership) => membership.id !== currentTenantId).map((membership) => <option key={membership.id} value={membership.id}>{membership.name}</option>)}
           </select>
         </div>
-        <nav className="navigation-list" aria-label="Main navigation">{navigationSections.map((section) => <div className="nav-section" key={section.label || 'overview'}>{section.label && <p className="nav-label">{section.label}</p>}{section.items.map(({ label, icon: Icon, count, children }) => <div className="nav-group" key={label}><button className={`nav-item ${activeNav === label ? 'active' : ''}`} aria-expanded={children ? expandedNav.includes(label) : undefined} onClick={() => { if (children) { setExpandedNav((current) => current.includes(label) ? current.filter((group) => group !== label) : [...current, label]); return } setActiveNav(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{count && <b>{count}</b>}{children && (expandedNav.includes(label) ? <ChevronDown className="nav-chevron" size={15} /> : <ChevronRight className="nav-chevron" size={15} />)}</button>{children && expandedNav.includes(label) && <div className="nav-children">{children.map(({ label: childLabel, view, icon: ChildIcon }) => <button key={view} className={`nav-child ${activeNav === view ? 'active' : ''}`} onClick={() => { setActiveNav(view); setMobileOpen(false) }}>{ChildIcon ? <ChildIcon size={15} /> : <span className="nav-child-dot" />}<span>{childLabel}</span></button>)}</div>}</div>)}</div>)}</nav>
+        <nav className="navigation-list" aria-label="Main navigation">{navigationSections.map((section) => <div className="nav-section" key={section.label || 'overview'}>{section.label && <p className="nav-label">{section.label}</p>}{section.items.map(({ label, icon: Icon, count, children }) => <div className="nav-group" key={label}><button className={`nav-item ${activeNav === label ? 'active' : ''}`} aria-expanded={children ? expandedNav.includes(label) : undefined} onClick={() => { if (children) { setExpandedNav((current) => current.includes(label) ? current.filter((group) => group !== label) : [...current, label]); return } setActiveNav(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{count && <b>{count}</b>}{children && (expandedNav.includes(label) ? <ChevronDown className="nav-chevron" size={15} /> : <ChevronRight className="nav-chevron" size={15} />)}</button>{children && expandedNav.includes(label) && <div className="nav-children">{children.map(({ label: childLabel, view, icon: ChildIcon }) => <button key={view} className={`nav-child ${activeNav === view ? 'active' : ''}`} onClick={() => { setActiveNav(view); setMobileOpen(false) }}>{ChildIcon ? <ChildIcon size={15} /> : <span className="nav-child-dot" />}<span>{childLabel}</span></button>)}</div>}</div>)}</div>)}{isPlatformAdmin && <a className="nav-item platform-admin-nav-link" href="/platform-admin"><ShieldCheck size={17} /><span>Platform admin</span></a>}</nav>
         <div className="sidebar-footer"><div className="support-card"><div className="support-icon"><Cable size={16} /></div><strong>Need help?</strong><span>Check the integration guide</span><a href="#activity">Open docs <ArrowUpRight size={12} /></a></div><div className="user-row"><div className="avatar">{currentUser.slice(0, 2).toUpperCase() || 'U'}</div><div><strong>{currentUser || 'Workspace user'}</strong><span>{currentTenantName}</span></div><button type="button" className="workspace-logout" onClick={signOut}>Sign out</button></div></div>
       </aside>
 

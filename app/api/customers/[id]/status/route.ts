@@ -2,13 +2,14 @@ import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { customers, radcheck } from '@/lib/db/schema'
-import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 import { toFreeRadiusExpiration } from '@/lib/hotspot-products'
 
 export async function PATCH(request: NextRequest, context: RouteContext<'/api/customers/[id]/status'>) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to update subscriber status.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   const { id } = await context.params
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
     return NextResponse.json({ error: 'Subscriber id is invalid.' }, { status: 400 })

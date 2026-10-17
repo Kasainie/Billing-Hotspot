@@ -3,7 +3,7 @@ import { and, eq, isNull, lt, notInArray, or, sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { routerConnectorCommands, routerConnectorQueries, routerMetricSamples, routerMonitors, routerRemoteSessions } from '@/lib/db/schema'
-import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
 import {
   matchesRouterConnectorToken,
@@ -17,8 +17,9 @@ type RouteContext = { params: Promise<{ id: string }> }
 const routerIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 async function enroll(request: NextRequest, routerId: string) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to enable the router API connector.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
 
   let baseUrl: URL
   try {

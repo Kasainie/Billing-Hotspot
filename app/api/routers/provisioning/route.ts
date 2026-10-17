@@ -7,6 +7,7 @@ import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
 import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, isValidProvisioningBaseUrl, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
 import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
 
 type ProvisionInput = {
@@ -53,8 +54,9 @@ function authorizationError() {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to provision a router for this workspace.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   if (!isAuthorized(request)) return authorizationError()
 
   let input: ProvisionInput
@@ -211,8 +213,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to configure a router for this workspace.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   if (!isAuthorized(request)) return authorizationError()
 
   let input: { token?: unknown; configuration?: unknown }

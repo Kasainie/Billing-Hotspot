@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { resendTenantSms } from '@/lib/db/tenant-sms'
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to resend SMS messages.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   const { id } = await context.params
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
     return NextResponse.json({ error: 'SMS message id is invalid.' }, { status: 400 })

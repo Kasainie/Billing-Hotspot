@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { getTenantPaymentMetadata, saveTenantPaymentSettings, validateTenantPaymentInput } from '@/lib/db/tenant-payments'
 import { getTenantC2bCallbackToken } from '@/lib/mobile-money-callback'
 
@@ -22,8 +23,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to update payment settings.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   let input: Record<string, unknown>
   try {
     input = await request.json() as Record<string, unknown>

@@ -3,13 +3,14 @@ import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { routerMonitors } from '@/lib/db/schema'
-import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { buildRouterMonitorScript } from '@/lib/router-monitor-script'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
 
 async function authorize(request: NextRequest, id: string) {
-  const session = await getTenantSession(request)
-  if (!session) return { response: NextResponse.json({ error: 'Sign in to manage router monitoring.' }, { status: 401 }) }
+  const access = await requireTenantAdmin(request)
+  if (access.response) return { response: access.response }
+  const session = access.session
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
     return { response: NextResponse.json({ error: 'Router id is invalid.' }, { status: 400 }) }
   }

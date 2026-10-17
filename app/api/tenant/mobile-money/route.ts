@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { customers, mobileMoneyTransactions, payments, pppoeAccounts } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { enqueueTenantSms } from '@/lib/db/tenant-sms'
 import { reconcilePppoeMobileMoney } from '@/lib/pppoe-reconciliation'
 
@@ -56,8 +57,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to reconcile mobile-money payments.' }, { status: 401 })
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
   let input: { transactionId?: unknown; accountNumber?: unknown }
   try {
     input = await request.json() as typeof input
