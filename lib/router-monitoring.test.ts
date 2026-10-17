@@ -42,6 +42,10 @@ test('router monitor setup installs a reboot-safe authenticated RouterOS heartbe
   assert.match(script, /activePppoeUsers/)
   assert.match(script, /totalRxBytes/)
   assert.match(script, /totalTxBytes/)
+  assert.match(script, /interfaceStats->"rx-bytes"/)
+  assert.match(script, /interfaceStats->"tx-bytes"/)
+  assert.doesNotMatch(script, /interfaceStats->"rx-byte"/)
+  assert.doesNotMatch(script, /interfaceStats->"tx-byte"/)
 })
 
 test('router monitor scripts reject invalid credentials and non-HTTPS production endpoints', () => {

@@ -50,7 +50,7 @@ export function buildRouterMonitorScript({
     '  }',
     '  :local rxBytes 0',
     '  :local txBytes 0',
-    '  :foreach interfaceStats in=[/interface ethernet print stats as-value] do={:set rxBytes ($rxBytes + ($interfaceStats->"rx-byte")); :set txBytes ($txBytes + ($interfaceStats->"tx-byte"))}',
+    '  :foreach interfaceStats in=[/interface ethernet print stats as-value] do={:set rxBytes ($rxBytes + ($interfaceStats->"rx-bytes")); :set txBytes ($txBytes + ($interfaceStats->"tx-bytes"))}',
     '  :local report {"cpuLoad"=[/system resource get cpu-load];"freeMemoryBytes"=[/system resource get free-memory];"totalMemoryBytes"=[/system resource get total-memory];"freeDiskBytes"=[/system resource get free-hdd-space];"totalDiskBytes"=[/system resource get total-hdd-space];"totalRxBytes"=$rxBytes;"totalTxBytes"=$txBytes;"activeHotspotUsers"=[/ip hotspot active print count-only];"activePppoeUsers"=[/ppp active print count-only];"uptime"=[/system resource get uptime];"routerOsVersion"=[/system resource get version];"boardName"=[/system resource get board-name];"winboxEnabled"=$winboxEnabled;"winboxPort"=$winboxPort;"webEnabled"=$webEnabled;"webScheme"=$webScheme;"webPort"=$webPort;"wireguardIp"=$wireguardIp}',
     '  :local payload [:serialize value=$report to=json]',
     '  :do {/tool fetch url=$reportUrl http-method=post http-data=$payload http-header-field=("content-type:application/json,x-router-monitor-id:" . $monitorId . ",x-router-monitor-token:" . $monitorToken) keep-result=no} on-error={:log warning "LKTECH router monitoring heartbeat failed"}',
