@@ -200,8 +200,12 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
   const errorPage = readFileSync(new URL('../public/hotspot-assets/error.html', import.meta.url), 'utf8')
   const logoutPage = readFileSync(new URL('../public/hotspot-assets/logout.html', import.meta.url), 'utf8')
 
-  assert.match(loginPage, /class="hotspot-home mari-net-portal portal-theme-pending"/)
+  assert.match(loginPage, /body\.portal-theme-pending \.portal-stack \{ visibility: hidden; \}/)
+  assert.match(loginPage, /class="hotspot-home mari-net-portal portal-theme-pending" data-portal-template="graphite"/)
+  assert.match(loginPage, /id="portal-base-style" rel="stylesheet" href="style\.css"/)
   assert.match(loginPage, /portalThemeState\.settings && portalThemeState\.stylesheet/)
+  assert.match(loginPage, /portalThemeState\.baseStylesheet && document\.body\.classList\.contains\('portal-theme-pending'\)/)
+  assert.match(loginPage, /portalThemeState\.baseStylesheet && portalThemeState\.settings && portalThemeState\.stylesheet/)
   assert.match(loginPage, /portal-theme-pending/)
   assert.match(loginPage, /class="marinet-brand">Mari-Net<\/h1>/)
   assert.match(loginPage, /action="\$\(link-login-only\)"/)
