@@ -1,8 +1,8 @@
-import { randomBytes } from 'node:crypto'
+import { randomInt } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
-import { and, count, desc, eq, gte, lt, sum } from 'drizzle-orm'
+import { and, count, desc, eq, gte, lt, sql, sum } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { customers, equipment, expenses, invoices, leads, packages, radcheck, radreply, sites, supportTickets, tr069Devices, vouchers } from '@/lib/db/schema'
+import { customers, equipment, expenses, invoices, leads, packages, radcheck, radreply, sites, subscriberCredits, supportTickets, tr069Devices, vouchers } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 
@@ -13,6 +13,15 @@ const leadStatuses = ['new', 'contacted', 'qualified', 'converted', 'lost'] as c
 const ticketStatuses = ['open', 'in_progress', 'waiting', 'resolved', 'closed'] as const
 const priorities = ['low', 'normal', 'high', 'urgent'] as const
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const voucherCredentialCharacters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+
+function generateVoucherCredential(length: number) {
+  let credential = ''
+  for (let index = 0; index < length; index++) {
+    credential += voucherCredentialCharacters[randomInt(voucherCredentialCharacters.length)]
+  }
+  return credential
+}
 
 function text(value: unknown, maxLength: number) {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
@@ -293,10 +302,30 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         plan: customers.plan,
         monthlyRate: customers.monthlyRate,
       }).from(customers).where(and(eq(customers.tenantId, access.tenantId), eq(customers.status, 'active'), gte(customers.monthlyRate, 1)))
+        .orderBy(customers.id)
       const result = await db.transaction(async (tx) => {
         const created = []
-        for (const customer of invoiceCustomers) {
+        for (const candidate of invoiceCustomers) {
+          const [customer] = await tx.select({
+            id: customers.id,
+            name: customers.name,
+            plan: customers.plan,
+            monthlyRate: customers.monthlyRate,
+            status: customers.status,
+          }).from(customers).where(and(
+            eq(customers.id, candidate.id),
+            eq(customers.tenantId, access.tenantId),
+          )).for('update').limit(1)
+          if (!customer || customer.status !== 'active' || customer.monthlyRate < 1) continue
           const invoiceNumber = `INV-${period.replace('-', '')}-${customer.id}`
+          const [creditBalance] = await tx.select({
+            amount: sum(sql`case when ${subscriberCredits.type} = 'credit' then ${subscriberCredits.amount} else -${subscriberCredits.amount} end`),
+          }).from(subscriberCredits).where(and(
+            eq(subscriberCredits.tenantId, access.tenantId),
+            eq(subscriberCredits.customerId, customer.id),
+          ))
+          const canPayFromCredit = Number(creditBalance?.amount || 0) >= customer.monthlyRate
+          const paidAt = canPayFromCredit ? new Date() : null
           const [invoice] = await tx.insert(invoices).values({
             tenantId: access.tenantId,
             customerId: customer.id,
@@ -306,11 +335,24 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
             dueAt,
             amount: customer.monthlyRate,
             description: customer.plan ? `Monthly ${customer.plan} subscription` : 'Monthly internet subscription',
-            status: 'issued',
+            status: canPayFromCredit ? 'paid' : 'issued',
+            paidAt,
           }).onConflictDoNothing({
             target: [invoices.tenantId, invoices.customerId, invoices.periodStart],
           }).returning({ id: invoices.id })
-          if (invoice) created.push(invoice.id)
+          if (invoice) {
+            created.push(invoice.id)
+            if (canPayFromCredit) {
+              await tx.insert(subscriberCredits).values({
+                tenantId: access.tenantId,
+                customerId: customer.id,
+                type: 'debit',
+                amount: customer.monthlyRate,
+                reason: `Applied to invoice ${invoiceNumber}`,
+                reference: invoice.id,
+              })
+            }
+          }
         }
         return created
       })
@@ -330,8 +372,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
     if (!plan) return invalid('Selected plan is unavailable in this workspace.')
 
     const generated = Array.from({ length: quantity }, () => ({
-      username: `LK${randomBytes(7).toString('hex').toUpperCase()}`,
-      password: randomBytes(9).toString('base64url'),
+      username: `LK${generateVoucherCredential(6).toUpperCase()}`,
+      password: generateVoucherCredential(8),
     }))
     const created = await db.transaction(async (tx) => {
       const voucherRows = await tx.insert(vouchers).values(generated.map(({ username }) => ({

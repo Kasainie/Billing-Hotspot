@@ -17,7 +17,7 @@ export function getRouterWebConsoleUrl({
   webPort: number | null
   wireguardIp: string | null
 }) {
-  if (webEnabled !== true || !webScheme || !webPort || !wireguardIp) return null
+  if (webEnabled !== true || !webScheme || !wireguardIp) return null
   const octets = wireguardIp.split('.')
   if (octets.length !== 4 ||
       octets.some((octet) => !/^\d{1,3}$/.test(octet) || Number(octet) > 255 || String(Number(octet)) !== octet)) return null
@@ -26,8 +26,9 @@ export function getRouterWebConsoleUrl({
     (firstOctet === 172 && secondOctet >= 16 && secondOctet <= 31) ||
     (firstOctet === 192 && secondOctet === 168)
   if (!isPrivateAddress) return null
-  if (!Number.isSafeInteger(webPort) || webPort < 1 || webPort > 65535) return null
-  return `${webScheme}://${wireguardIp}:${webPort}`
+  const port = webScheme === 'http' ? webPort : 80
+  if (!port || !Number.isSafeInteger(port) || port < 1 || port > 65535) return null
+  return `http://${wireguardIp}${port === 80 ? '' : `:${port}`}`
 }
 
 export function parseRouterTimestamp(value: Date | string | null) {

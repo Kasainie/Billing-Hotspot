@@ -12,6 +12,7 @@ type ActiveRadiusSession = {
   ipAddress: string | null
   nasIpAddress: string | null
   macAddress: string | null
+  callerId: string | null
   startedAt: Date | string | null
   lastAccountingAt: Date | string | null
   sessionSeconds: number | null
@@ -89,6 +90,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         ipAddress: routerRemoteSessions.ipAddress,
         routerName: routerMonitors.routerName,
         macAddress: routerRemoteSessions.macAddress,
+        callerId: routerRemoteSessions.callerId,
         startedAt: sql<Date | null>`case when ${routerRemoteSessions.uptimeSeconds} is null then null else clock_timestamp() - ${routerRemoteSessions.uptimeSeconds} * interval '1 second' end`,
         sessionSeconds: routerRemoteSessions.uptimeSeconds,
         downloadBytes: routerRemoteSessions.downloadBytes,
@@ -118,6 +120,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
           routerName: item.routerName,
           nasIpAddress: null,
           macAddress: item.macAddress,
+          callerId: item.callerId,
           startedAt: serializeDatabaseTimestamp(item.startedAt),
           lastAccountingAt: null,
           sessionSeconds: item.sessionSeconds,
@@ -159,6 +162,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
         framedipaddress::text as "ipAddress",
         nasipaddress::text as "nasIpAddress",
         callingstationid as "macAddress",
+        callingstationid as "callerId",
         acctstarttime as "startedAt",
         acctupdatetime as "lastAccountingAt",
         acctsessiontime as "sessionSeconds",
@@ -177,6 +181,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       ipAddress: row.ipAddress,
       nasIpAddress: row.nasIpAddress,
       macAddress: row.macAddress,
+      callerId: row.callerId,
       startedAt: serializeDatabaseTimestamp(row.startedAt),
       lastAccountingAt: serializeDatabaseTimestamp(row.lastAccountingAt),
       sessionSeconds: row.sessionSeconds,

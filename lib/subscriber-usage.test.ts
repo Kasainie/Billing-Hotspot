@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { calculateSubscriberUsageRate } from './subscriber-usage.ts'
+import {
+  calculateSubscriberUsageRate,
+  formatSubscriberSpeed,
+  subscriberUsageChartScale,
+} from './subscriber-usage.ts'
 
 test('calculates subscriber transfer rates from consecutive router byte counters', () => {
   assert.deepEqual(calculateSubscriberUsageRate(
@@ -20,4 +24,18 @@ test('reports zero while idle and rejects the first sample, invalid interval, or
     { ...sample, observedAt: '2026-10-16T12:00:10.000Z', downloadBytes: '200' },
     sample,
   ), null)
+})
+
+test('formats low non-zero rates in Kbps instead of rounding them to zero Mbps', () => {
+  assert.deepEqual(formatSubscriberSpeed(0.00018), { value: '0.18', unit: 'Kbps' })
+  assert.deepEqual(formatSubscriberSpeed(0.00001), { value: '0.01', unit: 'Kbps' })
+  assert.deepEqual(formatSubscriberSpeed(0.000001), { value: '<0.01', unit: 'Kbps' })
+  assert.deepEqual(formatSubscriberSpeed(0), { value: '0.00', unit: 'Mbps' })
+  assert.deepEqual(formatSubscriberSpeed(1.236), { value: '1.24', unit: 'Mbps' })
+})
+
+test('scales the graph to recent traffic with a readable idle range', () => {
+  assert.equal(subscriberUsageChartScale(0.00018), 0.0005)
+  assert.equal(subscriberUsageChartScale(3), 5)
+  assert.equal(subscriberUsageChartScale(0), 0.01)
 })

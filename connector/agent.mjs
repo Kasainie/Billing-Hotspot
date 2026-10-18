@@ -6,6 +6,7 @@ import {
   routerFileTimestamp,
 } from './backup-policy.mjs'
 import { exposeRouterScriptSource } from './router-script-source.mjs'
+import { addPppoeInterfaceCounters, byteCounter } from './session-counters.mjs'
 
 const required = [
   'APP_URL',
@@ -38,7 +39,7 @@ let completedCommands = []
 let completedResourceResults = []
 let pendingTelemetry = null
 let lastTelemetryAt = 0
-const pollIntervalMs = 5_000
+const pollIntervalMs = 1_000
 const telemetryIntervalMs = 60_000
 const automaticBackupIntervalMs = 24 * 60 * 60 * 1000
 const automaticBackupRetryMs = 15 * 60 * 1000
@@ -69,19 +70,6 @@ function parseUptime(value) {
 
 function text(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function byteCounter(value) {
-  if (value === null || value === undefined || value === '') return null
-  const raw = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-    ? String(value)
-    : typeof value === 'string' && /^\d+$/.test(value)
-      ? value
-      : null
-  if (raw === null || BigInt(raw) > 9_223_372_036_854_775_807n) {
-    throw new Error('RouterOS returned an invalid active-session byte counter.')
-  }
-  return raw
 }
 
 async function routerRequest(path, method = 'GET', body, parseResponse = true) {
@@ -314,14 +302,32 @@ async function readRouterResource(query) {
 }
 
 async function pollOnce() {
-  const [hotspot, pppoe] = await Promise.all([
+  const interfaceRequest = routerRequest('/interface/print', 'POST', { stats: '' }).then(
+    (interfaces) => ({ interfaces, error: null }),
+    (error) => ({ interfaces: null, error }),
+  )
+  const [hotspot, pppoe, interfaceResult] = await Promise.all([
     routerRequest('/ip/hotspot/active'),
     routerRequest('/ppp/active'),
+    interfaceRequest,
   ])
-  const sessions = [
+  let sessions = [
     ...mapSessions(hotspot, 'hotspot'),
     ...mapSessions(pppoe, 'pppoe'),
   ]
+  if (sessions.some((session) =>
+    session.sessionType === 'pppoe' &&
+    (session.downloadBytes === null || session.uploadBytes === null))) {
+    if (interfaceResult.error) {
+      console.error(`Unable to collect PPPoE interface counters: ${interfaceResult.error instanceof Error ? interfaceResult.error.message : 'RouterOS interface statistics failed.'}`)
+    } else {
+      try {
+        sessions = addPppoeInterfaceCounters(sessions, interfaceResult.interfaces)
+      } catch (error) {
+        console.error(`Unable to collect PPPoE interface counters: ${error instanceof Error ? error.message : 'RouterOS interface statistics failed.'}`)
+      }
+    }
+  }
   const now = Date.now()
   if (!pendingTelemetry && now - lastTelemetryAt >= telemetryIntervalMs) {
     try {
@@ -410,10 +416,12 @@ async function pollOnce() {
 
 console.log(`Router connector started for ${process.env.ROUTER_ID}.`)
 while (true) {
+  const cycleStartedAt = Date.now()
   let delayMs = pollIntervalMs
   try {
     await pollOnce()
     retryDelayMs = pollIntervalMs
+    delayMs = Math.max(0, pollIntervalMs - (Date.now() - cycleStartedAt))
   } catch (error) {
     console.error(error instanceof Error ? error.message : 'Router connector cycle failed.')
     delayMs = retryDelayMs

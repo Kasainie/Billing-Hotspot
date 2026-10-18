@@ -9,6 +9,32 @@ export type SubscriberUsageRate = {
   uploadMbps: number
 }
 
+export type FormattedSubscriberSpeed = {
+  value: string
+  unit: 'Mbps' | 'Kbps'
+}
+
+export function formatSubscriberSpeed(rateMbps: number): FormattedSubscriberSpeed {
+  if (rateMbps > 0 && rateMbps < 0.01) {
+    const rateKbps = rateMbps * 1000
+    return {
+      value: rateKbps < 0.01 ? '<0.01' : rateKbps < 1 ? rateKbps.toFixed(2) : rateKbps.toFixed(1),
+      unit: 'Kbps',
+    }
+  }
+  return { value: rateMbps.toFixed(2), unit: 'Mbps' }
+}
+
+export function subscriberUsageChartScale(peakRateMbps: number): number {
+  if (!Number.isFinite(peakRateMbps) || peakRateMbps <= 0) return 0.01
+
+  const target = peakRateMbps * 1.2
+  const magnitude = 10 ** Math.floor(Math.log10(target))
+  const normalized = target / magnitude
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+  return step * magnitude
+}
+
 export function calculateSubscriberUsageRate(
   previous: SubscriberUsageCounters | null,
   current: SubscriberUsageCounters,

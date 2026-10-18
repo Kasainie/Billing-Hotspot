@@ -16,6 +16,7 @@ body { min-width: 320px; min-height: 100vh; margin: 0; background: #f3f7f6; }
 .portal-layout { display: grid; width: min(100%, 940px); min-height: 550px; grid-template-columns: minmax(0, 1fr) 420px; overflow: hidden; border: 1px solid #dce6e3; border-radius: 10px; background: #fff; box-shadow: 0 24px 70px rgba(27, 58, 53, .11); }
 .portal-intro { display: flex; flex-direction: column; justify-content: space-between; padding: 36px 42px; background: #123b39; color: #fff; }
 .portal-brand { display: inline-flex; width: fit-content; align-items: center; gap: 10px; color: inherit; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-decoration: none; }
+.portal-brand-accent { color: #00ff90; }
 .portal-mark { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border-radius: 8px; background: #ff8a3d; color: #fff; font-size: 18px; font-weight: 800; }
 .intro-copy { max-width: 390px; margin: 56px 0; }
 .portal-kicker { display: flex; align-items: center; gap: 8px; margin: 0 0 15px; color: #087f76; font-size: 12px; font-weight: 700; letter-spacing: .06em; }
@@ -141,9 +142,9 @@ body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-prim
 .hotspot-home input::placeholder { color: #71818e; }
 .hotspot-home input:focus { border-color: #54bad2; box-shadow: 0 0 0 2px #54bad242; }
 .purchase-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
-.purchase-button, .account-button, .receipt-button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 5px; background: #16b86b; padding: 8px 12px; color: #fff; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; }
+.purchase-button, .account-button, .receipt-button { display: flex; min-height: 42px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 5px; background: #00ff90; padding: 8px 12px; color: #06110d; cursor: pointer; font: inherit; font-size: 14px; font-weight: 700; }
 .purchase-button:disabled { cursor: not-allowed; opacity: .55; }
-.purchase-button:hover:not(:disabled) { background: #10a85f; }
+.purchase-button:hover:not(:disabled), .account-button:hover, .receipt-button:hover { background: #00e583; color: #06110d; }
 .payment-hint { margin: 0; color: #a9c0cb; font-size: 12px; line-height: 1.5; }
 .purchase-status { margin: 0; color: #b8d5e1; font-size: 12px; line-height: 1.5; }
 .purchase-status.is-error, .package-loading.is-error { color: #ffc0b5; }
@@ -154,11 +155,24 @@ body.hotspot-home { min-width: 320px; background: #082b47; --portal-graphic-prim
 .account-section > p:not(.section-eyebrow), .receipt-section > div:first-child > p:last-child { margin: 6px 0 12px; color: #b7cbd5; font-size: 13px; line-height: 1.5; }
 .account-fields { display: grid; gap: 7px; }
 .account-button { width: 100%; margin-top: 9px; }
-.account-button:hover, .receipt-button:hover { filter: brightness(.94); }
 .receipt-section { padding: 14px; }
 .receipt-fields { display: grid; gap: 7px; }
 .receipt-button { width: 100%; margin-top: 9px; background: #347ff0; }
 .portal-footer { display: flex; justify-content: space-between; gap: 8px; margin: 13px 1px 0; border-top: 1px solid #83aabc55; padding: 10px 1px 0; color: #a8c1cc; font-size: 12px; line-height: 1.4; }
+.portal-copyright { display: flex; justify-content: center; margin: 12px 0 0; }
+.portal-copyright-text { display: inline-block; border: 1px solid #00ff9066; border-radius: 7px; background: #0f172a; padding: 7px 10px; color: transparent; font-size: 11px; font-weight: 700; letter-spacing: .01em; line-height: 1.35; background-image: linear-gradient(100deg, #f8fafc 0%, #f8fafc 38%, #00ff90 50%, #f8fafc 62%, #f8fafc 100%); background-size: 250% 100%; background-clip: text; -webkit-background-clip: text; box-shadow: 0 0 0 1px #00ff9014, 0 3px 12px #0f172a14; animation: portal-copyright-glow 3.6s ease-in-out infinite, portal-copyright-shimmer 4s ease-in-out infinite; }
+@keyframes portal-copyright-glow { 0%, 100% { border-color: #00ff9066; box-shadow: 0 0 0 1px #00ff9014, 0 3px 12px #0f172a14; } 50% { border-color: #00ff90; box-shadow: 0 0 0 2px #00ff9024, 0 0 12px #00ff9033; } }
+@keyframes portal-copyright-shimmer { 0%, 15% { background-position: 100% 50%; } 85%, 100% { background-position: 0% 50%; } }
+@media (max-width: 480px) { .portal-copyright-text { padding: 7px 9px; font-size: 10px; } }
+@media (prefers-reduced-motion: reduce) { .portal-copyright-text { color: #f8fafc; background-image: none; animation: none; } }
+.support-line { display: grid; justify-items: center; gap: 7px; margin-top: 16px; color: #e1edf2; font-size: 12px; text-align: center; }
+.support-line > strong { color: #f8fafc; font-size: 13px; }
+.support-engineer { color: #e1edf2; font-size: 12px; font-weight: 600; }
+.support-message { margin: 0; color: #b8cbd4; line-height: 1.45; }
+.support-contacts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; }
+.support-contacts a { color: #00ff90; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.support-contacts a:hover { color: #8effc7; }
+.support-contacts a:focus-visible { border-radius: 2px; outline: 2px solid #00e5ff; outline-offset: 3px; }
 .portal-state-panel { margin-top: 10px; border: 1px solid #80aac044; border-radius: 8px; background: var(--portal-panel-wash); padding: 15px; box-shadow: 0 8px 22px #00132230; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .portal-state-panel .portal-button { margin-top: 0; background: #16b86b; color: #fff; }
 .portal-state-panel .portal-button:hover { background: #10a85f; }
@@ -206,6 +220,10 @@ body.hotspot-home.mari-net-portal {
 .hotspot-home.mari-net-portal .portal-stack {
   width: min(100%, 760px);
   margin: 0 auto;
+}
+
+.hotspot-home.mari-net-portal.portal-theme-pending .portal-stack {
+  visibility: hidden;
 }
 
 .hotspot-home.mari-net-portal .marinet-card {
@@ -454,10 +472,7 @@ body.hotspot-home.mari-net-portal {
 }
 
 .hotspot-home.mari-net-portal .support-line {
-  margin-top: 18px;
-  text-align: center;
   color: var(--marinet-muted, #7e7b77);
-  font-size: 0.95rem;
 }
 
 .hotspot-home.mari-net-portal[data-portal-template="original"] {
@@ -589,8 +604,12 @@ body.hotspot-home.mari-net-portal {
 .hotspot-home.mari-net-portal .portal-shell {
   background-color: var(--marinet-page-background, #efefee);
   background-image:
-    radial-gradient(ellipse at 50% -12%, var(--marinet-page-glow, #ffffff) 0, transparent 57%),
-    linear-gradient(160deg, var(--marinet-page-background, #efefee), var(--marinet-page-background, #efefee));
+    linear-gradient(160deg, rgba(8, 16, 25, .12), rgba(8, 16, 25, .3)),
+    var(--portal-wallpaper, url("themes/savannah-background.png"));
+  background-size: auto, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-attachment: scroll, fixed;
 }
 
 .hotspot-home.mari-net-portal .portal-stack {
@@ -646,18 +665,19 @@ body.hotspot-home.mari-net-portal {
 .hotspot-home.mari-net-portal .action-panel button,
 .hotspot-home.mari-net-portal .marinet-phone-form button,
 .hotspot-home.mari-net-portal .login-button {
-  background: linear-gradient(135deg, var(--marinet-accent, #ea7d19), var(--marinet-accent-hover, #d86912));
-  color: var(--marinet-accent-ink, #ffffff);
-  box-shadow: 0 5px 12px color-mix(in srgb, var(--marinet-accent, #ea7d19) 25%, transparent);
+  background: #00ff90;
+  color: #06110d;
+  box-shadow: 0 5px 12px rgba(0, 255, 144, .25);
   transition: transform .18s ease, filter .18s ease, box-shadow .18s ease;
 }
 
 .hotspot-home.mari-net-portal .action-panel button:hover,
 .hotspot-home.mari-net-portal .marinet-phone-form button:hover,
 .hotspot-home.mari-net-portal .login-button:hover {
-  filter: brightness(1.06);
+  background: #00e583;
+  color: #06110d;
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--marinet-accent, #ea7d19) 32%, transparent);
+  box-shadow: 0 8px 18px rgba(0, 255, 144, .32);
 }
 
 .hotspot-home.mari-net-portal .portlet h3,
@@ -693,6 +713,10 @@ body.hotspot-home.mari-net-portal {
 .hotspot-home.mari-net-portal .support-line {
   color: var(--marinet-muted, #7e7b77);
 }
+.hotspot-home.mari-net-portal .support-line > strong { color: var(--marinet-text, #2f2f2f); }
+.hotspot-home.mari-net-portal .support-engineer { color: var(--marinet-text, #2f2f2f); }
+.hotspot-home.mari-net-portal .support-message { color: var(--marinet-muted, #7e7b77); }
+.hotspot-home.mari-net-portal .support-contacts a { color: var(--marinet-accent, #087f54); }
 
 @media (prefers-reduced-motion: reduce) {
   .hotspot-home.mari-net-portal .action-panel button,
@@ -719,5 +743,147 @@ body.hotspot-home.mari-net-portal {
 
   .hotspot-home.mari-net-portal .field-row {
     grid-template-columns: 1fr;
+  }
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] {
+  --portal-panel-wash: rgba(12, 27, 39, .46);
+  --portal-card-wash: rgba(13, 38, 52, .4);
+  --portal-voucher-wash: rgba(12, 27, 39, .46);
+  --marinet-text: #f8fbff;
+  --marinet-muted: #d4e4ed;
+  --marinet-input-text: #142b38;
+  --marinet-input-muted: #526a78;
+  --marinet-speed-accent: #7be8ff;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  color: #f8fbff;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .portal-stack,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-brand,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-tabs .is-active,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-name,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .section-heading h2,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .account-section h2,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .receipt-section h2,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .portlet h3,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .login-panel label,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .support-line > strong,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .support-engineer {
+  color: #f8fbff;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .72);
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-brand,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .section-heading h2,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .portlet h3 {
+  letter-spacing: -.025em;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-tabs span,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-currency,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-detail-label,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-duration,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .purchase-form > label,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .payment-hint,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .purchase-status,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .support-line,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .support-message {
+  color: #e1edf3;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .76);
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .section-eyebrow,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-speed,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-tabs .is-active {
+  color: #00bfff;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-tabs .is-active {
+  border-bottom-color: #00bfff;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .support-contacts a {
+  color: #00bfff;
+  font-weight: 700;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .76);
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .currency-label {
+  color: #f0f8fc;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] input {
+  color: #142b38;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] input::placeholder {
+  color: #526a78;
+  opacity: 1;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .portal-shell {
+  background-image:
+    linear-gradient(180deg, rgba(4, 13, 23, .12), rgba(4, 13, 23, .24)),
+    var(--portal-wallpaper, url("themes/savannah-background.png"));
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-card,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-section,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .portlet {
+  border-color: rgba(235, 247, 252, .4);
+  box-shadow: 0 16px 38px rgba(2, 10, 17, .24), inset 0 1px 0 rgba(255, 255, 255, .12);
+  -webkit-backdrop-filter: blur(6px) saturate(125%);
+  backdrop-filter: blur(6px) saturate(125%);
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-card {
+  background: linear-gradient(135deg, rgba(13, 29, 41, .58), rgba(28, 41, 50, .48));
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-section,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .portlet {
+  background: var(--portal-panel-wash);
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-card {
+  border-color: rgba(205, 231, 239, .52);
+  background: var(--portal-card-wash);
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-name,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .section-heading h2,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .portlet h3,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .login-panel label {
+  color: #f8fbff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .72);
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-currency,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-detail-label,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-duration,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .purchase-form > label,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .payment-hint,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .purchase-status,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .support-line,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .support-message {
+  color: #e1edf3;
+}
+
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-card:hover,
+.hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-card.selected {
+  border-color: #c5e14d;
+  background: rgba(39, 67, 48, .62);
+  box-shadow: inset 0 0 0 1px #c5e14d, 0 8px 20px rgba(0, 0, 0, .18);
+}
+
+@media (max-width: 560px) {
+  .hotspot-home.mari-net-portal[data-portal-template="graphite"] .marinet-card,
+  .hotspot-home.mari-net-portal[data-portal-template="graphite"] .package-section,
+  .hotspot-home.mari-net-portal[data-portal-template="graphite"] .portlet {
+    -webkit-backdrop-filter: blur(4px) saturate(120%);
+    backdrop-filter: blur(4px) saturate(120%);
   }
 }

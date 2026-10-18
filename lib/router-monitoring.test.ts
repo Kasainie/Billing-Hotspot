@@ -46,6 +46,7 @@ test('router monitor setup installs a reboot-safe authenticated RouterOS heartbe
   assert.match(script, /interfaceStats->"tx-bytes"/)
   assert.doesNotMatch(script, /interfaceStats->"rx-byte"/)
   assert.doesNotMatch(script, /interfaceStats->"tx-byte"/)
+  assert.ok(script.indexOf('name="www"') < script.indexOf('name="www-ssl"'))
 })
 
 test('router monitor scripts reject invalid credentials and non-HTTPS production endpoints', () => {
@@ -86,7 +87,9 @@ test('router web console links require reported WebFig and WireGuard details', (
     webPort: 80,
     wireguardIp: '10.77.0.2',
   }
-  assert.equal(getRouterWebConsoleUrl(router), 'http://10.77.0.2:80')
+  assert.equal(getRouterWebConsoleUrl(router), 'http://10.77.0.2')
+  assert.equal(getRouterWebConsoleUrl({ ...router, webScheme: 'https', webPort: 443 }), 'http://10.77.0.2')
+  assert.equal(getRouterWebConsoleUrl({ ...router, webPort: 8080 }), 'http://10.77.0.2:8080')
   assert.equal(getRouterWebConsoleUrl({ ...router, wireguardIp: null }), null)
   assert.equal(getRouterWebConsoleUrl({ ...router, wireguardIp: 'https://attacker.example' }), null)
   assert.equal(getRouterWebConsoleUrl({ ...router, wireguardIp: '203.0.113.15' }), null)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { BrandWordmark } from '@/components/brand-wordmark'
 
 type PortalPackage = {
   id: string
@@ -149,7 +150,7 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
   return (
     <main className="checkout-shell">
       <section className="checkout-panel">
-        <button className="checkout-brand" type="button" onClick={returnToPortal}><span className="checkout-mark">L</span>LKTECH HOTSPOT</button>
+        <button className="checkout-brand" type="button" onClick={returnToPortal}><span className="checkout-mark">L</span><BrandWordmark primary="LKTECH" accent="HOTSPOT" /></button>
         {status === 'complete' && credentials ? <>
           <p className="checkout-eyebrow success-eyebrow">PAYMENT CONFIRMED</p>
           <h1>You&apos;re ready to connect.</h1>

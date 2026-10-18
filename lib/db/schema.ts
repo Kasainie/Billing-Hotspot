@@ -77,6 +77,14 @@ export const tenantSmsSettings = pgTable('tenant_sms_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+export const tenantWorkspaceSettings = pgTable('tenant_workspace_settings', {
+  tenantId: text('tenant_id').notNull().primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
+  settings: jsonb('settings').$type<Record<string, Record<string, string | number | boolean>>>().notNull().default({}),
+  settingsEncrypted: text('settings_encrypted'),
+  secretsConfigured: jsonb('secrets_configured').$type<Record<string, string[]>>().notNull().default({}),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const smsMessages = pgTable('sms_messages', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
@@ -132,12 +140,15 @@ export const customers = pgTable('customers', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: text('tenant_id').notNull().default(DEFAULT_TENANT_ID),
   siteId: uuid('site_id'),
+  location: text('location'),
+  accountNumber: integer('account_number'),
   name: text('name').notNull(),
   email: text('email').notNull(),
   radiusUsername: text('radius_username'),
   phone: text('phone'),
   status: text('status').notNull().default('active'),
   plan: text('plan'),
+  isVip: boolean('is_vip').notNull().default(false),
   monthlyRate: integer('monthly_rate').notNull().default(0),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -286,6 +297,34 @@ export const invoices = pgTable('invoices', {
 }, (table) => [
   uniqueIndex('invoices_tenant_number_unique_idx').on(table.tenantId, table.invoiceNumber),
   uniqueIndex('invoices_tenant_customer_period_unique_idx').on(table.tenantId, table.customerId, table.periodStart),
+])
+
+export const subscriberCredits = pgTable('subscriber_credits', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull().references(() => customers.id, { onDelete: 'restrict' }),
+  type: text('type').notNull(),
+  amount: integer('amount').notNull(),
+  reason: text('reason').notNull(),
+  reference: text('reference'),
+  createdBy: uuid('created_by').references(() => tenantUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('subscriber_credits_tenant_customer_created_idx').on(table.tenantId, table.customerId, table.createdAt),
+  uniqueIndex('subscriber_credits_tenant_reference_unique_idx').on(table.tenantId, table.reference),
+])
+
+export const subscriberEvents = pgTable('subscriber_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull(),
+  eventType: text('event_type').notNull(),
+  description: text('description').notNull(),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+  createdBy: uuid('created_by').references(() => tenantUsers.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('subscriber_events_tenant_customer_created_idx').on(table.tenantId, table.customerId, table.createdAt),
 ])
 
 export const hotspotPortalSettings = pgTable('hotspot_portal_settings', {
@@ -524,7 +563,7 @@ export const hotspotPurchases = pgTable('hotspot_purchases', {
   uniqueIndex('hotspot_purchases_receipt_unique_idx').on(table.receipt),
 ])
 
-export const schema = { tenants, tenantUsers, emailVerificationCodes, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, tenantSmsSettings, smsMessages, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerConnectorQueries, routerMetricSamples }
+export const schema = { tenants, tenantUsers, emailVerificationCodes, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, tenantSmsSettings, tenantWorkspaceSettings, smsMessages, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerConnectorQueries, routerMetricSamples }
 export type Site = typeof sites.$inferSelect
 export type Customer = typeof customers.$inferSelect
 export type Payment = typeof payments.$inferSelect

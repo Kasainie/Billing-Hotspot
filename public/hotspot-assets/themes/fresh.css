@@ -2,6 +2,7 @@ body.hotspot-home { background: #eaf2e6; color: #1d352d; --portal-graphic-primar
 .hotspot-home .portal-stack { color: #1d352d; }
 .hotspot-home .portal-header { color: #1d352d; }
 .hotspot-home .portal-brand { color: #1d352d; }
+.hotspot-home .portal-brand-accent { color: #087f54; }
 .hotspot-home .network-status { color: #526d60; }
 .hotspot-home .welcome-panel, .hotspot-home .package-section, .hotspot-home .account-section, .hotspot-home .receipt-section { border-color: #c7d8cb; background: var(--portal-panel-wash); box-shadow: 0 8px 22px #23432f14; }
 .hotspot-home .welcome-panel h1, .hotspot-home .section-heading h2, .hotspot-home .account-section h2, .hotspot-home .receipt-section h2 { color: #1d352d; }
@@ -17,8 +18,8 @@ body.hotspot-home { background: #eaf2e6; color: #1d352d; --portal-graphic-primar
 .hotspot-home .package-card:hover, .hotspot-home .package-card.selected { border-color: #d77837; background: #fff8ef; box-shadow: inset 0 0 0 1px #d77837; }
 .hotspot-home .purchase-form > label, .hotspot-home .account-fields label, .hotspot-home .receipt-fields label { color: #395545; }
 .hotspot-home input { border-color: #c4d4c8; background: #fbfdfb; color: #1d352d; }
-.hotspot-home .purchase-button, .hotspot-home .account-button { background: #19805e; }
-.hotspot-home .purchase-button:hover:not(:disabled), .hotspot-home .account-button:hover { background: #126a4d; }
+.hotspot-home .purchase-button, .hotspot-home .account-button { background: #00ff90; color: #06110d; }
+.hotspot-home .purchase-button:hover:not(:disabled), .hotspot-home .account-button:hover { background: #00e583; color: #06110d; }
 .hotspot-home .payment-hint, .hotspot-home .purchase-status { color: #5b7063; }
 .hotspot-home .voucher-link { border-color: #d0dfd3; background: var(--portal-voucher-wash); color: #315442; }
 .hotspot-home .portal-footer { border-color: #c5d8c9; color: #526d5b; }

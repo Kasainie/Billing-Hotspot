@@ -2,12 +2,14 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { BrandWordmark } from '@/components/brand-wordmark'
 import {
   ArrowLeft,
   ArrowRight,
   Activity,
   AlertTriangle,
   ArrowDownRight,
+  ArrowUpDown,
   ArrowUpRight,
   Bell,
   ChevronLeft,
@@ -29,7 +31,9 @@ import {
   LayoutDashboard,
   MessageCircle,
   Menu,
+  Monitor,
   MoreHorizontal,
+  Moon,
   Network,
   Package,
   Palette,
@@ -41,9 +45,11 @@ import {
   ShieldCheck,
   Signal,
   SlidersHorizontal,
+  Sun,
   Ticket,
   Trash2,
   Upload,
+  UserRound,
   Users,
   Wifi,
   X,
@@ -59,7 +65,9 @@ import { LiveHotspotSessions } from '@/components/live-hotspot-sessions'
 import { RouterMonitorDetail, type RouterConnectorEnrollment, type RouterMonitorRecord, type RouterMonitorTab } from '@/components/router-monitor-detail'
 import { getRouterWebConsoleUrl } from '@/lib/router-monitoring'
 import { SubscriberProfile, type SubscriberProfileData } from '@/components/subscriber-profile'
-import { escapeCsvField as escapeSubscriberCsvField, parseCsv } from '@/lib/subscriber-csv'
+import { SettingsCenter } from '@/components/settings-center'
+import { parseCsv } from '@/lib/subscriber-csv'
+import { exportTabularReport, type ReportExportFormat } from '@/lib/report-export'
 
 const navigationSections: { label?: string; items: { label: string; icon: LucideIcon; count?: string; children?: { label: string; view: string; icon?: LucideIcon }[] }[] }[] = [
   { items: [{ label: 'Overview', icon: LayoutDashboard }] },
@@ -107,11 +115,34 @@ type DashboardData = {
   payments: { id: string; customerId: string | null; amount: number; status: string; method: string | null; reference: string | null; paidAt: string }[]
   packages: { id: string; name: string; downloadMbps: number; uploadMbps: number; monthlyPrice: number; active: boolean }[]
   expiringCustomers: DashboardCustomer[]
-  summary: { activeCustomers: number; siteCount: number; activePackages: number; paidRevenue: number; paidPaymentCount: number }
+  summary: { activeCustomers: number; totalCustomers: number; siteCount: number; activePackages: number; paidRevenue: number; paidPaymentCount: number }
 }
 type SearchResult = { id: string; label: string; detail: string; target: string; type: string }
 type HeaderNotification = { id: string; title: string; detail: string; target: string }
 type DashboardSections = { metrics: boolean; network: boolean; activity: boolean; operations: boolean }
+type SubscriberSort = 'lastOnline' | 'firstOnline' | 'oldest' | 'newest' | 'nameAsc' | 'nameDesc' | 'expirySoonest' | 'expiryLatest'
+type SubscriberTypeFilter = 'All' | 'Hotspot' | 'PPPoE' | 'Bindings'
+type SubscriberAdvancedFilter = 'hasPlan' | 'expired' | 'noEndDate' | 'atRisk' | 'vip' | 'offlineNow'
+
+const subscriberSortOptions: { value: SubscriberSort; label: string }[] = [
+  { value: 'lastOnline', label: 'Last online' },
+  { value: 'firstOnline', label: 'First online' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'newest', label: 'Newest first' },
+  { value: 'nameAsc', label: 'Name A–Z' },
+  { value: 'nameDesc', label: 'Name Z–A' },
+  { value: 'expirySoonest', label: 'Expiry: soonest' },
+  { value: 'expiryLatest', label: 'Expiry: latest' },
+]
+
+const subscriberAdvancedFilterOptions: { value: SubscriberAdvancedFilter; label: string }[] = [
+  { value: 'hasPlan', label: 'Has plan' },
+  { value: 'expired', label: 'Expired' },
+  { value: 'noEndDate', label: 'No end date' },
+  { value: 'atRisk', label: 'At risk' },
+  { value: 'vip', label: 'VIP' },
+  { value: 'offlineNow', label: 'Offline now' },
+]
 
 const emptyDashboardData: DashboardData = {
   sites: [],
@@ -119,11 +150,13 @@ const emptyDashboardData: DashboardData = {
   payments: [],
   packages: [],
   expiringCustomers: [],
-  summary: { activeCustomers: 0, siteCount: 0, activePackages: 0, paidRevenue: 0, paidPaymentCount: 0 },
+  summary: { activeCustomers: 0, totalCustomers: 0, siteCount: 0, activePackages: 0, paidRevenue: 0, paidPaymentCount: 0 },
 }
 const notificationStorageKey = 'lktech-dashboard-read-notifications'
 const defaultDashboardSections: DashboardSections = { metrics: true, network: true, activity: true, operations: true }
 const dashboardSectionsStorageKey = 'lktech-dashboard-sections'
+const dashboardThemeStorageKey = 'lktech-dashboard-theme'
+type DashboardTheme = 'light' | 'dark' | 'system'
 
 function escapeCsvField(value: unknown) {
   const text = String(value ?? '')
@@ -167,10 +200,17 @@ export function AdminDashboard() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchActiveIndex, setSearchActiveIndex] = useState(0)
   const [crudSearchTerm, setCrudSearchTerm] = useState('')
+  const [subscriberProfileTargetId, setSubscriberProfileTargetId] = useState('')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
+  const [themePreference, setThemePreference] = useState<DashboardTheme>('system')
+  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('dark')
+  const [profileNotice, setProfileNotice] = useState('')
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([])
   const [dashboardData, setDashboardData] = useState<DashboardData>(emptyDashboardData)
+  const [onlineClientCount, setOnlineClientCount] = useState<number | null>(null)
+  const [dashboardExportFormat, setDashboardExportFormat] = useState<ReportExportFormat>('csv')
+  const [exportingDashboardReport, setExportingDashboardReport] = useState(false)
   const [siteFilter, setSiteFilter] = useState('All sites')
   const [range, setRange] = useState('30 days')
   const [dashboardSections, setDashboardSections] = useState(defaultDashboardSections)
@@ -201,6 +241,32 @@ export function AdminDashboard() {
     const interval = window.setInterval(updateGreeting, 60_000)
     return () => window.clearInterval(interval)
   }, [])
+
+  useEffect(() => {
+    try {
+      const storedTheme = window.localStorage.getItem(dashboardThemeStorageKey)
+      if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') setThemePreference(storedTheme)
+    } catch (error) {
+      console.error('Unable to load dashboard theme preference', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: light)')
+    const updateTheme = () => setEffectiveTheme(themePreference === 'system' ? (media.matches ? 'light' : 'dark') : themePreference)
+    updateTheme()
+    media.addEventListener('change', updateTheme)
+    try {
+      window.localStorage.setItem(dashboardThemeStorageKey, themePreference)
+    } catch (error) {
+      console.error('Unable to save dashboard theme preference', error)
+    }
+    return () => media.removeEventListener('change', updateTheme)
+  }, [themePreference])
+
+  useEffect(() => {
+    document.documentElement.dataset.dashboardTheme = effectiveTheme
+  }, [effectiveTheme])
 
   useEffect(() => {
     if (!currentTenantId) return
@@ -506,7 +572,7 @@ export function AdminDashboard() {
     }
   }
 
-  function exportDashboardReport() {
+  async function exportDashboardReport() {
     const rangeMilliseconds = range === '24 hours' ? 24 * 60 * 60 * 1000 : range === '7 days' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000
     const generatedAt = Date.now()
     const cutoff = generatedAt - rangeMilliseconds
@@ -537,36 +603,37 @@ export function AdminDashboard() {
       return
     }
 
+    setExportingDashboardReport(true)
     try {
-      const csv = `\uFEFF${reportRows.map((row) => row.map(escapeCsvField).join(',')).join('\r\n')}`
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
       const safeWorkspaceName = currentTenantName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'workspace'
-      link.href = url
-      link.download = `lktech-${safeWorkspaceName}-report-${new Date(generatedAt).toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      await exportTabularReport({
+        format: dashboardExportFormat,
+        fileName: `lktech-${safeWorkspaceName}-report-${new Date(generatedAt).toISOString().slice(0, 10)}`,
+        title: `${currentTenantName} workspace report`,
+        sheetName: 'Workspace report',
+        headers: reportRows[0].map(String),
+        rows: reportRows.slice(1),
+      })
       setDashboardNotice(`Exported ${reportRows.length - 1} loaded records. The selected date range applies to the latest 100 loaded payments; the export includes at most 100 subscribers and payments.`)
     } catch (error) {
       console.error('Unable to export the dashboard report', error)
       setDashboardNotice('Unable to export the report. Please try again.')
+    } finally {
+      setExportingDashboardReport(false)
     }
   }
 
   return (
-    <main className="ops-shell">
+    <main className="ops-shell" data-dashboard-theme={effectiveTheme}>
       <aside className={`ops-sidebar ${mobileOpen ? 'is-open' : ''} ${sidebarCollapsed ? 'is-collapsed' : ''}`}>
-        <div className="brand-row"><div className="brand-mark"><Signal size={18} /></div><div><strong>LKTECH</strong></div><button className="icon-button collapse-button" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}>{sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}</button><button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={18} /></button></div>
+        <div className="brand-row"><div className="brand-mark"><Signal size={18} /></div><div><strong><BrandWordmark primary="LKTECH" accent="." tone="dark" /></strong></div><button className="icon-button collapse-button" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}>{sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}</button><button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={18} /></button></div>
         <div className="workspace-picker">
           <select aria-label="Active workspace" value={currentTenantId} onChange={(event) => switchWorkspace(event.target.value)}>
             {currentTenantId && <option value={currentTenantId}>{currentTenantName}</option>}
             {memberships.filter((membership) => membership.id !== currentTenantId).map((membership) => <option key={membership.id} value={membership.id}>{membership.name}</option>)}
           </select>
         </div>
-        <nav className="navigation-list" aria-label="Main navigation">{navigationSections.map((section) => <div className="nav-section" key={section.label || 'overview'}>{section.label && <p className="nav-label">{section.label}</p>}{section.items.map(({ label, icon: Icon, count, children }) => <div className="nav-group" key={label}><button className={`nav-item ${activeNav === label ? 'active' : ''}`} aria-expanded={children ? expandedNav.includes(label) : undefined} onClick={() => { if (children) { setExpandedNav((current) => current.includes(label) ? current.filter((group) => group !== label) : [...current, label]); return } setActiveNav(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{count && <b>{count}</b>}{children && (expandedNav.includes(label) ? <ChevronDown className="nav-chevron" size={15} /> : <ChevronRight className="nav-chevron" size={15} />)}</button>{children && expandedNav.includes(label) && <div className="nav-children">{children.map(({ label: childLabel, view, icon: ChildIcon }) => <button key={view} className={`nav-child ${activeNav === view ? 'active' : ''}`} onClick={() => { setActiveNav(view); setMobileOpen(false) }}>{ChildIcon ? <ChildIcon size={15} /> : <span className="nav-child-dot" />}<span>{childLabel}</span></button>)}</div>}</div>)}</div>)}{isPlatformAdmin && <a className="nav-item platform-admin-nav-link" href="/platform-admin"><ShieldCheck size={17} /><span>Platform admin</span></a>}</nav>
+        <nav className="navigation-list" aria-label="Main navigation">{navigationSections.map((section) => <div className="nav-section" key={section.label || 'overview'}>{section.label && <p className="nav-label">{section.label}</p>}{section.items.map(({ label, icon: Icon, count, children }) => { const itemCount = count ?? (label === 'Subscribers' && dataStatus === 'live' ? dashboardData.summary.totalCustomers.toLocaleString('en-KE') : label === 'Live sessions' && onlineClientCount !== null ? onlineClientCount.toLocaleString('en-KE') : null); return <div className="nav-group" key={label}><button className={`nav-item ${activeNav === label ? 'active' : ''}`} aria-expanded={children ? expandedNav.includes(label) : undefined} onClick={() => { if (children) { setExpandedNav((current) => current.includes(label) ? current.filter((group) => group !== label) : [...current, label]); return } setActiveNav(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{itemCount !== null && itemCount !== undefined && <b aria-label={label === 'Live sessions' ? `${itemCount} clients online` : label === 'Subscribers' ? `${itemCount} subscribers total` : undefined}>{itemCount}</b>}{children && (expandedNav.includes(label) ? <ChevronDown className="nav-chevron" size={15} /> : <ChevronRight className="nav-chevron" size={15} />)}</button>{children && expandedNav.includes(label) && <div className="nav-children">{children.map(({ label: childLabel, view, icon: ChildIcon }) => <button key={view} className={`nav-child ${activeNav === view ? 'active' : ''}`} onClick={() => { setActiveNav(view); setMobileOpen(false) }}>{ChildIcon ? <ChildIcon size={15} /> : <span className="nav-child-dot" />}<span>{childLabel}</span></button>)}</div>}</div> })}</div>)}{isPlatformAdmin && <a className="nav-item platform-admin-nav-link" href="/platform-admin"><ShieldCheck size={17} /><span>Platform admin</span></a>}</nav>
         <div className="sidebar-footer"><div className="support-card"><div className="support-icon"><Cable size={16} /></div><strong>Need help?</strong><span>Check the integration guide</span><a href="#activity">Open docs <ArrowUpRight size={12} /></a></div><div className="user-row"><div className="avatar">{currentUser.slice(0, 2).toUpperCase() || 'U'}</div><div><strong>{currentUser || 'Workspace user'}</strong><span>{currentTenantName}</span></div><button type="button" className="workspace-logout" onClick={signOut}>Sign out</button></div></div>
       </aside>
 
@@ -591,13 +658,50 @@ export function AdminDashboard() {
           </div>
           <div className="header-menu-anchor" ref={profileRef}>
             <button type="button" className="top-avatar" aria-label={`Account menu for ${currentUser || 'user'}`} aria-expanded={profileOpen} onClick={() => { setProfileOpen((open) => !open); setNotificationsOpen(false); setSearchOpen(false) }}>{userInitials}</button>
-            {profileOpen && <div className="header-popover profile-popover"><div className="profile-summary"><div className="profile-avatar">{userInitials}</div><span><strong>{currentUser || 'Workspace user'}</strong><small>{currentEmail}</small></span></div><div className="profile-workspace"><span>ACTIVE WORKSPACE</span><strong>{currentTenantName}</strong></div><button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Payment settings'); setProfileOpen(false) }}><Settings2 size={15} /> Payment settings</button><button type="button" className="profile-menu-item" onClick={() => { setActiveNav('SMS settings'); setProfileOpen(false) }}><MessageCircle size={15} /> SMS settings</button><button type="button" className="profile-menu-item profile-signout" onClick={() => { setProfileOpen(false); void signOut() }}>Sign out</button></div>}
+            {profileOpen && <div className="header-popover profile-popover">
+              <div className="profile-summary">
+                <div className="profile-avatar">{userInitials}</div>
+                <span><strong>{currentUser || 'Workspace user'}</strong><small>{currentEmail}</small></span>
+              </div>
+              <div className="profile-theme-switch" role="group" aria-label="Appearance">
+                {([
+                  { value: 'light', label: 'Light', icon: Sun },
+                  { value: 'dark', label: 'Dark', icon: Moon },
+                  { value: 'system', label: 'System', icon: Monitor },
+                ] as const).map(({ value, label, icon: ThemeIcon }) => <button
+                  key={value}
+                  type="button"
+                  className={themePreference === value ? 'is-selected' : ''}
+                  aria-pressed={themePreference === value}
+                  onClick={() => setThemePreference(value)}
+                ><ThemeIcon size={14} />{label}</button>)}
+              </div>
+              <div className="profile-menu-section">
+                <span className="profile-menu-label">ACCOUNT</span>
+                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Profile'); setProfileOpen(false) }}><UserRound size={16} /> Profile</button>
+                <button type="button" className="profile-menu-item" onClick={() => setProfileNotice('App installation is not enabled yet. You can bookmark this page for quick access.')}><Download size={16} /> Install app</button>
+              </div>
+              <div className="profile-menu-section">
+                <span className="profile-menu-label">WORKSPACE</span>
+                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Settings'); setProfileOpen(false) }}><Settings2 size={16} /> Settings</button>
+                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Staff'); setProfileOpen(false) }}><Users size={16} /> Staff</button>
+                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Plan & billing'); setProfileOpen(false) }}><CreditCard size={16} /> Plan &amp; billing</button>
+                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Request capacity'); setProfileOpen(false) }}><Activity size={16} /> Request capacity <ArrowUpRight size={13} className="profile-menu-external" /></button>
+                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Refer & Earn'); setProfileOpen(false) }}><Network size={16} /> Refer &amp; Earn</button>
+                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Audit log'); setProfileOpen(false) }}><FileText size={16} /> Audit log</button>
+              </div>
+              <div className="profile-menu-section">
+                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Feedback'); setProfileOpen(false) }}><MessageCircle size={16} /> Feedback</button>
+              </div>
+              {profileNotice && <p className="profile-menu-notice" role="status">{profileNotice}<button type="button" onClick={() => setProfileNotice('')} aria-label="Dismiss install instructions"><X size={13} /></button></p>}
+              <button type="button" className="profile-menu-item profile-signout" onClick={() => { setProfileOpen(false); void signOut() }}><ArrowRight size={16} /> Sign out</button>
+            </div>}
           </div>
         </div></header>
         <div className="page-wrap" data-dashboard-network={dashboardSections.network} data-dashboard-activity={dashboardSections.activity} data-dashboard-operations={dashboardSections.operations}>
-          {activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'SMS settings' ? <SmsSettings /> : activeNav === 'Payments' ? <PaymentReconciliation /> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} /> : <ModulePanel title={activeNav} /> : null}
+          {activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions onOnlineCountChange={setOnlineClientCount} onOpenSubscriber={(customerId) => { setCrudSearchTerm(customerId); setSubscriberProfileTargetId(customerId); setActiveNav('Subscribers') }} /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Settings' ? <SettingsCenter onNavigate={setActiveNav} onProfileNameChange={setCurrentUser} /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'SMS settings' ? <SmsSettings /> : activeNav === 'Payments' ? <PaymentReconciliation /> : activeNav === 'Profile' ? <section className="profile-page"><div className="page-heading"><div><div className="live-label"><StatusDot /> ACCOUNT</div><h1>Your profile</h1><p>Your account identity and current workspace access.</p></div></div><div className="profile-page-grid"><article className="panel profile-page-card"><span>ACCOUNT</span><div className="profile-page-identity"><div className="profile-avatar">{userInitials}</div><div><h2>{currentUser || 'Workspace user'}</h2><p>{currentEmail || 'Email unavailable'}</p></div></div><dl><div><dt>Name</dt><dd>{currentUser || 'Not available'}</dd></div><div><dt>Email</dt><dd>{currentEmail || 'Not available'}</dd></div></dl></article><article className="panel profile-page-card"><span>WORKSPACE ACCESS</span><h2>{currentTenantName}</h2><dl><div><dt>Workspace</dt><dd>{currentTenantName}</dd></div><div><dt>Your role</dt><dd>{memberships.find((membership) => membership.id === currentTenantId)?.role || (isPlatformAdmin ? 'Platform administrator' : 'Workspace member')}</dd></div><div><dt>Available workspaces</dt><dd>{memberships.length}</dd></div></dl></article></div></section> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} initialExpandedId={activeNav === 'Subscribers' ? subscriberProfileTargetId : ''} onInitialProfileOpened={() => setSubscriberProfileTargetId('')} /> : <ModulePanel title={activeNav} /> : null}
           {activeNav === 'Overview' ? <>
-          <div className="page-heading"><div><div className="live-label"><StatusDot tone={networkStatusTone} /> WORKSPACE OVERVIEW</div><h1>{timeGreeting || 'Welcome'}, {currentUser.trim().split(/\s+/)[0] || 'there'}.</h1><p>Workspace records and billing activity for your network.</p></div><div className="heading-actions"><button ref={customizeButtonRef} type="button" className="outline-button" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={openDashboardCustomization}><SlidersHorizontal size={15} /> Customize</button><button type="button" className="primary-button" onClick={exportDashboardReport}><ArrowDownRight size={15} /> Export report</button></div></div>
+          <div className="page-heading"><div><div className="live-label"><StatusDot tone={networkStatusTone} /> WORKSPACE OVERVIEW</div><h1>{timeGreeting || 'Welcome'}, {currentUser.trim().split(/\s+/)[0] || 'there'}.</h1><p>Workspace records and billing activity for your network.</p></div><div className="heading-actions"><button ref={customizeButtonRef} type="button" className="outline-button" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={openDashboardCustomization}><SlidersHorizontal size={15} /> Customize</button><select className="outline-button report-export-format" aria-label="Workspace report export format" value={dashboardExportFormat} onChange={(event) => setDashboardExportFormat(event.target.value as ReportExportFormat)} disabled={exportingDashboardReport}><option value="csv">CSV</option><option value="excel">Excel (.xlsx)</option><option value="pdf">PDF</option></select><button type="button" className="primary-button" onClick={() => void exportDashboardReport()} disabled={exportingDashboardReport}><ArrowDownRight size={15} /> {exportingDashboardReport ? 'Exporting…' : 'Export report'}</button></div></div>
           {dashboardNotice && <p className="dashboard-notice" role="status">{dashboardNotice}<button type="button" aria-label="Dismiss message" onClick={() => setDashboardNotice('')}><X size={13} /></button></p>}
           <div className="status-strip">
             <div><span className="status-strip-label">WORKSPACE DATA</span><strong><StatusDot tone={networkStatusTone} />{dataStatus === 'loading' ? 'Loading workspace data' : dataStatus === 'error' ? 'Workspace data unavailable' : dashboardData.sites.length === 0 ? 'No sites configured' : `${activeSiteCount} of ${dashboardData.sites.length} sites marked active`}</strong></div>
@@ -634,7 +738,7 @@ export function AdminDashboard() {
             <section className="panel activity-panel"><div className="panel-heading"><div><h3>Available plans</h3><span>Plans configured in this workspace</span></div><button type="button" className="text-button" onClick={() => setActiveNav('Plans')}>Manage plans <ArrowUpRight size={13} /></button></div><div className="activity-list">{dataStatus === 'live' && dashboardData.packages.length ? dashboardData.packages.slice(0, 5).map((plan) => <div key={plan.id}><div className={`activity-icon ${plan.active ? 'green' : 'amber'}`}><Package size={14} /></div><span><strong>{plan.name}</strong><small>{plan.downloadMbps}/{plan.uploadMbps} Mbps · {plan.active ? 'Active' : 'Inactive'}</small></span></div>) : <p className="header-empty">{dataStatus === 'live' ? 'No plans have been configured.' : dataStatus === 'loading' ? 'Loading plans…' : 'Plan records are unavailable.'}</p>}</div></section>
           </div>}
           </> : null}
-          <footer className="footer-bar"><span>LKTECH workspace dashboard</span><span>{dataStatus === 'live' ? 'Live workspace records' : dataStatus === 'error' ? 'Workspace data unavailable' : 'Loading workspace data'}</span></footer>
+          <footer className="footer-bar"><span className="copyright-notice"><span className="copyright-notice-text">© 2026 LKTECH™. All rights reserved.</span></span><span>{dataStatus === 'live' ? 'Live workspace records' : dataStatus === 'error' ? 'Workspace data unavailable' : 'Loading workspace data'}</span></footer>
         </div>
         {customizeOpen && <div className="dashboard-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCustomizeOpen(false) }}>
           <section className="dashboard-customize-dialog" role="dialog" aria-modal="true" aria-labelledby="dashboard-customize-title" onKeyDown={(event) => {
@@ -1868,16 +1972,29 @@ function PackagePanel({ initialFilter = '' }: { initialFilter?: string }) {
   </section>
 }
 
-function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customers' | 'packages' | 'payments'; initialFilter?: string }) {
+function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onInitialProfileOpened }: { entity: 'sites' | 'customers' | 'packages' | 'payments'; initialFilter?: string; initialExpandedId?: string; onInitialProfileOpened?: () => void }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const subscriberImportInput = useRef<HTMLInputElement>(null)
   const [subscriberImportResult, setSubscriberImportResult] = useState<{ imported: number; failures: { row: number; reason: string }[]; failedCount: number } | null>(null)
   const [subscriberPlans, setSubscriberPlans] = useState<{ id: string; name: string; type: string; monthlyPrice: number; durationSeconds: number; availability: string }[]>([])
   const [subscriberPlansError, setSubscriberPlansError] = useState('')
+  const [subscriberSites, setSubscriberSites] = useState<{ id: string; name: string; location: string }[]>([])
+  const [subscriberSitesError, setSubscriberSitesError] = useState('')
+  const [subscriberExportFormat, setSubscriberExportFormat] = useState<ReportExportFormat>('csv')
   const [recordFilter, setRecordFilter] = useState(initialFilter)
+  const [subscriberTypeFilter, setSubscriberTypeFilter] = useState<SubscriberTypeFilter>('All')
+  const [subscriberAdvancedFilters, setSubscriberAdvancedFilters] = useState<SubscriberAdvancedFilter[]>([])
+  const [subscriberFilterMenuOpen, setSubscriberFilterMenuOpen] = useState(false)
+  const [subscriberRouterFilter, setSubscriberRouterFilter] = useState('')
+  const [subscriberCreatedFrom, setSubscriberCreatedFrom] = useState('')
+  const [subscriberCreatedTo, setSubscriberCreatedTo] = useState('')
+  const [subscriberSort, setSubscriberSort] = useState<SubscriberSort>('lastOnline')
+  const [subscriberSortMenuOpen, setSubscriberSortMenuOpen] = useState(false)
   const [name, setName] = useState('')
   const [detail, setDetail] = useState('')
   const [subscriberPhone, setSubscriberPhone] = useState('')
+  const [subscriberLocation, setSubscriberLocation] = useState('')
+  const [subscriberSiteId, setSubscriberSiteId] = useState('')
   const [subscriberPlanId, setSubscriberPlanId] = useState('')
   const [radiusUsername, setRadiusUsername] = useState('')
   const [radiusPassword, setRadiusPassword] = useState('')
@@ -1913,7 +2030,7 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
     }
     setSubscriberFormOpen(!subscriberFormOpen)
   }
-  const toggleSubscriberDetails = async (customerId: string) => {
+  const toggleSubscriberDetails = useCallback(async (customerId: string) => {
     if (expandedDetailsId === customerId) {
       setExpandedDetailsId('')
       setSubscriberDetails(null)
@@ -1931,12 +2048,26 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       const result = await response.json() as SubscriberProfileData & { error?: string }
       if (!response.ok) throw new Error(result.error || 'Unable to load subscriber details.')
       setSubscriberDetails(result)
+      if (initialExpandedId === customerId) onInitialProfileOpened?.()
     } catch (reason) {
       setDetailsError(reason instanceof Error ? reason.message : 'Unable to load subscriber details.')
     } finally {
       setDetailsLoadingId('')
     }
-  }
+  }, [expandedDetailsId, initialExpandedId, onInitialProfileOpened])
+  const refreshSubscriberDetails = useCallback(async (customerId: string) => {
+    const response = await fetch(`/api/customers/${encodeURIComponent(customerId)}/details`, { cache: 'no-store' })
+    const result = await response.json() as SubscriberProfileData & { error?: string }
+    if (!response.ok) throw new Error(result.error || 'Unable to refresh subscriber details.')
+    setSubscriberDetails(result)
+  }, [])
+  const [autoOpenedProfileId, setAutoOpenedProfileId] = useState('')
+  useEffect(() => {
+    if (entity !== 'customers' || !initialExpandedId || autoOpenedProfileId === initialExpandedId ||
+        !rows.some((row) => String(row.id) === initialExpandedId)) return
+    setAutoOpenedProfileId(initialExpandedId)
+    void toggleSubscriberDetails(initialExpandedId)
+  }, [autoOpenedProfileId, entity, initialExpandedId, rows, toggleSubscriberDetails])
   const copySubscriberCredential = async (kind: 'username' | 'password' | 'accountNumber', value: string) => {
     try {
       await navigator.clipboard.writeText(value)
@@ -1966,6 +2097,27 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       setMessage(reason instanceof Error ? reason.message : 'Unable to send SMS.')
     } finally {
       setSendingSmsId('')
+    }
+  }
+  const changeSubscriberVip = async (subscriberId: string, isVip: boolean) => {
+    setSaving(true)
+    setMessage('')
+    setMessageIsError(false)
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(subscriberId)}/actions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'vip', isVip }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to update VIP status.')
+      setRows((current) => current.map((row) => String(row.id) === subscriberId ? { ...row, isVip } : row))
+      setMessage(isVip ? 'Subscriber marked as VIP.' : 'VIP marker removed.')
+    } catch (reason) {
+      setMessageIsError(true)
+      setMessage(reason instanceof Error ? reason.message : 'Unable to update VIP status.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -2002,6 +2154,33 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
     return () => { active = false }
   }, [entity])
 
+  useEffect(() => {
+    if (entity !== 'customers') return
+    let active = true
+    const loadSubscriberSites = async () => {
+      try {
+        const response = await fetch('/api/sites', { cache: 'no-store' })
+        const result = await response.json() as { error?: string } | Record<string, unknown>[]
+        if (!response.ok || !Array.isArray(result)) throw new Error(!Array.isArray(result) && result.error ? result.error : 'Unable to load network sites.')
+        if (active) {
+          setSubscriberSites(result.map((site) => ({
+            id: String(site.id),
+            name: String(site.name || ''),
+            location: String(site.location || ''),
+          })))
+          setSubscriberSitesError('')
+        }
+      } catch (error) {
+        if (active) {
+          setSubscriberSites([])
+          setSubscriberSitesError(error instanceof Error ? error.message : 'Unable to load network sites.')
+        }
+      }
+    }
+    void loadSubscriberSites()
+    return () => { active = false }
+  }, [entity])
+
   const load = () => fetch(`/api/${entity}`, { cache: 'no-store' }).then(async (response) => {
     const data = await response.json()
     if (!response.ok) throw new Error(data.error || 'Could not load live records')
@@ -2024,11 +2203,62 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
   }, [subscriberToDelete, saving])
   const filteredRows = useMemo(() => {
     const normalizedFilter = recordFilter.trim().toLowerCase()
-    if (!normalizedFilter) return rows
-    return rows.filter((row) => Object.values(row).some((value) => String(value ?? '').toLowerCase().includes(normalizedFilter)))
-  }, [recordFilter, rows])
+    const filtered = rows.filter((row) => {
+      const matchesSearch = !normalizedFilter || Object.values(row).some((value) => String(value ?? '').toLowerCase().includes(normalizedFilter))
+      const matchesType = subscriberTypeFilter === 'All' ||
+        (subscriberTypeFilter === 'Bindings' ? row.hasBinding === true : row.serviceType === subscriberTypeFilter)
+      if (!matchesSearch || !matchesType) return false
+      if (entity !== 'customers') return true
+      const expiry = typeof row.expiresAt === 'string' ? new Date(row.expiresAt).getTime() : null
+      const createdAt = typeof row.createdAt === 'string' ? new Date(row.createdAt).getTime() : null
+      const now = Date.now()
+      const matchesAdvanced = subscriberAdvancedFilters.every((filter) => {
+        if (filter === 'hasPlan') return Boolean(row.plan)
+        if (filter === 'expired') return expiry !== null && Number.isFinite(expiry) && expiry <= now
+        if (filter === 'noEndDate') return !row.expiresAt
+        if (filter === 'atRisk') return expiry !== null && Number.isFinite(expiry) && expiry > now && expiry <= now + 7 * 24 * 60 * 60 * 1000
+        if (filter === 'vip') return row.isVip === true
+        return row.isOnline !== true
+      })
+      const routers = Array.isArray(row.routerNames) ? row.routerNames : []
+      const matchesRouter = !subscriberRouterFilter || routers.includes(subscriberRouterFilter)
+      const from = subscriberCreatedFrom ? new Date(`${subscriberCreatedFrom}T00:00:00`).getTime() : null
+      const to = subscriberCreatedTo ? new Date(`${subscriberCreatedTo}T23:59:59.999`).getTime() : null
+      const matchesCreatedRange = (from === null || (createdAt !== null && createdAt >= from)) &&
+        (to === null || (createdAt !== null && createdAt <= to))
+      return matchesAdvanced && matchesRouter && matchesCreatedRange
+    })
+    if (entity !== 'customers') return filtered
+
+    const dateValue = (value: unknown) => {
+      if (typeof value !== 'string' && !(value instanceof Date)) return null
+      const timestamp = new Date(value).getTime()
+      return Number.isFinite(timestamp) ? timestamp : null
+    }
+    const direction = subscriberSort === 'firstOnline' || subscriberSort === 'oldest' || subscriberSort === 'nameAsc' || subscriberSort === 'expirySoonest' ? 1 : -1
+    const field = subscriberSort === 'lastOnline' ? 'lastOnlineAt'
+      : subscriberSort === 'firstOnline' ? 'firstOnlineAt'
+        : subscriberSort === 'oldest' || subscriberSort === 'newest' ? 'createdAt'
+          : subscriberSort === 'expirySoonest' || subscriberSort === 'expiryLatest' ? 'expiresAt' : null
+    return [...filtered].sort((left, right) => {
+      if (subscriberSort === 'nameAsc' || subscriberSort === 'nameDesc') {
+        return String(left.name || '').localeCompare(String(right.name || ''), undefined, { sensitivity: 'base' }) * direction
+      }
+      const leftDate = dateValue(field ? left[field] : null)
+      const rightDate = dateValue(field ? right[field] : null)
+      if (leftDate === null || rightDate === null) return leftDate === rightDate ? 0 : leftDate === null ? 1 : -1
+      return (leftDate - rightDate) * direction
+    })
+  }, [entity, recordFilter, rows, subscriberAdvancedFilters, subscriberCreatedFrom, subscriberCreatedTo, subscriberRouterFilter, subscriberSort, subscriberTypeFilter])
+  const subscriberTypeCounts = {
+    All: rows.length,
+    Hotspot: rows.filter((row) => row.serviceType === 'Hotspot').length,
+    PPPoE: rows.filter((row) => row.serviceType === 'PPPoE').length,
+    Bindings: rows.filter((row) => row.hasBinding === true).length,
+  }
+  const subscriberRouterOptions = [...new Set(rows.flatMap((row) => Array.isArray(row.availableRouters) ? row.availableRouters.filter((router): router is string => typeof router === 'string') : []))].sort((left, right) => left.localeCompare(right))
   const exportSubscribers = async () => {
-    const columns = ['Name', 'Email', 'Phone', 'Plan', 'Plan ID', 'RADIUS Username', 'RADIUS Password', 'Status', 'Expires At', 'Created At']
+    const columns = ['Account Number', 'Name', 'Email', 'Phone', 'Location', 'Network Site', 'Plan', 'Plan ID', 'RADIUS Username', 'RADIUS Password', 'Status', 'Expires At', 'Created At']
     setSaving(true)
     setMessage('')
     setMessageIsError(false)
@@ -2046,13 +2276,16 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
         if (offset > 10_000) throw new Error('Subscriber export is limited to 10,000 records.')
         if (result.length < 200) break
       }
-      const csvRows = allRows.map((row) => {
+      const exportRows = allRows.map((row) => {
         const matchingPlans = subscriberPlans.filter((plan) => plan.name.toLowerCase() === String(row.plan || '').trim().toLowerCase())
         const plan = matchingPlans.length === 1 ? matchingPlans[0] : null
         return [
+          String(row.accountNumber || ''),
           String(row.name || ''),
           String(row.email || ''),
           String(row.phone || ''),
+          String(row.location || ''),
+          String(row.siteName || ''),
           String(row.plan || ''),
           plan?.id || '',
           String(row.radiusUsername || ''),
@@ -2062,15 +2295,14 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
           typeof row.createdAt === 'string' ? row.createdAt : '',
         ]
       })
-      const csv = `\uFEFF${[columns, ...csvRows].map((line) => line.map(escapeSubscriberCsvField).join(',')).join('\r\n')}`
-      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `lktech-subscribers-${new Date().toISOString().slice(0, 10)}.csv`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      await exportTabularReport({
+        format: subscriberExportFormat,
+        fileName: `lktech-subscribers-${new Date().toISOString().slice(0, 10)}`,
+        title: 'Subscriber report',
+        sheetName: 'Subscribers',
+        headers: columns,
+        rows: exportRows,
+      })
       setMessage(`Exported ${allRows.length} subscriber${allRows.length === 1 ? '' : 's'}. Passwords are intentionally blank.`)
     } catch (reason) {
       setMessageIsError(true)
@@ -2093,6 +2325,8 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       const nameColumn = column('name', 'fullname')
       const emailColumn = column('email', 'emailaddress')
       const phoneColumn = column('phone', 'phonenumber')
+      const locationColumn = column('location', 'address', 'area')
+      const siteColumn = column('site', 'sitename', 'networksite')
       const planColumn = column('plan', 'planname', 'package')
       const planIdColumn = column('planid', 'packageid')
       const usernameColumn = column('radiususername', 'username')
@@ -2124,6 +2358,10 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
           const emailValue = valueAt(emailColumn)
           const usernameValue = valueAt(usernameColumn)
           const passwordValue = valueAt(passwordColumn)
+          const siteValue = valueAt(siteColumn)
+          const matchedSite = siteValue
+            ? subscriberSites.find((site) => site.id === siteValue || site.name.toLowerCase() === siteValue.toLowerCase())
+            : undefined
           const planIdValue = valueAt(planIdColumn)
           const planNameValue = valueAt(planColumn)
           const planById = planIdValue ? subscriberPlans.find((plan) => plan.id === planIdValue) : undefined
@@ -2141,6 +2379,10 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
             failures.push({ row: lineNumber, reason })
             continue
           }
+          if (siteValue && !matchedSite) {
+            failures.push({ row: lineNumber, reason: `Network site "${siteValue}" was not found. Use a site name or ID from this workspace.` })
+            continue
+          }
           try {
             const response = await fetch('/api/customers', {
               method: 'POST',
@@ -2149,6 +2391,8 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
                 name: nameValue,
                 email: emailValue,
                 phone: valueAt(phoneColumn),
+                location: valueAt(locationColumn),
+                siteId: matchedSite?.id || null,
                 packageId: plan.id,
                 radiusUsername: usernameValue,
                 password: passwordValue,
@@ -2201,7 +2445,16 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
     const body = entity === 'sites'
       ? { name, location: detail || 'Central Sector' }
       : entity === 'customers'
-        ? { name: name.trim(), email: detail.trim(), phone: subscriberPhone.trim(), packageId: subscriberPlanId, radiusUsername: radiusUsername.trim(), password: radiusPassword }
+        ? {
+          name: name.trim(),
+          email: detail.trim(),
+          phone: subscriberPhone.trim(),
+          location: subscriberLocation.trim(),
+          siteId: subscriberSiteId || null,
+          packageId: subscriberPlanId,
+          radiusUsername: radiusUsername.trim(),
+          password: radiusPassword,
+        }
         : entity === 'packages'
           ? { name, downloadMbps: 20, uploadMbps: 10, monthlyPrice: 1800 }
           : { amount: 1800, method: detail || 'Mobile Money', reference: `PAY-${Date.now()}` }
@@ -2212,10 +2465,15 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
         setMessageIsError(true)
         return setMessage(result.error || 'Unable to save record')
       }
-      setName(''); setDetail(''); setSubscriberPhone(''); setSubscriberPlanId(''); setRadiusUsername(''); setRadiusPassword(''); setConfirmRadiusPassword('')
+      const result = entity === 'customers'
+        ? await response.json() as { accountNumber?: number | string }
+        : null
+      setName(''); setDetail(''); setSubscriberPhone(''); setSubscriberLocation(''); setSubscriberSiteId(''); setSubscriberPlanId(''); setRadiusUsername(''); setRadiusPassword(''); setConfirmRadiusPassword('')
       setShowRadiusPassword(false)
       if (entity === 'customers') setSubscriberFormOpen(false)
-      setMessage(entity === 'customers' ? 'Subscriber created safely suspended with the selected plan. Activate the account and set its expiry before service begins; use View details to retrieve the login and any PPPoE account number.' : 'Record created')
+      setMessage(entity === 'customers'
+        ? `Subscriber created safely suspended. Account number: ${result?.accountNumber || 'assigned'}. Activate the account and set its expiry before service begins.`
+        : 'Record created')
       try {
         await load()
       } catch (reason) {
@@ -2296,12 +2554,13 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
   const selectedSubscriberPlan = subscriberPlans.find((plan) => plan.id === subscriberPlanId)
   return <section className={`crud-workspace${entity === 'customers' ? ' subscriber-workspace' : ''}`}><div className="page-heading"><div><div className="live-label"><StatusDot /> LIVE DATA</div><h1>{labels[entity]}</h1><p>{entity === 'customers' ? 'Manage customer contact details, PPPoE and Wi-Fi logins, service plans, and account access.' : 'Manage records persisted in Supabase.'}</p></div>{entity === 'customers' ? <div className="subscriber-data-actions">
     <input ref={subscriberImportInput} type="file" accept=".csv,text/csv" aria-label="Choose subscriber CSV file" className="subscriber-import-input" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSubscribers(file) }} />
-    <button className="outline-button" type="button" onClick={() => void exportSubscribers()} disabled={saving}><Download size={14} /> Export CSV</button>
+    <select className="outline-button report-export-format" aria-label="Subscriber report export format" value={subscriberExportFormat} onChange={(event) => setSubscriberExportFormat(event.target.value as ReportExportFormat)} disabled={saving}><option value="csv">CSV</option><option value="excel">Excel (.xlsx)</option><option value="pdf">PDF</option></select>
+    <button className="outline-button" type="button" onClick={() => void exportSubscribers()} disabled={saving}><Download size={14} /> {saving ? 'Exporting…' : 'Export subscribers'}</button>
     <button className="outline-button" type="button" onClick={() => subscriberImportInput.current?.click()} disabled={saving || subscriberPlans.length === 0} title={subscriberPlansError || undefined}><Upload size={14} /> {saving ? 'Importing…' : 'Import CSV'}</button>
     <button className="primary-button" type="button" onClick={toggleSubscriberForm} disabled={saving}>{subscriberFormOpen ? 'Close form' : 'Add subscriber'}</button>
   </div> : <button className="primary-button" type="button" onClick={() => void create()} disabled={saving}>{saving ? 'Saving...' : 'Add record'}</button>}</div>
     {entity === 'customers' && <div className="subscriber-info-card"><span className="subscriber-info-icon" aria-hidden="true">i</span><p><strong>Account access</strong> New subscribers start suspended for safety. Set an expiry date and choose <strong>Confirm activation</strong> before they can connect. You can suspend or renew accounts at any time.</p></div>}
-    {entity === 'customers' && <p className="subscriber-import-help">Import a CSV with Name, Email, Plan or Plan ID, RADIUS Username, and RADIUS Password columns. Exported CSVs leave passwords blank for your security; add a 12–128 character password to each row before importing. Imports are limited to 200 records at a time, and new accounts stay suspended.</p>}
+    {entity === 'customers' && <p className="subscriber-import-help">Import a CSV with Name, Email, Plan or Plan ID, RADIUS Username, and RADIUS Password columns. Location and Network Site are optional; site values can be a site name or ID. Account numbers are generated automatically. Exported CSVs leave passwords blank for your security; add a 12–128 character password to each row before importing. Imports are limited to 200 records at a time, and new accounts stay suspended.</p>}
     {entity === 'customers' && subscriberImportResult && subscriberImportResult.failedCount > 0 && <div className="subscriber-import-report" role="status"><strong>Import row results</strong><ul>{subscriberImportResult.failures.map((failure) => <li key={`${failure.row}-${failure.reason}`}>Row {failure.row}: {failure.reason}</li>)}</ul>{subscriberImportResult.failedCount > subscriberImportResult.failures.length && <small>Showing the first {subscriberImportResult.failures.length} of {subscriberImportResult.failedCount} failed rows.</small>}</div>}
     {entity === 'customers' ? (subscriberFormOpen ? <form className="subscriber-create-form panel" onSubmit={(event) => { event.preventDefault(); void create() }}>
       <div className="subscriber-form-heading"><div><span className="eyebrow">NEW SUBSCRIBER</span><h2>Create subscriber account</h2><p>Add the customer details and a unique login for your FreeRADIUS server.</p></div></div>
@@ -2309,7 +2568,10 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
         <label>Full name <span aria-hidden="true">*</span><input required maxLength={120} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Ama Mensah" /></label>
         <label>Email address <span aria-hidden="true">*</span><input required type="email" maxLength={254} autoComplete="email" value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="name@example.com" /></label>
         <label>Service plan <span aria-hidden="true">*</span><select required value={subscriberPlanId} onChange={(event) => setSubscriberPlanId(event.target.value)}><option value="">Select a plan</option>{subscriberPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} · {plan.type} · KSh {plan.monthlyPrice.toLocaleString('en-KE')}{plan.availability === 'hidden' ? ' · Hidden' : ''}</option>)}</select><small>{subscriberPlansError || (selectedSubscriberPlan ? `${selectedSubscriberPlan.type} plan · ${Math.ceil(selectedSubscriberPlan.durationSeconds / 86400)} day${Math.ceil(selectedSubscriberPlan.durationSeconds / 86400) === 1 ? '' : 's'}` : 'Choose the service plan this subscriber will use.')}</small></label>
-        <label>Phone number{selectedSubscriberPlan?.type === 'PPPoE' && <> <span aria-hidden="true">*</span></>}<input type="tel" required={selectedSubscriberPlan?.type === 'PPPoE'} autoComplete="tel" maxLength={32} value={subscriberPhone} onChange={(event) => setSubscriberPhone(event.target.value)} placeholder="e.g. 0712 345 678" /><small>Required for PPPoE so an account number can be assigned.</small></label>
+        <label>Phone number{selectedSubscriberPlan?.type === 'PPPoE' && <> <span aria-hidden="true">*</span></>}<input type="tel" required={selectedSubscriberPlan?.type === 'PPPoE'} autoComplete="tel" maxLength={32} value={subscriberPhone} onChange={(event) => setSubscriberPhone(event.target.value)} placeholder="e.g. 0712 345 678" /><small>Required for PPPoE account setup.</small></label>
+        <label>Physical location<input maxLength={240} autoComplete="street-address" value={subscriberLocation} onChange={(event) => setSubscriberLocation(event.target.value)} placeholder="e.g. Eastlands, Nairobi" /><small>Customer address or area; separate from the network site.</small></label>
+        <label>Network site<select value={subscriberSiteId} onChange={(event) => setSubscriberSiteId(event.target.value)}><option value="">No site assigned</option>{subscriberSites.map((site) => <option key={site.id} value={site.id}>{site.name}{site.location ? ` · ${site.location}` : ''}</option>)}</select><small>{subscriberSitesError || (subscriberSites.length ? 'Select the network site serving this subscriber.' : 'No network sites are configured yet; you can assign one later.')}</small></label>
+        <label className="subscriber-account-number-field">Account number<div className="subscriber-account-number-preview">Generated automatically for every subscriber</div><small>A unique account number is assigned when the subscriber is created.</small></label>
         <label>RADIUS username <span aria-hidden="true">*</span><input required minLength={3} maxLength={64} pattern="[A-Za-z0-9._@-]{3,64}" autoComplete="username" value={radiusUsername} onChange={(event) => setRadiusUsername(event.target.value)} placeholder="3–64 letters, numbers, . _ @ -" /><small>Must be unique across all workspaces on this RADIUS server.</small></label>
         <label>RADIUS password <span aria-hidden="true">*</span><div className="subscriber-password-field"><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={radiusPassword} onChange={(event) => setRadiusPassword(event.target.value)} placeholder="At least 12 characters" /><button type="button" className="password-visibility-button" onClick={() => setShowRadiusPassword((visible) => !visible)} aria-label={showRadiusPassword ? 'Hide RADIUS password' : 'Show RADIUS password'}>{showRadiusPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>Use 12–128 characters. The password is provisioned to RADIUS.</small></label>
         <label className="subscriber-confirm-field">Confirm RADIUS password <span aria-hidden="true">*</span><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={confirmRadiusPassword} onChange={(event) => setConfirmRadiusPassword(event.target.value)} placeholder="Re-enter the password" /></label>
@@ -2318,21 +2580,23 @@ function CrudPanel({ entity, initialFilter = '' }: { entity: 'sites' | 'customer
       <div className="subscriber-form-footer"><span><strong>*</strong> Required fields</span><button className="primary-button" type="submit" disabled={saving || subscriberPlans.length === 0}>{saving ? 'Creating subscriber…' : 'Create subscriber account'}</button></div>
     </form> : null) : <div className="crud-form"><input value={name} onChange={(event) => setName(event.target.value)} placeholder={entity === 'payments' ? 'Amount or payment label' : `${labels[entity]} name`} aria-label="Record name" /><input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder={entity === 'sites' ? 'Location' : 'Method or detail'} aria-label="Record detail" /><button className="outline-button" onClick={() => void create()} disabled={saving}>Create</button>{message && <span className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</span>}</div>}
     {entity === 'customers' && !subscriberFormOpen && message && <p className={`subscriber-flash-message ${messageIsError ? 'is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}
-    <div className="panel crud-table"><div className="panel-heading"><div><h3>{entity === 'customers' ? 'Subscriber accounts' : 'Records'}</h3><span>{recordFilter ? `${filteredRows.length} matching · ${rows.length} total` : `${rows.length} loaded from Supabase`}</span></div><input className="record-filter" value={recordFilter} onChange={(event) => setRecordFilter(event.target.value)} placeholder={`Filter ${labels[entity].toLowerCase()}...`} aria-label={`Filter ${labels[entity].toLowerCase()}`} /><button className="text-button" onClick={() => { void load().catch((reason) => setMessage(reason instanceof Error ? reason.message : 'Unable to refresh records.')) }}>Refresh</button></div>{message && entity !== 'customers' && <p className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}<div className="table-scroll"><table><thead><tr>{entity === 'customers' ? <><th>Subscriber</th><th>PPPoE / Wi-Fi login</th><th>Plan</th><th>Account status</th><th>Expires</th><th>Actions</th></> : <><th>Name / ID</th><th>Status</th><th>Details</th><th /></>}</tr></thead><tbody>{filteredRows.map((row) => {
+    <div className="panel crud-table"><div className="panel-heading"><div><h3>{entity === 'customers' ? 'Subscriber accounts' : 'Records'}</h3><span>{recordFilter || subscriberTypeFilter !== 'All' || subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberCreatedFrom || subscriberCreatedTo ? `${filteredRows.length} matching · ${rows.length} total` : `${rows.length} loaded from Supabase`}</span></div><div className="crud-table-tools">{entity === 'customers' && <div className="subscriber-type-filters" role="group" aria-label="Filter subscribers by connection type">{(['All', 'Hotspot', 'PPPoE', 'Bindings'] as const).map((filter) => <button key={filter} type="button" aria-pressed={subscriberTypeFilter === filter} className={subscriberTypeFilter === filter ? 'active' : ''} onClick={() => setSubscriberTypeFilter(filter)}>{filter}<span>{subscriberTypeCounts[filter]}</span></button>)}</div>}{entity === 'customers' && <div className="subscriber-filter-control"><button className={`outline-button subscriber-filter-trigger${subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberCreatedFrom || subscriberCreatedTo ? ' has-filters' : ''}`} type="button" aria-haspopup="dialog" aria-expanded={subscriberFilterMenuOpen} onClick={() => { setSubscriberSortMenuOpen(false); setSubscriberFilterMenuOpen((open) => !open) }}><SlidersHorizontal size={15} />Filters{Boolean(subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberCreatedFrom || subscriberCreatedTo) && <span>{subscriberAdvancedFilters.length + Number(Boolean(subscriberRouterFilter)) + Number(Boolean(subscriberCreatedFrom || subscriberCreatedTo))}</span>}</button>{subscriberFilterMenuOpen && <section className="subscriber-filter-menu" role="dialog" aria-label="Subscriber filters"><div className="subscriber-filter-menu-heading"><h4>Filters</h4><button type="button" onClick={() => { setSubscriberAdvancedFilters([]); setSubscriberRouterFilter(''); setSubscriberCreatedFrom(''); setSubscriberCreatedTo('') }}>Reset</button></div><p>Select one or more — all chosen filters must match.</p><div className="subscriber-filter-chips">{subscriberAdvancedFilterOptions.map((option) => <button key={option.value} type="button" aria-pressed={subscriberAdvancedFilters.includes(option.value)} className={subscriberAdvancedFilters.includes(option.value) ? 'selected' : ''} onClick={() => setSubscriberAdvancedFilters((current) => current.includes(option.value) ? current.filter((filter) => filter !== option.value) : [...current, option.value])}>{option.label}</button>)}</div><label className="subscriber-filter-field">MikroTik / Router<select value={subscriberRouterFilter} onChange={(event) => setSubscriberRouterFilter(event.target.value)}><option value="">All routers</option>{subscriberRouterOptions.map((router) => <option key={router} value={router}>{router}</option>)}</select></label><fieldset className="subscriber-filter-date-range"><legend>Created between</legend><label><span>From</span><input type="date" aria-label="Created from date" value={subscriberCreatedFrom} max={subscriberCreatedTo || undefined} onChange={(event) => setSubscriberCreatedFrom(event.target.value)} /></label><label><span>To</span><input type="date" aria-label="Created to date" value={subscriberCreatedTo} min={subscriberCreatedFrom || undefined} onChange={(event) => setSubscriberCreatedTo(event.target.value)} /></label></fieldset></section>}</div>}{entity === 'customers' && <div className="subscriber-sort-control"><button className="outline-button subscriber-sort-trigger" type="button" aria-haspopup="menu" aria-expanded={subscriberSortMenuOpen} onClick={() => { setSubscriberFilterMenuOpen(false); setSubscriberSortMenuOpen((open) => !open) }}><ArrowUpDown size={15} /> Sort: {subscriberSortOptions.find((option) => option.value === subscriberSort)?.label}</button>{subscriberSortMenuOpen && <div className="subscriber-sort-menu" role="menu" aria-label="Sort subscribers">{subscriberSortOptions.map((option) => <button key={option.value} type="button" role="menuitemradio" aria-checked={subscriberSort === option.value} className={subscriberSort === option.value ? 'selected' : ''} onClick={() => { setSubscriberSort(option.value); setSubscriberSortMenuOpen(false) }}>{subscriberSort === option.value && <Check size={14} />}{option.label}</button>)}</div>}</div>}<input className="record-filter" value={recordFilter} onChange={(event) => setRecordFilter(event.target.value)} placeholder={`Filter ${labels[entity].toLowerCase()}...`} aria-label={`Filter ${labels[entity].toLowerCase()}`} /><button className="text-button" onClick={() => { void load().catch((reason) => setMessage(reason instanceof Error ? reason.message : 'Unable to refresh records.')) }}>Refresh</button></div></div>{message && entity !== 'customers' && <p className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}<div className="table-scroll"><table><thead><tr>{entity === 'customers' ? <><th>Subscriber</th><th>PPPoE / Wi-Fi login</th><th>Plan</th><th>Account status</th><th>Expires</th><th>Actions</th></> : <><th>Name / ID</th><th>Status</th><th>Details</th><th /></>}</tr></thead><tbody>{filteredRows.map((row) => {
     const expiry = typeof row.expiresAt === 'string' ? new Date(row.expiresAt) : null
     const isExpired = Boolean(expiry && expiry.getTime() <= Date.now())
     const status = entity === 'customers' && row.status === 'active' && isExpired ? 'expired' : String(row.status || (row.active ? 'active' : 'inactive'))
     if (entity === 'customers') return <Fragment key={String(row.id)}><tr>
-      <td><strong>{String(row.name || 'Unnamed subscriber')}</strong><span>{String(row.email || 'No email address')}</span>{typeof row.phone === 'string' && row.phone.trim() ? <span>{row.phone}</span> : null}<small className="subscriber-created">Added {typeof row.createdAt === 'string' ? new Date(row.createdAt).toLocaleDateString() : 'date unavailable'}</small></td>
+      <td><strong>{String(row.name || 'Unnamed subscriber')}</strong>{row.isVip === true && <span className="subscriber-vip-badge">VIP</span>}<span>{String(row.email || 'No email address')}</span>{typeof row.phone === 'string' && row.phone.trim() ? <span>{row.phone}</span> : null}<span>Account no. {String(row.accountNumber || 'Unavailable')}</span>{typeof row.location === 'string' && row.location.trim() ? <span>{row.location}</span> : null}{typeof row.siteName === 'string' && row.siteName.trim() ? <span>Site: {row.siteName}</span> : null}<small className="subscriber-created">Added {typeof row.createdAt === 'string' ? new Date(row.createdAt).toLocaleDateString() : 'date unavailable'}</small></td>
       <td><strong className="subscriber-login">{String(row.radiusUsername || 'No login')}</strong><span>RADIUS username</span></td>
       <td><strong>{String(row.plan || 'No plan assigned')}</strong>{Number(row.monthlyRate) > 0 && <span>KSh {Number(row.monthlyRate).toLocaleString('en-KE')} / month</span>}</td>
       <td><span className={`subscriber-status subscriber-status-${status.replace(/[^a-z0-9-]/g, '-')}`}>{status === 'active' ? 'Active' : status === 'suspended' ? 'Suspended' : status === 'expired' ? 'Expired' : status}</span></td>
       <td>{expiry && Number.isFinite(expiry.getTime()) ? <><strong>{expiry.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span>{expiry.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit' })}</span></> : <span className="subscriber-no-expiry">No expiry set</span>}</td>
-      <td><div className="subscriber-actions">{row.radiusUsername ? <><button className="subscriber-details-toggle" type="button" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={() => void toggleSubscriberDetails(String(row.id))}>{detailsLoadingId === String(row.id) ? 'Loading…' : expandedDetailsId === String(row.id) ? 'Hide details' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={(event) => { subscriberDeleteTriggerRef.current = event.currentTarget; setSubscriberDeleteError(''); setSubscriberToDelete({ id: String(row.id), name: String(row.name || 'this subscriber') }) }}>Delete</button></> : <span>Login unavailable</span>}<button className="text-button" type="button" disabled={!row.phone || sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(smsSubscriberId === String(row.id) ? '' : String(row.id)); setSmsDraft(''); setMessage(''); setMessageIsError(false) }}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send SMS'}</button></div>{smsSubscriberId === String(row.id) && <div className="subscriber-sms-compose"><label htmlFor={`subscriber-sms-${String(row.id)}`}>Message to {String(row.name || 'subscriber')}</label><textarea id={`subscriber-sms-${String(row.id)}`} value={smsDraft} onChange={(event) => setSmsDraft(event.target.value)} maxLength={500} rows={3} placeholder="Type your message..." /><span>{smsDraft.length}/500 characters</span><div><button className="text-button" type="button" disabled={!smsDraft.trim() || sendingSmsId === String(row.id)} onClick={() => void sendSubscriberSms(String(row.id))}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send message'}</button><button className="text-button" type="button" disabled={sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(''); setSmsDraft('') }}>Cancel</button></div></div>}</td>
+      <td><div className="subscriber-actions">{row.radiusUsername ? <><button className="subscriber-details-toggle" type="button" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={() => void toggleSubscriberDetails(String(row.id))}>{detailsLoadingId === String(row.id) ? 'Loading…' : expandedDetailsId === String(row.id) ? 'Hide details' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={(event) => { subscriberDeleteTriggerRef.current = event.currentTarget; setSubscriberDeleteError(''); setSubscriberToDelete({ id: String(row.id), name: String(row.name || 'this subscriber') }) }}>Delete</button></> : <span>Login unavailable</span>}<button className="text-button subscriber-vip-action" type="button" aria-pressed={row.isVip === true} disabled={saving} onClick={() => void changeSubscriberVip(String(row.id), row.isVip !== true)}>{row.isVip === true ? 'Remove VIP' : 'Mark VIP'}</button><button className="text-button" type="button" disabled={!row.phone || sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(smsSubscriberId === String(row.id) ? '' : String(row.id)); setSmsDraft(''); setMessage(''); setMessageIsError(false) }}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send SMS'}</button></div>{smsSubscriberId === String(row.id) && <div className="subscriber-sms-compose"><label htmlFor={`subscriber-sms-${String(row.id)}`}>Message to {String(row.name || 'subscriber')}</label><textarea id={`subscriber-sms-${String(row.id)}`} value={smsDraft} onChange={(event) => setSmsDraft(event.target.value)} maxLength={500} rows={3} placeholder="Type your message..." /><span>{smsDraft.length}/500 characters</span><div><button className="text-button" type="button" disabled={!smsDraft.trim() || sendingSmsId === String(row.id)} onClick={() => void sendSubscriberSms(String(row.id))}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send message'}</button><button className="text-button" type="button" disabled={sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(''); setSmsDraft('') }}>Cancel</button></div></div>}</td>
     </tr>{expandedDetailsId === String(row.id) && <tr className="subscriber-detail-row"><td colSpan={6}>{detailsLoadingId === String(row.id) ? <p className="subscriber-detail-loading" role="status">Loading secure subscriber details…</p> : detailsError ? <p className="subscriber-form-message is-error" role="alert">{detailsError}</p> : subscriberDetails && String(subscriberDetails.id) === String(row.id) ?
       <SubscriberProfile
         data={subscriberDetails}
         onClose={() => { setExpandedDetailsId(''); setSubscriberDetails(null); setDetailsError(''); setShowSubscriberPassword(false) }}
+        onRefresh={() => refreshSubscriberDetails(String(row.id))}
+        onDelete={() => { subscriberDeleteTriggerRef.current = null; setSubscriberDeleteError(''); setSubscriberToDelete({ id: String(row.id), name: String(row.name || 'this subscriber') }) }}
         onCopy={(kind, value) => void copySubscriberCredential(kind, value)}
         copiedCredential={copiedCredential}
         showPassword={showSubscriberPassword}

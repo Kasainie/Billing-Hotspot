@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { PasswordRequirement, PasswordRequirements } from '@/components/password-requirements'
+import { BrandWordmark } from '@/components/brand-wordmark'
 import { getPasswordValidationErrors } from '@/lib/password-policy'
 
 export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
@@ -132,7 +133,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
     <main className="auth-shell">
       <section className="auth-card">
         <div className="auth-mark" aria-hidden="true">LK</div>
-        <p className="auth-kicker">LKTECH · ISP OPERATIONS</p>
+        <BrandWordmark primary="LKTECH" accent="· ISP OPERATIONS" className="auth-kicker" />
         <h1>{verificationPending ? 'Verify your email' : isSignup ? 'Create your account' : 'Welcome back'}</h1>
         <p className="auth-description">{verificationPending
           ? <>We sent a six-digit code to <strong>{verificationEmail}</strong>. Enter it below to finish creating your account.</>

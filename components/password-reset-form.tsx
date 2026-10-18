@@ -5,13 +5,14 @@ import type { ReactNode } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { PasswordRequirement, PasswordRequirements } from '@/components/password-requirements'
 import { getPasswordValidationErrors } from '@/lib/password-policy'
+import { BrandWordmark } from '@/components/brand-wordmark'
 
 function AuthCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
     <main className="auth-shell">
       <section className="auth-card">
         <div className="auth-mark" aria-hidden="true">R4</div>
-        <p className="auth-kicker">LKTECH · ISP OPERATIONS</p>
+        <BrandWordmark primary="LKTECH" accent="· ISP OPERATIONS" className="auth-kicker" />
         <h1>{title}</h1>
         <p className="auth-description">{description}</p>
         {children}

@@ -1,14 +1,22 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, CalendarDays, Clock3, Copy, CreditCard, Router, Wifi } from 'lucide-react'
-import { calculateSubscriberUsageRate, type SubscriberUsageCounters, type SubscriberUsageRate } from '@/lib/subscriber-usage'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Activity, CalendarDays, Clock3, Copy, CreditCard, Ellipsis, FileText, Gift, MessageCircle, Pause, Pencil, Router, Send, Ticket, Trash2, Wifi, X } from 'lucide-react'
+import {
+  calculateSubscriberUsageRate,
+  formatSubscriberSpeed,
+  subscriberUsageChartScale,
+  type SubscriberUsageCounters,
+  type SubscriberUsageRate,
+} from '@/lib/subscriber-usage'
+import { exportSubscriberUsagePdf } from '@/lib/report-export'
 
 export type SubscriberProfileData = {
   id: string
   name: string
   email: string
   phone: string | null
+  location: string | null
   radiusUsername: string | null
   radiusPassword: string | null
   status: string
@@ -17,8 +25,10 @@ export type SubscriberProfileData = {
   expiresAt: string | null
   createdAt: string
   accountNumber: string | null
+  accountSource: string
   siteId: string | null
   siteName: string | null
+  siteLocation: string | null
   planDetails: {
     type: string
     rateLimit: string
@@ -30,6 +40,9 @@ export type SubscriberProfileData = {
   billing: {
     lifetimeValue: number
     paidThisMonth: number
+    creditBalance: number
+    creditEntries: Array<{ id: string; type: string; amount: number; reason: string; createdAt: string }>
+    invoices: Array<{ id: string; invoiceNumber: string; amount: number; status: string; dueAt: string; createdAt: string; description: string }>
     payments: Array<{
       id: string
       amount: number
@@ -59,10 +72,15 @@ export type SubscriberProfileData = {
     bytesOut: string
     terminateCause: string | null
   }>
-  activity: Array<{ day: string; sessionCount: number }>
+  activity: Array<{ day: string; sessionCount: number; bytesIn: string; bytesOut: string }>
+  events: Array<{ id: string; eventType: string; description: string; metadata: Record<string, unknown>; createdAt: string }>
+  tickets: Array<{ id: string; subject: string; description: string; status: string; priority: string; createdAt: string; updatedAt: string }>
+  packageHistory: Array<{ id: string; productName: string; amount: number; status: string; receipt: string | null; createdAt: string; paidAt: string | null }>
   analytics: {
     paymentTrend: Array<{ month: string; amount: string; paymentCount: number }>
-    hourlyUsage: Array<{ hour: number; sessionCount: number }>
+    hourlyUsage: Array<{ hour: number; sessionCount: number; bytesIn: string; bytesOut: string }>
+    dailyUsage: Array<{ day: string; sessionCount: number; bytesIn: string; bytesOut: string }>
+    hourlyUsage24h: Array<{ hourAt: string | null; sessionCount: number; bytesIn: string; bytesOut: string }>
   }
 }
 
@@ -85,10 +103,11 @@ function formatBytes(value: string | number) {
 }
 
 function formatDuration(seconds: number | null) {
-  if (!seconds || seconds < 0) return '—'
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
+  const duration = Number(seconds)
+  if (seconds === null || !Number.isSafeInteger(duration) || duration < 0 || duration > 10 * 365 * 86400) return '—'
+  const days = Math.floor(duration / 86400)
+  const hours = Math.floor((duration % 86400) / 3600)
+  const minutes = Math.floor((duration % 3600) / 60)
   return [days ? `${days}d` : '', hours ? `${hours}h` : '', `${minutes}m`].filter(Boolean).join(' ')
 }
 
@@ -110,6 +129,7 @@ type SubscriberLiveData = {
     routerName: string | null
     nasIpAddress: string | null
     macAddress: string | null
+    callerId: string | null
     startedAt: string | null
     lastAccountingAt: string | null
     sessionSeconds: number | null
@@ -122,7 +142,7 @@ type SubscriberLiveData = {
 
 type SubscriberUsagePoint = { at: string; rate: SubscriberUsageRate | null }
 
-function SubscriberLiveReports({ subscriberId, data }: { subscriberId: string; data: SubscriberProfileData }) {
+function SubscriberLiveReports({ subscriberId, data, onLiveDataChange }: { subscriberId: string; data: SubscriberProfileData; onLiveDataChange: (data: SubscriberLiveData, rate?: SubscriberUsageRate | null) => void }) {
   const [liveData, setLiveData] = useState<SubscriberLiveData | null>(null)
   const [currentRate, setCurrentRate] = useState<SubscriberUsageRate | null>(null)
   const [points, setPoints] = useState<SubscriberUsagePoint[]>([])
@@ -175,6 +195,7 @@ function SubscriberLiveReports({ subscriberId, data }: { subscriberId: string; d
         }
         currentRateRef.current = rate
         setLiveData(result)
+        onLiveDataChange(result, rate)
         setCurrentRate(rate)
         setError('')
       } catch (reason) {
@@ -185,30 +206,46 @@ function SubscriberLiveReports({ subscriberId, data }: { subscriberId: string; d
     }
 
     void sample()
-    const timer = window.setInterval(() => void sample(), 1_000)
+    const timer = window.setInterval(() => void sample(), 5_000)
     return () => {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [subscriberId])
+  }, [onLiveDataChange, subscriberId])
 
-  const maxRate = Math.max(
-    data.planDetails?.downloadMbps || 0,
-    data.planDetails?.uploadMbps || 0,
+  const peakRate = Math.max(
+    currentRate?.downloadMbps || 0,
+    currentRate?.uploadMbps || 0,
     ...points.map(({ rate }) => Math.max(rate?.downloadMbps || 0, rate?.uploadMbps || 0)),
-    1,
   )
+  const maxRate = subscriberUsageChartScale(peakRate)
   const chartStart = points.length ? new Date(points[0].at).getTime() : 0
   const chartDuration = points.length > 1 ? new Date(points[points.length - 1].at).getTime() - chartStart : 0
   const chartPath = (direction: 'downloadMbps' | 'uploadMbps') => points.map(({ at, rate }, index) => {
     const x = chartDuration > 0
-      ? (new Date(at).getTime() - chartStart) / chartDuration * 1000
-      : points.length > 1 ? index / (points.length - 1) * 1000 : 0
+      ? 60 + (new Date(at).getTime() - chartStart) / chartDuration * 940
+      : points.length > 1 ? 60 + index / (points.length - 1) * 940 : 60
     const y = 145 - Math.min(1, (rate?.[direction] || 0) / maxRate) * 125
     return `${index ? 'L' : 'M'} ${x} ${y}`
   }).join(' ')
   const downloadRate = liveData?.source === 'router' ? currentRate?.downloadMbps : undefined
   const uploadRate = liveData?.source === 'router' ? currentRate?.uploadMbps : undefined
+  const formattedDownloadRate = downloadRate === undefined ? null : formatSubscriberSpeed(downloadRate)
+  const formattedUploadRate = uploadRate === undefined ? null : formatSubscriberSpeed(uploadRate)
+  const activeSessionSeconds = Math.max(0, ...((liveData?.activeSessions || []).map((session) => session.sessionSeconds || 0)))
+  const currentSessionDownload = liveData?.downloadBytes || '0'
+  const currentSessionUpload = liveData?.uploadBytes || '0'
+  const currentSessionTotal = BigInt(currentSessionDownload) + BigInt(currentSessionUpload)
+  const reportMonth = new Date().toISOString().slice(0, 7)
+  const monthEntries = data.analytics.dailyUsage.filter((entry) => entry.day.startsWith(reportMonth))
+  const monthTraffic = monthEntries.reduce((total, entry) =>
+    total + BigInt(entry.bytesIn || '0') + BigInt(entry.bytesOut || '0'), BigInt(0))
+  const connectionType = data.planDetails?.type || (data.accountNumber ? 'PPPoE' : 'Service')
+  const planLimit = data.planDetails
+    ? data.planDetails.downloadMbps > 0 || data.planDetails.uploadMbps > 0
+      ? `${data.planDetails.downloadMbps}/${data.planDetails.uploadMbps} Mbps`
+      : data.planDetails.rateLimit || 'Unavailable'
+    : 'Not assigned'
   const liveSourceLabel = liveData?.source === 'router'
     ? liveData.liveIssue === 'byte-counters-unavailable' ? 'Counters unavailable' : 'Router live'
     : liveData?.connector.state === 'online'
@@ -239,7 +276,7 @@ function SubscriberLiveReports({ subscriberId, data }: { subscriberId: string; d
       <div className="subscriber-live-reports-heading">
         <div>
           <h4><Activity size={16} /> Live subscriber usage</h4>
-          <p>Page checks every second; router counters are sampled about every 5 seconds.</p>
+          <p>Router counters are checked every 5 seconds while this report is open.</p>
         </div>
         <span className={`subscriber-live-indicator ${liveData?.connector.state === 'online' ? 'is-live' : ''}`}>
           <i />{liveSourceLabel}
@@ -248,13 +285,27 @@ function SubscriberLiveReports({ subscriberId, data }: { subscriberId: string; d
       {error && <p className="subscriber-live-error" role="alert">{error}</p>}
       {liveHelp && <p className="subscriber-live-status-note">{liveHelp}</p>}
       <div className="subscriber-live-stats">
-        <article><span>DOWNLOAD SPEED</span><strong>{downloadRate === undefined ? '—' : downloadRate.toFixed(2)} <small>Mbps</small></strong><p>{liveData?.downloadBytes ? `${formatBytes(liveData.downloadBytes)} total in active sessions` : 'Router byte counters unavailable'}</p></article>
-        <article><span>UPLOAD SPEED</span><strong>{uploadRate === undefined ? '—' : uploadRate.toFixed(2)} <small>Mbps</small></strong><p>{liveData?.uploadBytes ? `${formatBytes(liveData.uploadBytes)} total in active sessions` : 'Router byte counters unavailable'}</p></article>
+        <article><span>DOWNLOAD SPEED</span><strong>{formattedDownloadRate ? <>{formattedDownloadRate.value} <small>{formattedDownloadRate.unit}</small></> : '—'}</strong><p>{liveData?.downloadBytes ? `${formatBytes(liveData.downloadBytes)} total in active sessions` : 'Router byte counters unavailable'}</p></article>
+        <article><span>UPLOAD SPEED</span><strong>{formattedUploadRate ? <>{formattedUploadRate.value} <small>{formattedUploadRate.unit}</small></> : '—'}</strong><p>{liveData?.uploadBytes ? `${formatBytes(liveData.uploadBytes)} total in active sessions` : 'Router byte counters unavailable'}</p></article>
+      </div>
+      <div className="subscriber-live-session-summary">
+        <article><span>SESSION UP</span><strong>{liveData?.activeSessions.length ? formatDuration(activeSessionSeconds) : 'Offline'}</strong><small>{liveData?.activeSessions[0]?.startedAt ? `Since ${formatDate(liveData.activeSessions[0].startedAt)}` : 'Current connection'}</small></article>
+        <article><span>THIS SESSION</span><strong>{liveData?.downloadBytes !== null && liveData?.uploadBytes !== null && liveData ? formatBytes(currentSessionTotal.toString()) : '—'}</strong><small>↓ {formatBytes(currentSessionDownload)} · ↑ {formatBytes(currentSessionUpload)}</small></article>
+        <article><span>SESSIONS STARTED THIS MONTH</span><strong>{formatBytes(monthTraffic.toString())}</strong><small>Cumulative RADIUS session counters</small></article>
+        <article><span>CONNECTION</span><strong>{connectionType}</strong><small>{liveData?.activeSessions[0]?.ipAddress || 'No active IP'}</small></article>
+        <article><span>DEVICE · NETWORK</span><strong>{liveData?.activeSessions[0]?.macAddress || liveData?.activeSessions[0]?.callerId || (liveData?.activeSessions.length ? 'Device ID not reported' : 'No active device')}</strong><small>{liveData?.activeSessions[0]?.routerName || liveData?.activeSessions[0]?.nasIpAddress || data.siteName || 'Router not reported'}</small></article>
       </div>
       <div className="subscriber-live-chart" role="img" aria-label="Router-measured subscriber download and upload rates over recent samples">
-        <div className="subscriber-live-chart-scale"><span>Scale: 0–{maxRate.toFixed(maxRate < 10 ? 1 : 0)} Mbps</span><span>{points.length} router samples</span></div>
+        <div className="subscriber-live-chart-scale"><span>Auto scale: 0–{formatSubscriberSpeed(maxRate).value} {formatSubscriberSpeed(maxRate).unit}</span><span>{points.length} router samples</span></div>
         <svg viewBox="0 0 1000 160" preserveAspectRatio="none" aria-hidden="true">
-          {[20, 62, 103, 145].map((y) => <line key={y} x1="0" x2="1000" y1={y} y2={y} />)}
+          {[20, 62, 103, 145].map((y, index) => {
+            const rate = maxRate * (3 - index) / 3
+            const formattedRate = formatSubscriberSpeed(rate)
+            return <g key={y}>
+              <line x1="58" x2="1000" y1={y} y2={y} />
+              <text className="subscriber-live-chart-axis-label" x="2" y={y + 3}>{formattedRate.value}</text>
+            </g>
+          })}
           {points.length > 1 && <>
             <path className="subscriber-live-download-line" d={chartPath('downloadMbps')} />
             <path className="subscriber-live-upload-line" d={chartPath('uploadMbps')} />
@@ -262,15 +313,15 @@ function SubscriberLiveReports({ subscriberId, data }: { subscriberId: string; d
         </svg>
         {points.length < 2 && <p>{liveData?.source === 'router' ? 'Waiting for a second router sample to calculate speed…' : liveHelp}</p>}
       </div>
-      <div className="subscriber-live-legend"><span className="download">Download</span><span className="upload">Upload</span><span>Plan limit: {data.planDetails ? `${data.planDetails.downloadMbps}/${data.planDetails.uploadMbps} Mbps` : 'Not assigned'}</span></div>
+      <div className="subscriber-live-legend"><span className="download">Download</span><span className="upload">Upload</span><span>Plan limit: {planLimit}</span></div>
       {points.length > 1 && <div className="subscriber-live-time-axis"><span>{formatDate(points[0].at, { timeStyle: 'short' })}</span><span>Most recent: {formatDate(points[points.length - 1].at, { timeStyle: 'short' })}</span></div>}
       <div className="subscriber-live-footnote">
         <span>{liveData?.source === 'router' ? 'Router sample' : 'Last RADIUS accounting update'}: {liveData?.observedAt ? formatDate(liveData.observedAt) : 'Not received yet'}</span>
-        <span>Page checked: {liveData ? formatDate(liveData.checkedAt, { timeStyle: 'medium' }) : 'Loading…'}</span>
+        <span>Live check: {liveData ? formatDate(liveData.checkedAt, { timeStyle: 'medium' }) : 'Loading…'} · analytics refresh every 30s</span>
       </div>
       {liveData?.activeSessions.length ? <div className="subscriber-profile-table-scroll">
         <table><thead><tr><th>STARTED</th><th>IP ADDRESS</th><th>DEVICE</th><th>SESSION TIME</th><th>DOWNLOAD</th><th>UPLOAD</th><th>ROUTER</th></tr></thead><tbody>
-          {liveData.activeSessions.map((session) => <tr key={session.id}><td>{formatDate(session.startedAt)}</td><td>{session.ipAddress || '—'}</td><td>{session.macAddress || '—'}</td><td>{formatDuration(session.sessionSeconds)}</td><td>{session.downloadBytes ? formatBytes(session.downloadBytes) : '—'}</td><td>{session.uploadBytes ? formatBytes(session.uploadBytes) : '—'}</td><td>{session.routerName || session.nasIpAddress || '—'}</td></tr>)}
+          {liveData.activeSessions.map((session) => <tr key={session.id}><td>{formatDate(session.startedAt)}</td><td>{session.ipAddress || '—'}</td><td>{session.macAddress || session.callerId || 'Not reported'}</td><td>{formatDuration(session.sessionSeconds)}</td><td>{session.downloadBytes ? formatBytes(session.downloadBytes) : '—'}</td><td>{session.uploadBytes ? formatBytes(session.uploadBytes) : '—'}</td><td>{session.routerName || session.nasIpAddress || '—'}</td></tr>)}
         </tbody></table>
       </div> : null}
     </section>
@@ -300,40 +351,71 @@ function SubscriberHistoricalReports({ data }: { data: SubscriberProfileData }) 
     .filter((payment) => payment.status === 'paid')
     .sort((left, right) => right.paidAt.localeCompare(left.paidAt))[0]
 
-  const monthStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)
-  const daysInMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)).getUTCDate()
-  const startsByDay = new Map(data.activity.map((entry) => [entry.day, entry.sessionCount]))
-  const usageDays = Array.from({ length: daysInMonth }, (_, index) => {
-    const date = new Date(monthStart + index * 86400000)
+  const monthKey = today.toISOString().slice(0, 7)
+  const dailyUsageByDay = new Map(data.analytics.dailyUsage.map((entry) => [entry.day, entry]))
+  const usageDays = Array.from({ length: 30 }, (_, index) => {
+    const date = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()) - (29 - index) * 86400000)
     const day = date.toISOString().slice(0, 10)
-    const sessionStarts = startsByDay.get(day) || 0
-    return { day, date: date.getUTCDate(), sessionStarts }
+    const entry = dailyUsageByDay.get(day)
+    return {
+      day,
+      date: date.getUTCDate(),
+      sessionStarts: entry?.sessionCount || 0,
+      bytesIn: entry?.bytesIn || '0',
+      bytesOut: entry?.bytesOut || '0',
+    }
   })
-  const monthSessionStarts = usageDays.reduce((sum, day) => sum + day.sessionStarts, 0)
-  const activeUsageDays = usageDays.filter((day) => day.sessionStarts > 0)
-  const peakDay = [...activeUsageDays].sort((left, right) => right.sessionStarts - left.sessionStarts)[0]
-  const averageDailySessions = activeUsageDays.length
-    ? monthSessionStarts / activeUsageDays.length
-    : 0
-  const maxDailySessions = Math.max(...usageDays.map((day) => day.sessionStarts), 1)
-
+  const monthActivity = data.analytics.dailyUsage.filter((entry) => entry.day.startsWith(monthKey))
+  const monthSessionStarts = monthActivity.reduce((sum, day) => sum + day.sessionCount, 0)
+  const monthBytesIn = monthActivity.reduce((sum, day) => sum + BigInt(day.bytesIn || '0'), BigInt(0))
+  const monthBytesOut = monthActivity.reduce((sum, day) => sum + BigInt(day.bytesOut || '0'), BigInt(0))
+  const monthBytes = monthBytesIn + monthBytesOut
+  const monthActiveDays = monthActivity.filter((day) => day.sessionCount > 0).length
+  const recentBytes = usageDays.reduce((sum, day) =>
+    sum + BigInt(day.bytesIn || '0') + BigInt(day.bytesOut || '0'), BigInt(0))
+  const currentHour = new Date()
+  currentHour.setUTCMinutes(0, 0, 0)
+  const recentHourMap = new Map(data.analytics.hourlyUsage24h
+    .filter((entry) => entry.hourAt)
+    .map((entry) => [new Date(entry.hourAt!).toISOString().slice(0, 13), entry]))
+  const recentHours = Array.from({ length: 24 }, (_, index) => {
+    const date = new Date(currentHour.getTime() - (23 - index) * 3_600_000)
+    const key = date.toISOString().slice(0, 13)
+    const entry = recentHourMap.get(key)
+    return {
+      key,
+      label: date.toLocaleTimeString('en-KE', { hour: '2-digit', hour12: false, timeZone: 'UTC' }),
+      sessionCount: entry?.sessionCount || 0,
+      bytesIn: entry?.bytesIn || '0',
+      bytesOut: entry?.bytesOut || '0',
+    }
+  })
+  const maxRecentHourBytes = Math.max(...recentHours.map((hour) =>
+    Number(BigInt(hour.bytesIn) + BigInt(hour.bytesOut))), 1)
+  const recent24hBytes = recentHours.reduce((total, hour) =>
+    total + BigInt(hour.bytesIn) + BigInt(hour.bytesOut), BigInt(0))
   const usageByHour = new Map(data.analytics.hourlyUsage.map((entry) => [entry.hour, entry]))
   const hours = Array.from({ length: 24 }, (_, hour) => {
     const entry = usageByHour.get(hour)
     return {
       hour,
       sessionCount: entry?.sessionCount || 0,
+      bytesIn: entry?.bytesIn || '0',
+      bytesOut: entry?.bytesOut || '0',
+      bytes: BigInt(entry?.bytesIn || '0') + BigInt(entry?.bytesOut || '0'),
     }
   })
-  const peakHour = [...hours].sort((left, right) => right.sessionCount - left.sessionCount)[0]
-  const totalHourlySessions = hours.reduce((sum, hour) => sum + hour.sessionCount, 0)
-  const eveningSessions = hours.filter((hour) => hour.hour >= 17).reduce((sum, hour) => sum + hour.sessionCount, 0)
-  const eveningShare = totalHourlySessions > 0 ? Math.round(eveningSessions / totalHourlySessions * 100) : 0
-  const maxHourlySessions = Math.max(...hours.map((hour) => hour.sessionCount), 1)
-  const peakPeriod = peakHour?.sessionCount
+  const peakHour = [...hours].sort((left, right) => left.bytes === right.bytes
+    ? right.sessionCount - left.sessionCount
+    : left.bytes < right.bytes ? 1 : -1)[0]
+  const totalHourlyBytes = hours.reduce((sum, hour) => sum + hour.bytes, BigInt(0))
+  const eveningBytes = hours.filter((hour) => hour.hour >= 17).reduce((sum, hour) => sum + hour.bytes, BigInt(0))
+  const eveningShare = totalHourlyBytes > BigInt(0) ? Number(eveningBytes * BigInt(100) / totalHourlyBytes) : 0
+  const maxHourlyBytes = Math.max(...hours.map((hour) => Number(hour.bytes)), 1)
+  const peakPeriod = peakHour?.bytes > BigInt(0)
     ? peakHour.hour < 12 ? 'Morning' : peakHour.hour < 17 ? 'Afternoon' : 'Evening'
     : 'Not enough data'
-
+  const maxDailyBytes = Math.max(...usageDays.map((day) => Number(BigInt(day.bytesIn || '0') + BigInt(day.bytesOut || '0'))), 1)
   return (
     <div className="subscriber-analytics-grid">
       <section className="subscriber-profile-panel subscriber-analytics-card">
@@ -353,39 +435,72 @@ function SubscriberHistoricalReports({ data }: { data: SubscriberProfileData }) 
       </section>
 
       <section className="subscriber-profile-panel subscriber-analytics-card">
-        <div className="subscriber-analytics-heading"><div><h4><Activity size={16} /> Daily connections</h4><p>RADIUS sessions started each day this month</p></div></div>
-        <div className="subscriber-analytics-chart subscriber-data-chart" role="img" aria-label="Daily RADIUS session starts this month">
-          {usageDays.map((day) => <div className="subscriber-data-column" key={day.day} title={`${day.day}: ${day.sessionStarts} session starts`}>
-            <span className="session-start-bar" style={{ height: `${day.sessionStarts / maxDailySessions * 100}%` }} />
-            {(day.date === 1 || day.date === daysInMonth || day.date % 5 === 0) && <small>{day.date}</small>}
-          </div>)}
+        <div className="subscriber-analytics-heading"><div><h4><Activity size={16} /> Data usage · last 30 days</h4><p>RADIUS data recorded for sessions started each day · updates with accounting</p></div></div>
+        <div className="subscriber-analytics-chart subscriber-data-chart" role="img" aria-label="Daily subscriber download and upload bytes recorded over the last 30 days">
+          {usageDays.map((day, index) => {
+            const bytesIn = Number(day.bytesIn)
+            const bytesOut = Number(day.bytesOut)
+            const total = bytesIn + bytesOut
+            return <div className="subscriber-data-column" key={day.day} title={`${day.day}: ${formatBytes(total)} total · ${day.sessionStarts} sessions`}>
+              <span className="download-bar" style={{ height: `${bytesIn ? Math.max(1, bytesIn / maxDailyBytes * 100) : 0}%` }} />
+              <span className="upload-bar" style={{ height: `${bytesOut ? Math.max(1, bytesOut / maxDailyBytes * 100) : 0}%` }} />
+              {(index === 0 || index === usageDays.length - 1 || day.date % 5 === 0) && <small>{day.date}</small>}
+            </div>
+          })}
         </div>
+        <div className="subscriber-analytics-legend"><span className="download">Download</span><span className="upload">Upload</span></div>
         <div className="subscriber-analytics-summary">
-          <div><span>STARTED THIS MONTH</span><strong>{monthSessionStarts}</strong></div>
-          <div><span>BUSIEST DAY</span><strong>{peakDay ? `${peakDay.date} · ${peakDay.sessionStarts}` : '—'}</strong></div>
-          <div><span>AVG / ACTIVE DAY</span><strong>{averageDailySessions.toFixed(1)} sessions</strong></div>
-          <div><span>ALL-TIME SESSIONS</span><strong>{data.sessionSummary.sessionCount.toLocaleString('en-KE')}</strong></div>
+          <div><span>THIS MONTH</span><strong>{formatBytes(monthBytes.toString())}</strong></div>
+          <div><span>LAST 30 DAYS</span><strong>{formatBytes(recentBytes.toString())}</strong></div>
+          <div><span>AVG / ACTIVE DAY</span><strong>{formatBytes(monthActiveDays ? (monthBytes / BigInt(monthActiveDays)).toString() : '0')}</strong></div>
+          <div><span>SESSIONS THIS MONTH</span><strong>{monthSessionStarts.toLocaleString('en-KE')}</strong></div>
         </div>
       </section>
 
       <section className="subscriber-profile-panel subscriber-analytics-card subscriber-peak-usage">
-        <div className="subscriber-analytics-heading">
-          <div><h4><Clock3 size={16} /> Connection start times</h4><p>RADIUS sessions started during each hour · last 30 days</p></div>
-          <span className="subscriber-peak-scale">Fewer starts → more starts</span>
+        <div className="subscriber-analytics-heading"><div><h4><Activity size={16} /> Last 24 hours</h4><p>RADIUS traffic grouped by session start hour · refreshed every 30 seconds</p></div></div>
+        <div className="subscriber-analytics-chart subscriber-data-chart subscriber-24h-chart" role="img" aria-label="RADIUS data for sessions started in each of the last 24 hours">
+          {recentHours.map((hour, index) => {
+            const bytesIn = Number(hour.bytesIn)
+            const bytesOut = Number(hour.bytesOut)
+            const total = bytesIn + bytesOut
+            return <div className="subscriber-data-column" key={hour.key} title={`${hour.label}:00 UTC · ${formatBytes(total)} across ${hour.sessionCount} session${hour.sessionCount === 1 ? '' : 's'}`}>
+              <span className="download-bar" style={{ height: `${bytesIn ? Math.max(1, bytesIn / maxRecentHourBytes * 100) : 0}%` }} />
+              <span className="upload-bar" style={{ height: `${bytesOut ? Math.max(1, bytesOut / maxRecentHourBytes * 100) : 0}%` }} />
+              {(index % 4 === 0 || index === recentHours.length - 1) && <small>{hour.label}</small>}
+            </div>
+          })}
         </div>
-        <div className="subscriber-hour-chart" role="img" aria-label="RADIUS session starts by hour over the last 30 days">
-          {hours.map((hour) => <div key={hour.hour} className="subscriber-hour-column" title={`${String(hour.hour).padStart(2, '0')}:00: ${hour.sessionCount} session starts`}>
-            <span className={hour.sessionCount > 0 ? 'has-value' : ''} style={{ height: `${hour.sessionCount / maxHourlySessions * 100}%` }} />
+        <div className="subscriber-analytics-legend"><span className="download">Download</span><span className="upload">Upload</span></div>
+        <div className="subscriber-analytics-summary">
+          <div><span>RECORDED TRAFFIC</span><strong>{formatBytes(recent24hBytes.toString())}</strong></div>
+          <div><span>SESSION STARTS</span><strong>{recentHours.reduce((sum, hour) => sum + hour.sessionCount, 0)}</strong></div>
+          <div><span>ACTIVE HOURS</span><strong>{recentHours.filter((hour) => hour.sessionCount > 0).length} / 24</strong></div>
+          <div><span>WINDOW</span><strong>24 hours</strong></div>
+        </div>
+        <small className="subscriber-analytics-note">RADIUS stores cumulative session counters. The chart attributes each session’s recorded totals to its start hour; it is not a per-hour packet capture.</small>
+      </section>
+
+      <section className="subscriber-profile-panel subscriber-analytics-card subscriber-peak-usage">
+        <div className="subscriber-analytics-heading">
+          <div><h4><Clock3 size={16} /> Peak usage hours</h4><p>Traffic from sessions started during each hour · last 30 days</p></div>
+          <span className="subscriber-peak-scale">Less traffic → more traffic</span>
+        </div>
+        <div className="subscriber-hour-chart" role="img" aria-label="Subscriber traffic grouped by session start hour over the last 30 days">
+          {hours.map((hour) => <div key={hour.hour} className="subscriber-hour-column" title={`${String(hour.hour).padStart(2, '0')}:00: ${formatBytes(hour.bytes.toString())} across ${hour.sessionCount} sessions`}>
+            <span className={hour.bytesIn !== '0' ? 'has-value' : ''} style={{ height: `${Number(hour.bytesIn) / maxHourlyBytes * 100}%` }} />
+            <span className="upload-bar" style={{ height: `${Number(hour.bytesOut) / maxHourlyBytes * 100}%` }} />
             {(hour.hour % 6 === 0 || hour.hour === 23) && <small>{String(hour.hour).padStart(2, '0')}</small>}
           </div>)}
         </div>
+        <div className="subscriber-analytics-legend"><span className="download">Download</span><span className="upload">Upload</span></div>
         <div className="subscriber-analytics-summary subscriber-peak-summary">
-          <div><span>PEAK HOUR</span><strong>{peakHour?.sessionCount ? `${String(peakHour.hour).padStart(2, '0')}:00 – ${String((peakHour.hour + 1) % 24).padStart(2, '0')}:00` : '—'}</strong></div>
-          <div><span>SESSIONS (30 DAYS)</span><strong>{totalHourlySessions}</strong></div>
+          <div><span>PEAK HOUR</span><strong>{peakHour?.bytes ? `${String(peakHour.hour).padStart(2, '0')}:00 – ${String((peakHour.hour + 1) % 24).padStart(2, '0')}:00` : '—'}</strong></div>
+          <div><span>TRAFFIC (30 DAYS)</span><strong>{formatBytes(totalHourlyBytes.toString())}</strong></div>
           <div><span>BUSIEST PERIOD</span><strong>{peakPeriod}</strong></div>
-          <div><span>STARTED AFTER 17:00</span><strong>{eveningShare}%</strong></div>
+          <div><span>AFTER 17:00</span><strong>{eveningShare}% of traffic</strong></div>
         </div>
-        <small className="subscriber-analytics-note">These charts count when sessions began; they do not represent data transferred or online time during each hour.</small>
+        <small className="subscriber-analytics-note">RADIUS stores cumulative counters per session, not per-hour samples. Traffic is attributed to each session’s start hour; these values refresh as router accounting updates arrive.</small>
       </section>
     </div>
   )
@@ -394,6 +509,8 @@ function SubscriberHistoricalReports({ data }: { data: SubscriberProfileData }) 
 export function SubscriberProfile({
   data,
   onClose,
+  onRefresh,
+  onDelete,
   onCopy,
   copiedCredential,
   showPassword,
@@ -401,36 +518,361 @@ export function SubscriberProfile({
 }: {
   data: SubscriberProfileData
   onClose: () => void
+  onRefresh: () => Promise<void>
+  onDelete: () => void
   onCopy: (kind: 'username' | 'accountNumber' | 'password', value: string) => void
   copiedCredential: string
   showPassword: boolean
   onTogglePassword: () => void
 }) {
-  const [tab, setTab] = useState<'Overview' | 'Reports' | 'Sessions' | 'Payments'>('Overview')
-  const activityByDay = useMemo(() => new Map(data.activity.map((entry) => [entry.day, entry.sessionCount])), [data.activity])
+  const [tab, setTab] = useState<'Overview' | 'Reports' | 'Sessions' | 'Payments' | 'Package history' | 'SMS' | 'Tickets' | 'Notes'>('Overview')
+  const [liveData, setLiveData] = useState<SubscriberLiveData | null>(null)
+  const [liveRate, setLiveRate] = useState<SubscriberUsageRate | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [actionDialog, setActionDialog] = useState<'edit' | 'expiry' | 'sms' | 'credentials' | 'payment_details' | 'invoice' | 'compensate' | 'ticket' | null>(null)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [exportingReport, setExportingReport] = useState(false)
+  const [actionMessage, setActionMessage] = useState('')
+  const [actionError, setActionError] = useState(false)
+  const [profileName, setProfileName] = useState(data.name)
+  const [profileEmail, setProfileEmail] = useState(data.email)
+  const [profilePhone, setProfilePhone] = useState(data.phone || '')
+  const [expiryInput, setExpiryInput] = useState(() => {
+    const date = data.expiresAt ? new Date(data.expiresAt) : new Date()
+    if (!Number.isFinite(date.getTime())) return ''
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+    return local.toISOString().slice(0, 16)
+  })
+  const [smsMessage, setSmsMessage] = useState('')
+  const [compensationKind, setCompensationKind] = useState<'days' | 'credit'>('days')
+  const [compensationAmount, setCompensationAmount] = useState('1')
+  const [actionReason, setActionReason] = useState('')
+  const [invoiceDueAt, setInvoiceDueAt] = useState(() => {
+    const due = new Date(Date.now() + 14 * 86_400_000)
+    return `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`
+  })
+  const [ticketSubject, setTicketSubject] = useState('')
+  const [ticketDescription, setTicketDescription] = useState('')
+  const [ticketPriority, setTicketPriority] = useState('normal')
+  const [clockNow, setClockNow] = useState(Date.now())
+  const [lastLiveCheck, setLastLiveCheck] = useState('')
+  const [lastDetailsCheck, setLastDetailsCheck] = useState(() => new Date().toISOString())
+  const [detailsRefreshError, setDetailsRefreshError] = useState('')
+  const detailsRefreshInFlight = useRef(false)
+  const actionDialogRef = useRef<HTMLDivElement>(null)
+  const activityByDay = useMemo(() => new Map(data.activity.map((entry) => [entry.day, entry])), [data.activity])
   const activityDays = useMemo(() => Array.from({ length: 365 }, (_, index) => {
     const date = new Date()
     date.setUTCHours(0, 0, 0, 0)
     date.setUTCDate(date.getUTCDate() - (364 - index))
     const day = date.toISOString().slice(0, 10)
-    return { day, count: activityByDay.get(day) || 0 }
+    const entry = activityByDay.get(day)
+    return { day, count: entry?.sessionCount || 0, bytes: BigInt(entry?.bytesIn || '0') + BigInt(entry?.bytesOut || '0') }
   }), [activityByDay])
-  const activeSession = data.sessions.find((session) => !session.stoppedAt)
+  const activeSession = liveData?.activeSessions[0] || data.sessions.find((session) => !session.stoppedAt)
   const expiry = data.expiresAt ? new Date(data.expiresAt) : null
-  const isOnline = data.sessionSummary.activeSessions > 0
+  const isOnline = liveData ? liveData.activeSessions.length > 0 : data.sessionSummary.activeSessions > 0
+  const visibleSession = liveData?.activeSessions[0]
+  const eventItems = useMemo(() => data.events, [data.events])
+  const currentMonth = new Date(clockNow).toISOString().slice(0, 7)
+  const monthActivity = data.analytics.dailyUsage.filter((entry) => entry.day.startsWith(currentMonth))
+  const monthUsageBytes = monthActivity.reduce((total, entry) =>
+    total + BigInt(entry.bytesIn || '0') + BigInt(entry.bytesOut || '0'), BigInt(0))
+  const yearActivityBytes = data.activity.reduce((total, entry) =>
+    total + BigInt(entry.bytesIn || '0') + BigInt(entry.bytesOut || '0'), BigInt(0))
+  const recentCommunications = eventItems.filter((entry) => entry.eventType === 'sms').slice(0, 3)
+
+  const handleLiveDataChange = useCallback((value: SubscriberLiveData, rate?: SubscriberUsageRate | null) => {
+    setLiveData(value)
+    if (rate !== undefined) setLiveRate(rate)
+    setLastLiveCheck(value.checkedAt)
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'Reports') return
+    let cancelled = false
+    let inFlight = false
+    let controller: AbortController | null = null
+    const refresh = async () => {
+      if (cancelled || inFlight || document.visibilityState === 'hidden') return
+      inFlight = true
+      controller = new AbortController()
+      const timeout = window.setTimeout(() => controller?.abort(), 4_000)
+      try {
+        const response = await fetch(`/api/customers/${encodeURIComponent(data.id)}/live`, {
+          cache: 'no-store', signal: controller.signal,
+        })
+        const result = await response.json() as SubscriberLiveData & { error?: string }
+        if (!response.ok) throw new Error(result.error || 'Unable to refresh subscriber status.')
+        if (!cancelled) handleLiveDataChange(result)
+      } catch (error) {
+        if (!cancelled && !(error instanceof DOMException && error.name === 'AbortError')) {
+          setActionMessage(error instanceof Error ? error.message : 'Unable to refresh subscriber status.')
+          setActionError(true)
+        }
+      } finally {
+        window.clearTimeout(timeout)
+        inFlight = false
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 5_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void refresh()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      cancelled = true
+      controller?.abort()
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [data.id, handleLiveDataChange, tab])
+
+  useEffect(() => {
+    let cancelled = false
+    const refreshDetails = async () => {
+      if (cancelled || detailsRefreshInFlight.current || document.visibilityState === 'hidden') return
+      detailsRefreshInFlight.current = true
+      try {
+        await onRefresh()
+        if (!cancelled) {
+          setLastDetailsCheck(new Date().toISOString())
+          setDetailsRefreshError('')
+        }
+      } catch (error) {
+        if (!cancelled) setDetailsRefreshError(error instanceof Error ? error.message : 'Unable to refresh subscriber reports.')
+      } finally {
+        detailsRefreshInFlight.current = false
+      }
+    }
+    const timer = window.setInterval(() => void refreshDetails(), 30_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void refreshDetails()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [data.id, onRefresh])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!actionDialog) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !actionBusy) setActionDialog(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    actionDialogRef.current?.querySelector<HTMLElement>('input, textarea, select, button')?.focus()
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [actionBusy, actionDialog])
+
+  const performAction = async (action: string, values: Record<string, unknown> = {}) => {
+    setActionBusy(true)
+    setActionMessage('')
+    setActionError(false)
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(data.id)}/actions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action, ...values }),
+      })
+      const result = await response.json() as { error?: string; message?: string; status?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to complete subscriber action.')
+      setActionDialog(null)
+      setMenuOpen(false)
+      setActionMessage(result.message || 'Subscriber information updated.')
+      setActionError(false)
+      await onRefresh()
+      return true
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : 'Unable to complete subscriber action.')
+      setActionError(true)
+      return false
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const submitDialogAction = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (actionDialog === 'edit') {
+      void performAction('profile', { name: profileName, email: profileEmail, phone: profilePhone })
+    } else if (actionDialog === 'expiry') {
+      const expiresAt = new Date(expiryInput)
+      if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) {
+        setActionError(true)
+        setActionMessage('Choose an expiry date and time in the future.')
+        return
+      }
+      void performAction('subscription', { status: 'active', expiresAt: expiresAt.toISOString() })
+    } else if (actionDialog === 'sms') {
+      void performAction('sms', { message: smsMessage })
+    } else if (actionDialog === 'credentials' || actionDialog === 'payment_details') {
+      void performAction(actionDialog)
+    } else if (actionDialog === 'invoice') {
+      void performAction('invoice', { dueAt: invoiceDueAt })
+    } else if (actionDialog === 'compensate') {
+      const numericAmount = Number(compensationAmount)
+      if (!Number.isSafeInteger(numericAmount) || numericAmount < 1) {
+        setActionError(true)
+        setActionMessage('Enter a positive whole-number amount.')
+        return
+      }
+      void performAction(compensationKind === 'days' ? 'extend' : 'credit', {
+        ...(compensationKind === 'days' ? { days: numericAmount } : { amount: numericAmount }),
+        reason: actionReason,
+        idempotencyKey: crypto.randomUUID(),
+      })
+    } else if (actionDialog === 'ticket') {
+      void performAction('ticket', { subject: ticketSubject, description: ticketDescription, priority: ticketPriority })
+    }
+  }
+
+  const exportSubscriberReport = async () => {
+    const activeReportSession = liveData?.activeSessions[0] || activeSession
+    const liveSession = liveData?.activeSessions[0]
+    const liveDownload = liveData?.downloadBytes ?? liveSession?.downloadBytes ??
+      (activeSession && 'bytesIn' in activeSession ? activeSession.bytesIn : null)
+    const liveUpload = liveData?.uploadBytes ?? liveSession?.uploadBytes ??
+      (activeSession && 'bytesOut' in activeSession ? activeSession.bytesOut : null)
+    const monthKey = new Date(clockNow).toISOString().slice(0, 7)
+    const monthEntries = data.analytics.dailyUsage.filter((entry) => entry.day.startsWith(monthKey))
+    const monthSessionCount = monthEntries.reduce((total, entry) => total + entry.sessionCount, 0)
+    const monthSessionDurations = data.sessions
+      .filter((session) => session.startedAt?.startsWith(monthKey))
+      .map((session) => Number(session.sessionSeconds))
+      .filter((seconds) => Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= 10 * 365 * 86400)
+    const averageSessionSeconds = monthSessionDurations.length
+      ? Math.round(monthSessionDurations.reduce((total, seconds) => total + seconds, 0) / monthSessionDurations.length)
+      : 0
+    const hourMap = new Map(data.analytics.hourlyUsage24h
+      .filter((entry) => entry.hourAt)
+      .map((entry) => [new Date(entry.hourAt!).toISOString().slice(0, 13), entry]))
+    const currentHour = new Date(clockNow)
+    currentHour.setUTCMinutes(0, 0, 0)
+    const last24Hours = Array.from({ length: 24 }, (_, index) => {
+      const hour = new Date(currentHour.getTime() - (23 - index) * 3_600_000)
+      const entry = hourMap.get(hour.toISOString().slice(0, 13))
+      const download = BigInt(entry?.bytesIn || '0')
+      const upload = BigInt(entry?.bytesOut || '0')
+      return {
+        hour: `${hour.toLocaleTimeString('en-KE', { hour: '2-digit', hour12: false, timeZone: 'UTC' })}:00`,
+        download: formatBytes(download.toString()),
+        upload: formatBytes(upload.toString()),
+        totalBytes: Number(download + upload),
+      }
+    }).filter((entry) => entry.totalBytes > 0)
+    const thisMonth = monthEntries.map((entry) => ({
+      day: entry.day,
+      download: formatBytes(entry.bytesIn),
+      upload: formatBytes(entry.bytesOut),
+      totalBytes: Number(BigInt(entry.bytesIn || '0') + BigInt(entry.bytesOut || '0')),
+    })).filter((entry) => entry.totalBytes > 0)
+
+    setExportingReport(true)
+    setActionMessage('')
+    setActionError(false)
+    try {
+      const safeName = data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'subscriber'
+      await exportSubscriberUsagePdf({
+        fileName: `subscriber-${safeName}-${new Date().toISOString().slice(0, 10)}`,
+        name: data.name,
+        email: data.email,
+        username: data.radiusUsername,
+        phone: data.phone,
+        connectionType: data.planDetails?.type || (data.accountNumber ? 'PPPoE' : 'Service'),
+        accountNumber: data.accountNumber,
+        totalPaid: formatMoney(data.billing.lifetimeValue),
+        paidThisMonth: formatMoney(data.billing.paidThisMonth),
+        sessionsThisMonth: monthSessionCount,
+        averageSessionThisMonth: averageSessionSeconds ? formatDuration(averageSessionSeconds) : '—',
+        online: isOnline,
+        siteName: data.siteLocation || data.siteName,
+        currentSession: [
+          ['Router', liveSession?.routerName || liveSession?.nasIpAddress || activeReportSession?.nasIpAddress || data.siteName || '—'],
+          ['IP address', activeReportSession?.ipAddress || '—'],
+          ['MAC / caller ID', liveSession?.macAddress || liveSession?.callerId || activeReportSession?.macAddress || '—'],
+          ['Connected for', activeReportSession?.sessionSeconds != null
+            ? formatDuration(activeReportSession.sessionSeconds)
+            : activeReportSession?.startedAt
+              ? formatDuration(Math.floor((clockNow - new Date(activeReportSession.startedAt).getTime()) / 1000))
+              : 'Offline'],
+          ['Downloaded', liveDownload ? formatBytes(liveDownload) : '—'],
+          ['Uploaded', liveUpload ? formatBytes(liveUpload) : '—'],
+        ],
+        last24Hours,
+        thisMonth,
+        sessions: data.sessions.map((session) => [
+          formatDate(session.startedAt),
+          session.nasIpAddress || data.siteName || '—',
+          formatDuration(session.sessionSeconds),
+          formatBytes(session.bytesIn),
+          formatBytes(session.bytesOut),
+          session.stoppedAt ? session.terminateCause || formatDate(session.stoppedAt) : 'Still connected',
+        ]),
+        payments: data.billing.payments.map((payment) => [
+          formatDate(payment.paidAt, { dateStyle: 'medium' }),
+          payment.method || payment.status,
+          payment.reference || '—',
+          formatMoney(payment.amount),
+        ]),
+        generatedAt: formatDate(new Date().toISOString()),
+      })
+      setActionMessage('Subscriber usage report exported.')
+    } catch (error) {
+      console.error('Unable to export the subscriber report', error)
+      setActionError(true)
+      setActionMessage('Unable to export subscriber PDF. Please try again.')
+    } finally {
+      setExportingReport(false)
+    }
+  }
 
   return (
     <section className="subscriber-profile" aria-label={`Profile for ${data.name}`}>
       <header className="subscriber-profile-header">
-        <div className="subscriber-profile-breadcrumb"><span>CUSTOMERS</span><span>—</span><span>SUBSCRIBERS</span><span>—</span><span>#{data.id.slice(0, 8).toUpperCase()}</span></div>
-        <button className="text-button" type="button" onClick={onClose}>Close profile</button>
+        <div className="subscriber-profile-toolbar">
+          <div className="subscriber-profile-breadcrumb"><span>CUSTOMERS</span><span>—</span><span>SUBSCRIBERS</span><span>—</span><span>#{data.id.slice(0, 8).toUpperCase()}</span></div>
+          <div className="subscriber-profile-actions">
+            <button className="outline-button" type="button" onClick={onClose}>Close profile</button>
+            <button className="outline-button" type="button" disabled={!data.phone || actionBusy} onClick={() => { setActionMessage(''); setActionDialog('sms') }}><MessageCircle size={14} /> SMS</button>
+            <button className="outline-button subscriber-profile-icon-action" type="button" aria-label="Edit subscriber" disabled={actionBusy} onClick={() => { setProfileName(data.name); setProfileEmail(data.email); setProfilePhone(data.phone || ''); setActionMessage(''); setActionDialog('edit') }}><Pencil size={14} /></button>
+            <button className="primary-button subscriber-profile-expiry-action" type="button" disabled={actionBusy || !data.radiusUsername} onClick={() => { setActionMessage(''); setActionDialog('expiry') }}><CalendarDays size={14} /> Change expiry</button>
+            <div className="subscriber-profile-menu-anchor">
+              <button className="outline-button subscriber-profile-icon-action" type="button" aria-label="More subscriber actions" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><Ellipsis size={17} /></button>
+              {menuOpen && <div className="subscriber-profile-menu" role="menu">
+                <button type="button" role="menuitem" disabled title="Customer self-service portal is not configured"><Wifi size={14} /> View customer portal</button>
+                <button type="button" role="menuitem" disabled={!data.phone || !data.radiusUsername || !data.radiusPassword} onClick={() => { setActionMessage(''); setActionDialog('credentials'); setMenuOpen(false) }}><Send size={14} /> Send credentials</button>
+                <button type="button" role="menuitem" disabled={!data.phone} onClick={() => { setActionMessage(''); setActionDialog('payment_details'); setMenuOpen(false) }}><MessageCircle size={14} /> Send payment details</button>
+                <button type="button" role="menuitem" onClick={() => { setActionMessage(''); setActionDialog('invoice'); setMenuOpen(false) }}><FileText size={14} /> Generate invoice</button>
+                <button type="button" role="menuitem" disabled={!data.radiusUsername || data.status === 'suspended'} onClick={() => void performAction('subscription', { status: 'suspended' })}><Pause size={14} /> Pause subscription</button>
+                <button type="button" role="menuitem" disabled title="FUP override is unavailable until an operator policy is configured"><Activity size={14} /> FUP override · unavailable</button>
+                <button type="button" role="menuitem" className="is-danger" disabled={!data.radiusUsername || data.status === 'blocked'} onClick={() => {
+                  if (window.confirm(`Block ${data.name}? New RADIUS logins will be rejected.`)) void performAction('subscription', { status: 'blocked' })
+                }}><Wifi size={14} /> Block subscriber</button>
+                <button type="button" role="menuitem" onClick={() => { setActionReason(''); setCompensationAmount('1'); setCompensationKind('days'); setActionDialog('compensate'); setMenuOpen(false) }}><Gift size={14} /> Compensate</button>
+                <div className="subscriber-profile-menu-separator" />
+                <button type="button" role="menuitem" className="is-danger" onClick={() => { setMenuOpen(false); onDelete() }}><Trash2 size={14} /> Delete subscriber</button>
+              </div>}
+            </div>
+          </div>
+        </div>
         <div className="subscriber-profile-identity">
           <div className="subscriber-profile-avatar" aria-hidden="true">{data.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'U'}</div>
           <div className="subscriber-profile-name">
             <h3>{data.name}</h3>
             <div className="subscriber-profile-meta">
               <strong>@{data.radiusUsername || 'No login'}</strong>
-              <span className={`subscriber-profile-badge ${isOnline ? 'online' : ''}`}>{isOnline ? 'Online' : 'Offline'}</span>
+              <span className={`subscriber-profile-badge ${isOnline ? 'online' : ''}`}>{isOnline ? `Online · ${visibleSession?.startedAt ? formatDuration(Math.floor((clockNow - new Date(visibleSession.startedAt).getTime()) / 1000)) : 'active'}` : 'Offline'}</span>
+              {visibleSession?.routerName && <span className="subscriber-profile-badge">{visibleSession.routerName}</span>}
+              {(visibleSession?.downloadBytes || visibleSession?.uploadBytes) && <span className="subscriber-profile-badge">{formatBytes(String(BigInt(visibleSession.downloadBytes || '0') + BigInt(visibleSession.uploadBytes || '0')))} this session</span>}
               <span className="subscriber-profile-badge"><Wifi size={13} />{data.planDetails?.type || 'Service'}</span>
               {data.plan && <span className="subscriber-profile-badge"><Router size={13} />{data.plan}{data.planDetails?.rateLimit ? ` · ${data.planDetails.rateLimit}` : ''}</span>}
             </div>
@@ -441,24 +883,30 @@ export function SubscriberProfile({
             </div>
           </div>
         </div>
+        {actionMessage && <p className={`subscriber-profile-action-message${actionError ? ' is-error' : ''}`} role={actionError ? 'alert' : 'status'}>{actionMessage}</p>}
       </header>
 
       <div className="subscriber-profile-metrics">
         <article><span>Subscription</span><strong>{expiry && Number.isFinite(expiry.getTime()) ? `${Math.max(0, Math.ceil((expiry.getTime() - Date.now()) / 86400000))} days` : 'No expiry'}</strong><small>{expiry ? `Renews ${formatDate(expiry.toISOString())}` : 'No expiry date recorded'}</small></article>
-        <article><span>Last session</span><strong>{data.sessionSummary.lastSessionAt ? formatDate(data.sessionSummary.lastSessionAt, { dateStyle: 'medium' }) : 'Never'}</strong><small>{data.sessionSummary.lastSessionAt ? formatDate(data.sessionSummary.lastSessionAt, { timeStyle: 'short' }) : 'No sessions on record'}</small></article>
+        <article><span>Last session</span><strong className={isOnline ? 'is-online-value' : ''}>{isOnline ? 'Online' : data.sessionSummary.lastSessionAt ? formatDate(data.sessionSummary.lastSessionAt, { dateStyle: 'medium' }) : 'Never'}</strong><small>{isOnline ? `Live · ${visibleSession?.startedAt ? formatDuration(Math.floor((clockNow - new Date(visibleSession.startedAt).getTime()) / 1000)) : 'active'}${lastLiveCheck ? ` · checked ${formatDate(lastLiveCheck, { timeStyle: 'short' })}` : ''}` : data.sessionSummary.lastSessionAt ? formatDate(data.sessionSummary.lastSessionAt, { timeStyle: 'short' }) : 'No sessions on record'}</small></article>
         <article><span>Lifetime value</span><strong>{formatMoney(data.billing.lifetimeValue)}</strong><small>{formatMoney(data.billing.paidThisMonth)} this month</small></article>
-        <article><span>Sessions</span><strong>{data.sessionSummary.sessionCount.toLocaleString('en-KE')}</strong><small>{data.sessionSummary.activeSessions} active now</small></article>
+        <article><span>Wallet balance</span><strong>{data.billing.creditBalance > 0 ? formatMoney(data.billing.creditBalance) : '—'}</strong><small>{data.billing.creditBalance > 0 ? 'Account credit available' : 'No account credit'}</small></article>
       </div>
 
       <nav className="subscriber-profile-tabs" aria-label="Subscriber profile sections">
-        {(['Overview', 'Reports', 'Sessions', 'Payments'] as const).map((item) => (
+        {(['Overview', 'Reports', 'Sessions', 'Payments', 'Package history', 'SMS', 'Tickets', 'Notes'] as const).map((item) => (
           <button key={item} type="button" className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)}>
-            {item}{item === 'Sessions' ? <span>{data.sessionSummary.sessionCount}</span> : item === 'Payments' ? <span>{data.billing.payments.length}</span> : null}
+            {item}{item === 'Sessions' ? <span>{data.sessionSummary.sessionCount}</span> : item === 'Payments' ? <span>{data.billing.payments.length}</span> : item === 'Package history' ? <span>{data.packageHistory.length}</span> : item === 'SMS' ? <span>{eventItems.filter((entry) => entry.eventType === 'sms').length}</span> : item === 'Tickets' ? <span>{data.tickets.length}</span> : item === 'Notes' ? <span>{eventItems.filter((entry) => entry.eventType === 'note').length}</span> : null}
           </button>
         ))}
       </nav>
 
       {tab === 'Overview' && <>
+        <div className="subscriber-profile-refresh-status">
+          <span>Profile data refreshes every 30 seconds. Router status and counters refresh every 5 seconds.</span>
+          <span>{lastDetailsCheck ? `Updated ${formatDate(lastDetailsCheck, { timeStyle: 'short' })}` : 'Profile data loaded'}</span>
+        </div>
+        {detailsRefreshError && <p className="subscriber-live-error" role="alert">{detailsRefreshError}</p>}
         <div className="subscriber-profile-columns">
           <div className="subscriber-profile-main-column">
             <section className="subscriber-profile-panel">
@@ -467,7 +915,8 @@ export function SubscriberProfile({
               <div className="subscriber-lifecycle">
                 <div><span className="lifecycle-dot muted" /><div><strong>Account created</strong><small>{formatDate(data.createdAt)}</small><p>Subscriber added to this workspace</p></div></div>
                 {data.sessionSummary.firstSessionAt && <div><span className="lifecycle-dot" /><div><strong>First session</strong><small>{formatDate(data.sessionSummary.firstSessionAt)}</small><p>First recorded RADIUS connection</p></div></div>}
-                <div><span className={`lifecycle-dot ${isOnline ? 'live' : ''}`} /><div><strong>{isOnline ? 'Connected now' : 'Current state'}</strong><small>{data.status}</small><p>{isOnline ? 'An active RADIUS session is recorded' : expiry ? `Service expiry ${formatDate(expiry.toISOString())}` : 'No active RADIUS session'}</p></div></div>
+                {data.sessionSummary.lastSessionAt && <div><span className="lifecycle-dot" /><div><strong>Last session</strong><small>{formatDate(data.sessionSummary.lastSessionAt)}</small><p>Most recent RADIUS accounting record</p></div></div>}
+                <div><span className={`lifecycle-dot ${isOnline ? 'live' : ''}`} /><div><strong>{isOnline ? 'Today · live session' : 'Current state'}</strong><small>{isOnline ? `${liveData?.activeSessions.length || data.sessionSummary.activeSessions} online` : data.status}</small><p>{isOnline ? `Connected for ${visibleSession?.sessionSeconds ? formatDuration(visibleSession.sessionSeconds) : 'active'}` : expiry ? `Service expiry ${formatDate(expiry.toISOString())}` : 'No active RADIUS session'}</p></div></div>
               </div>
             </section>
 
@@ -475,9 +924,9 @@ export function SubscriberProfile({
               <h4><CalendarDays size={16} /> Activity · last 365 days</h4>
               <div className="subscriber-activity-legend"><span>Less</span>{[0, 1, 2, 3, 4].map((level) => <i key={level} className={`activity-level-${level}`} />)}<span>More</span></div>
               <div className="subscriber-activity-content">
-                <p>{activityDays.filter((day) => day.count > 0).length} active days</p>
+                <p>{activityDays.filter((day) => day.count > 0).length} active days · {formatBytes(yearActivityBytes.toString())} transferred</p>
                 <div className="subscriber-activity-grid" aria-label="Daily RADIUS sessions over the last 365 days">
-                  {activityDays.map(({ day, count }) => <span key={day} className={`activity-level-${count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : count <= 6 ? 3 : 4}`} title={`${day}: ${count} session${count === 1 ? '' : 's'}`} />)}
+                  {activityDays.map(({ day, count, bytes }) => <span key={day} className={`activity-level-${count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : count <= 6 ? 3 : 4}`} title={`${day}: ${count} session${count === 1 ? '' : 's'} · ${formatBytes(bytes.toString())}`} />)}
                 </div>
                 <small>{data.sessionSummary.sessionCount ? 'Daily activity is based on recorded RADIUS sessions.' : 'No RADIUS activity in the last year.'}</small>
               </div>
@@ -485,7 +934,11 @@ export function SubscriberProfile({
 
             {data.planDetails?.fupEnabled && data.planDetails.fupLimitBytes && <section className="subscriber-profile-panel">
               <h4><Activity size={16} /> Fair Use Policy</h4>
-              <div className="subscriber-profile-inset"><p>Configured plan limit: <strong>{formatBytes(String(data.planDetails.fupLimitBytes))}</strong></p><p>All-time recorded data: <strong>{formatBytes(data.sessionSummary.bytesIn)} received</strong> · <strong>{formatBytes(data.sessionSummary.bytesOut)} sent</strong></p></div>
+              <div className="subscriber-profile-inset">
+                <p>Month-to-date RADIUS usage: <strong>{formatBytes(monthUsageBytes.toString())}</strong> of <strong>{formatBytes(String(data.planDetails.fupLimitBytes))}</strong></p>
+                <div className="subscriber-fup-progress" role="progressbar" aria-label="Fair use policy usage this month" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, Math.round(Number(monthUsageBytes) / data.planDetails.fupLimitBytes * 100))}><span style={{ width: `${Math.min(100, Number(monthUsageBytes) / data.planDetails.fupLimitBytes * 100)}%` }} /></div>
+                <p>Downloaded {formatBytes(data.sessionSummary.bytesOut)} · Uploaded {formatBytes(data.sessionSummary.bytesIn)}</p>
+              </div>
             </section>}
           </div>
 
@@ -493,16 +946,34 @@ export function SubscriberProfile({
             <section className="subscriber-profile-panel">
               <h4><Wifi size={16} /> Device &amp; network</h4>
               <dl className="subscriber-profile-facts">
-                <div><dt>Network site</dt><dd>{data.siteName || 'Not assigned'}</dd></div>
-                <div><dt>Connection type</dt><dd>{data.planDetails?.type || 'Not recorded'}</dd></div>
+                <div><dt>Router</dt><dd>{visibleSession?.routerName || data.siteName || 'Not reported'}</dd></div>
+                <div><dt>IP address</dt><dd>{visibleSession?.ipAddress || activeSession?.ipAddress || 'No active session'}</dd></div>
+                <div><dt>MAC / caller ID</dt><dd>{visibleSession?.macAddress || visibleSession?.callerId || activeSession?.macAddress || (isOnline ? 'Not reported by router' : 'No active session')}</dd></div>
+                <div><dt>Connection type</dt><dd>{data.planDetails?.type || (data.accountNumber ? 'PPPoE' : 'Not recorded')}</dd></div>
                 <div><dt>Username</dt><dd>{data.radiusUsername || 'Not set'}{data.radiusUsername && <button type="button" aria-label="Copy username" onClick={() => onCopy('username', data.radiusUsername!)}><Copy size={14} />{copiedCredential === 'username' ? 'Copied' : ''}</button>}</dd></div>
                 {data.accountNumber && <div><dt>Account number</dt><dd>{data.accountNumber}<button type="button" aria-label="Copy account number" onClick={() => onCopy('accountNumber', data.accountNumber!)}><Copy size={14} />{copiedCredential === 'accountNumber' ? 'Copied' : ''}</button></dd></div>}
                 {data.radiusPassword && <div><dt>Password</dt><dd><span className="subscriber-profile-password">{showPassword ? data.radiusPassword : '••••••••••••'}</span><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={onTogglePassword}>{showPassword ? 'Hide' : 'Show'}</button><button type="button" aria-label="Copy password" onClick={() => onCopy('password', data.radiusPassword!)}><Copy size={14} />{copiedCredential === 'password' ? 'Copied' : ''}</button></dd></div>}
-                <div><dt>Current IP</dt><dd>{activeSession?.ipAddress || 'No active session'}</dd></div>
-                <div><dt>Router / NAS</dt><dd>{activeSession?.nasIpAddress || 'No active session'}</dd></div>
+                <div><dt>Customer location</dt><dd>{data.location || 'Not recorded'}</dd></div>
+                <div><dt>Network site</dt><dd>{data.siteName ? `${data.siteName}${data.siteLocation ? ` · ${data.siteLocation}` : ''}` : 'Not assigned'}</dd></div>
+                <div><dt>Router / NAS</dt><dd>{visibleSession?.routerName || visibleSession?.nasIpAddress || activeSession?.nasIpAddress || 'Not reported'}</dd></div>
                 <div><dt>Data received · all sessions</dt><dd>{formatBytes(data.sessionSummary.bytesIn)}</dd></div>
                 <div><dt>Data sent · all sessions</dt><dd>{formatBytes(data.sessionSummary.bytesOut)}</dd></div>
               </dl>
+            </section>
+            <section className="subscriber-profile-panel">
+              <h4><FileText size={16} /> Reference</h4>
+              <dl className="subscriber-profile-facts">
+                <div><dt>Account ID</dt><dd>#{data.id.slice(0, 8).toUpperCase()}</dd></div>
+                <div><dt>Account number</dt><dd>{data.accountNumber || 'Not assigned'}</dd></div>
+                <div><dt>Phone</dt><dd>{data.phone || 'Not recorded'}</dd></div>
+                <div><dt>Customer location</dt><dd>{data.location || 'Not recorded'}</dd></div>
+                <div><dt>Network site</dt><dd>{data.siteName || 'Not assigned'}</dd></div>
+                <div><dt>Acquired via</dt><dd>{data.accountSource}</dd></div>
+              </dl>
+            </section>
+            <section className="subscriber-profile-panel">
+              <div className="subscriber-profile-section-heading"><div><h4><MessageCircle size={16} /> Communications</h4><p>Recent messages sent to this subscriber</p></div><button type="button" className="outline-button" onClick={() => setTab('SMS')}>View all</button></div>
+              {recentCommunications.length ? <div className="subscriber-profile-communications">{recentCommunications.map((entry) => <article key={entry.id}><div><strong>Sent</strong><time>{formatDate(entry.createdAt, { dateStyle: 'medium' })}</time></div><p>{entry.description}</p></article>)}</div> : <p className="subscriber-profile-empty">No communications recorded.</p>}
             </section>
             <section className="subscriber-profile-panel">
               <h4><CreditCard size={16} /> Recent payments</h4>
@@ -513,7 +984,17 @@ export function SubscriberProfile({
       </>}
 
       {tab === 'Reports' && <>
-        <SubscriberLiveReports subscriberId={data.id} data={data} />
+        <div className="subscriber-report-export-bar">
+          <button className="outline-button" type="button" disabled={exportingReport} onClick={() => void exportSubscriberReport()}>
+            <FileText size={15} /> {exportingReport ? 'Exporting PDF…' : 'Export PDF'}
+          </button>
+        </div>
+        <div className="subscriber-profile-refresh-status">
+          <span>Live router counters update every 5 seconds. Historical billing and usage refresh every 30 seconds.</span>
+          <span>Updated {formatDate(lastDetailsCheck, { timeStyle: 'short' })}</span>
+        </div>
+        {detailsRefreshError && <p className="subscriber-live-error" role="alert">{detailsRefreshError}</p>}
+        <SubscriberLiveReports subscriberId={data.id} data={data} onLiveDataChange={handleLiveDataChange} />
         <SubscriberHistoricalReports data={data} />
       </>}
 
@@ -534,6 +1015,91 @@ export function SubscriberProfile({
           {!data.billing.payments.length && <tr><td colSpan={5} className="subscriber-profile-empty">No payments are linked to this subscriber.</td></tr>}
         </tbody></table></div>
       </section>}
+
+      {tab === 'Package history' && <section className="subscriber-profile-panel subscriber-profile-table-panel">
+        <h4><Router size={16} /> Package history</h4>
+        <p>Completed hotspot purchases and recorded subscription changes.</p>
+        <div className="subscriber-profile-table-scroll"><table><thead><tr><th>DATE</th><th>PACKAGE / EVENT</th><th>STATUS</th><th>AMOUNT</th><th>REFERENCE</th></tr></thead><tbody>
+          {[
+            ...data.packageHistory.map((purchase) => ({
+              id: purchase.id, at: purchase.paidAt || purchase.createdAt, name: purchase.productName,
+              status: purchase.status, amount: purchase.amount, reference: purchase.receipt || '—',
+            })),
+            ...eventItems.filter((entry) => entry.eventType === 'package_changed' || entry.eventType === 'subscription_updated').map((entry) => ({
+              id: entry.id, at: entry.createdAt, name: entry.description, status: 'recorded', amount: 0, reference: '—',
+            })),
+          ].sort((left, right) => right.at.localeCompare(left.at)).map((entry) => <tr key={entry.id}><td>{formatDate(entry.at)}</td><td>{entry.name}</td><td>{entry.status}</td><td>{entry.amount ? formatMoney(entry.amount) : '—'}</td><td>{entry.reference}</td></tr>)}
+          {!data.packageHistory.length && !eventItems.some((entry) => entry.eventType === 'package_changed' || entry.eventType === 'subscription_updated') && <tr><td colSpan={5} className="subscriber-profile-empty">No package changes or purchases have been recorded.</td></tr>}
+        </tbody></table></div>
+      </section>}
+
+      {tab === 'SMS' && <section className="subscriber-profile-panel subscriber-profile-table-panel">
+        <div className="subscriber-profile-section-heading"><div><h4><MessageCircle size={16} /> SMS history</h4><p>Delivery state is recorded when messages are sent or queued.</p></div><button type="button" className="outline-button" disabled={!data.phone} onClick={() => { setActionMessage(''); setActionDialog('sms') }}><Send size={14} /> Send SMS</button></div>
+        <div className="subscriber-profile-table-scroll"><table><thead><tr><th>DATE</th><th>ACTIVITY</th><th>RECIPIENT</th><th>STATUS</th></tr></thead><tbody>
+          {eventItems.filter((entry) => entry.eventType === 'sms').map((entry) => <tr key={entry.id}><td>{formatDate(entry.createdAt)}</td><td>{entry.description}</td><td>{String(entry.metadata.phone || data.phone || '—')}</td><td>{String(entry.metadata.status || 'Recorded')}</td></tr>)}
+          {!eventItems.some((entry) => entry.eventType === 'sms') && <tr><td colSpan={4} className="subscriber-profile-empty">No SMS messages have been sent from this profile.</td></tr>}
+        </tbody></table></div>
+      </section>}
+
+      {tab === 'Tickets' && <section className="subscriber-profile-panel subscriber-profile-table-panel">
+        <div className="subscriber-profile-section-heading"><div><h4><Ticket size={16} /> Support tickets</h4><p>Tickets linked to this subscriber account.</p></div><button type="button" className="outline-button" onClick={() => { setActionMessage(''); setActionDialog('ticket') }}><Ticket size={14} /> New ticket</button></div>
+        <div className="subscriber-profile-table-scroll"><table><thead><tr><th>CREATED</th><th>SUBJECT</th><th>PRIORITY</th><th>STATUS</th><th>UPDATED</th></tr></thead><tbody>
+          {data.tickets.map((ticket) => <tr key={ticket.id}><td>{formatDate(ticket.createdAt)}</td><td><strong>{ticket.subject}</strong><small>{ticket.description}</small></td><td>{ticket.priority}</td><td>{ticket.status}</td><td>{formatDate(ticket.updatedAt)}</td></tr>)}
+          {!data.tickets.length && <tr><td colSpan={5} className="subscriber-profile-empty">No support tickets are linked to this subscriber.</td></tr>}
+        </tbody></table></div>
+      </section>}
+
+      {tab === 'Notes' && <section className="subscriber-profile-panel subscriber-profile-table-panel">
+        <h4><FileText size={16} /> Subscriber notes</h4>
+        <form className="subscriber-profile-note-form" onSubmit={(event) => {
+          event.preventDefault()
+          const form = event.currentTarget
+          const note = new FormData(form).get('note')
+          void performAction('note', { note }).then((saved) => { if (saved) form.reset() })
+        }}>
+          <label htmlFor={`subscriber-note-${data.id}`}>Add a private workspace note</label>
+          <textarea id={`subscriber-note-${data.id}`} name="note" required maxLength={2000} rows={3} placeholder="Add a service or account note…" />
+          <button type="submit" className="primary-button" disabled={actionBusy}><FileText size={14} /> Save note</button>
+        </form>
+        <div className="subscriber-profile-events">{eventItems.filter((entry) => entry.eventType === 'note').map((entry) => <article key={entry.id}><p>{entry.description}</p><time>{formatDate(entry.createdAt)}</time></article>)}{!eventItems.some((entry) => entry.eventType === 'note') && <p className="subscriber-profile-empty">No private notes have been added.</p>}</div>
+      </section>}
+
+      {actionDialog && <div className="subscriber-action-backdrop" onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !actionBusy) setActionDialog(null)
+      }}>
+        <div className="subscriber-action-dialog" role="dialog" aria-modal="true" aria-labelledby={`subscriber-action-title-${data.id}`} ref={actionDialogRef}>
+          <div className="subscriber-action-dialog-heading"><div><span>SUBSCRIBER ACTION</span><h3 id={`subscriber-action-title-${data.id}`}>{({
+            edit: 'Edit subscriber', expiry: 'Change subscription expiry', sms: 'Send SMS',
+            credentials: 'Send login credentials', payment_details: 'Send payment details',
+            invoice: 'Generate invoice', compensate: 'Compensate subscriber', ticket: 'Create support ticket',
+          })[actionDialog]}</h3></div><button type="button" aria-label="Close dialog" disabled={actionBusy} onClick={() => setActionDialog(null)}><X size={17} /></button></div>
+          <form onSubmit={submitDialogAction}>
+            {actionDialog === 'edit' && <div className="subscriber-action-form-grid">
+              <label>Full name<input required maxLength={120} value={profileName} onChange={(event) => setProfileName(event.target.value)} /></label>
+              <label>Email<input required type="email" maxLength={254} value={profileEmail} onChange={(event) => setProfileEmail(event.target.value)} /></label>
+              <label>Phone<input type="tel" maxLength={32} value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} /></label>
+            </div>}
+            {actionDialog === 'expiry' && <label className="subscriber-action-form-field">New expiry date and time<input required type="datetime-local" value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label>}
+            {actionDialog === 'sms' && <label className="subscriber-action-form-field">Message to {data.name}<textarea required maxLength={500} rows={4} value={smsMessage} onChange={(event) => setSmsMessage(event.target.value)} placeholder="Type a message…" /><small>{smsMessage.length}/500 characters · {data.phone || 'No phone number'}</small></label>}
+            {actionDialog === 'credentials' && <p className="subscriber-action-warning">This sends the stored RADIUS username and password to {data.phone}. Only continue if this number is verified and the subscriber requested their credentials.</p>}
+            {actionDialog === 'payment_details' && <p className="subscriber-action-warning">This sends plan and monthly price details to {data.phone}: {data.plan || 'plan not set'} · {formatMoney(data.monthlyRate)}/month.</p>}
+            {actionDialog === 'invoice' && <><p className="subscriber-action-warning">Creates the current month’s invoice for {formatMoney(data.monthlyRate)}. Available account credit will be applied in full if it covers the invoice. An invoice can only be generated once per month.</p><label className="subscriber-action-form-field">Due date<input required type="date" value={invoiceDueAt} onChange={(event) => setInvoiceDueAt(event.target.value)} /></label></>}
+            {actionDialog === 'compensate' && <div className="subscriber-action-form-grid">
+              <label>Compensation type<select value={compensationKind} onChange={(event) => setCompensationKind(event.target.value as 'days' | 'credit')}><option value="days">Free service days</option><option value="credit">Account credit (KSh)</option></select></label>
+              <label>{compensationKind === 'days' ? 'Days to add' : 'Credit amount (KSh)'}<input required type="number" min="1" max={compensationKind === 'days' ? '365' : '10000000'} step="1" value={compensationAmount} onChange={(event) => setCompensationAmount(event.target.value)} /></label>
+              <label className="subscriber-action-wide">Reason<input required maxLength={500} value={actionReason} onChange={(event) => setActionReason(event.target.value)} placeholder="Document why this compensation is being granted" /></label>
+              {compensationKind === 'credit' && <p className="subscriber-action-warning subscriber-action-wide">Account credits are applied to a generated monthly invoice only when they fully cover it. Current balance: {formatMoney(data.billing.creditBalance)}.</p>}
+            </div>}
+            {actionDialog === 'ticket' && <div className="subscriber-action-form-grid">
+              <label className="subscriber-action-wide">Subject<input required maxLength={180} value={ticketSubject} onChange={(event) => setTicketSubject(event.target.value)} /></label>
+              <label>Priority<select value={ticketPriority} onChange={(event) => setTicketPriority(event.target.value)}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
+              <label className="subscriber-action-wide">Description<textarea required maxLength={4000} rows={4} value={ticketDescription} onChange={(event) => setTicketDescription(event.target.value)} /></label>
+            </div>}
+            {actionError && actionMessage && <p className="subscriber-action-error" role="alert">{actionMessage}</p>}
+            <div className="subscriber-action-dialog-actions"><button type="button" className="outline-button" disabled={actionBusy} onClick={() => setActionDialog(null)}>Cancel</button><button className="primary-button" type="submit" disabled={actionBusy}>{actionBusy ? 'Working…' : actionDialog === 'credentials' || actionDialog === 'payment_details' ? 'Confirm and send' : actionDialog === 'invoice' ? 'Generate invoice' : 'Save'}</button></div>
+          </form>
+        </div>
+      </div>}
     </section>
   )
 }

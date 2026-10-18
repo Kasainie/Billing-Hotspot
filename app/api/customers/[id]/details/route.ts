@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { customers, hotspotPurchases, packages, payments, pppoeAccounts, radcheck, sites } from '@/lib/db/schema'
+import { customers, hotspotPurchases, invoices, packages, payments, pppoeAccounts, radcheck, sites, subscriberCredits, subscriberEvents, supportTickets } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { serializeDatabaseTimestamp } from '@/lib/database-timestamp'
 
@@ -20,6 +20,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
       name: customers.name,
       email: customers.email,
       phone: customers.phone,
+      location: customers.location,
+      accountNumber: customers.accountNumber,
       radiusUsername: customers.radiusUsername,
       status: customers.status,
       plan: customers.plan,
@@ -33,7 +35,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     )).limit(1)
 
     if (!customer) return NextResponse.json({ error: 'Subscriber was not found.' }, { status: 404 })
-    const [account, credential, plan, site, paidSummary, paidThisMonth, paymentRows, hotspotPaidSummary, hotspotPaidThisMonth, hotspotPaymentRows, sessionSummary, sessionRows, activityRows, paymentTrendRows, hourlyUsageRows] = await Promise.all([
+    const [account, credential, plan, site, paidSummary, paidThisMonth, paymentRows, hotspotPaidSummary, hotspotPaidThisMonth, hotspotPaymentRows, sessionSummary, sessionRows, activityRows, paymentTrendRows, hourlyUsageRows, hourlyUsage24hRows] = await Promise.all([
       db.select({ accountNumber: pppoeAccounts.accountNumber })
         .from(pppoeAccounts).where(and(
           eq(pppoeAccounts.customerId, customer.id),
@@ -60,7 +62,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         )).orderBy(desc(packages.createdAt)).limit(1)
         : Promise.resolve([]),
       customer.siteId
-        ? db.select({ name: sites.name }).from(sites).where(and(
+        ? db.select({ name: sites.name, location: sites.location }).from(sites).where(and(
           eq(sites.id, customer.siteId),
           eq(sites.tenantId, session.tenantId),
         )).limit(1)
@@ -178,12 +180,16 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         `)
         : Promise.resolve({ rows: [] }),
       customer.radiusUsername
-        ? db.execute<{ day: string; sessionCount: number }>(sql`
-          select to_char(date_trunc('day', acctstarttime), 'YYYY-MM-DD') as "day", count(*)::int as "sessionCount"
+        ? db.execute<{ day: string; sessionCount: number; bytesIn: string; bytesOut: string }>(sql`
+          select to_char(date_trunc('day', acctstarttime), 'YYYY-MM-DD') as "day",
+            count(*)::int as "sessionCount",
+            coalesce(sum(acctinputoctets), 0)::text as "bytesIn",
+            coalesce(sum(acctoutputoctets), 0)::text as "bytesOut"
           from public.radacct
           where username = ${customer.radiusUsername}
             and acctstarttime >= now() - interval '364 days'
           group by date_trunc('day', acctstarttime)
+          order by date_trunc('day', acctstarttime)
         `)
         : Promise.resolve({ rows: [] }),
       db.execute<{ month: string; amount: string; paymentCount: number }>(sql`
@@ -212,9 +218,13 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         ? db.execute<{
           hour: number
           sessionCount: number
+          bytesIn: string
+          bytesOut: string
         }>(sql`
           select extract(hour from acctstarttime)::int as hour,
-            count(*)::int as "sessionCount"
+            count(*)::int as "sessionCount",
+            coalesce(sum(acctinputoctets), 0)::text as "bytesIn",
+            coalesce(sum(acctoutputoctets), 0)::text as "bytesOut"
           from public.radacct
           where username = ${customer.radiusUsername}
             and acctstarttime >= now() - interval '30 days'
@@ -223,19 +233,99 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
           order by hour
         `)
         : Promise.resolve({ rows: [] }),
+      customer.radiusUsername
+        ? db.execute<{
+          hourAt: Date | string
+          sessionCount: number
+          bytesIn: string
+          bytesOut: string
+        }>(sql`
+          select date_trunc('hour', acctstarttime) as "hourAt",
+            count(*)::int as "sessionCount",
+            coalesce(sum(acctinputoctets), 0)::text as "bytesIn",
+            coalesce(sum(acctoutputoctets), 0)::text as "bytesOut"
+          from public.radacct
+          where username = ${customer.radiusUsername}
+            and acctstarttime >= now() - interval '24 hours'
+            and acctstarttime is not null
+          group by date_trunc('hour', acctstarttime)
+          order by date_trunc('hour', acctstarttime)
+        `)
+        : Promise.resolve({ rows: [] }),
     ])
     const sessionTotals = sessionSummary.rows[0]
+    const [invoiceRows, creditRows, creditBalanceRows, eventRows, ticketRows, purchaseHistoryRows] = await Promise.all([
+      db.select({
+        id: invoices.id,
+        invoiceNumber: invoices.invoiceNumber,
+        amount: invoices.amount,
+        status: invoices.status,
+        dueAt: invoices.dueAt,
+        createdAt: invoices.createdAt,
+        description: invoices.description,
+      }).from(invoices).where(and(eq(invoices.tenantId, session.tenantId), eq(invoices.customerId, customer.id)))
+        .orderBy(desc(invoices.createdAt)).limit(100),
+      db.select({
+        id: subscriberCredits.id,
+        type: subscriberCredits.type,
+        amount: subscriberCredits.amount,
+        reason: subscriberCredits.reason,
+        createdAt: subscriberCredits.createdAt,
+      }).from(subscriberCredits).where(and(eq(subscriberCredits.tenantId, session.tenantId), eq(subscriberCredits.customerId, customer.id)))
+        .orderBy(desc(subscriberCredits.createdAt)).limit(50),
+      db.select({ balance: sql<string>`coalesce(sum(case when ${subscriberCredits.type} = 'credit' then ${subscriberCredits.amount} else -${subscriberCredits.amount} end), 0)::text` })
+        .from(subscriberCredits).where(and(eq(subscriberCredits.tenantId, session.tenantId), eq(subscriberCredits.customerId, customer.id))),
+      db.select({
+        id: subscriberEvents.id,
+        eventType: subscriberEvents.eventType,
+        description: subscriberEvents.description,
+        metadata: subscriberEvents.metadata,
+        createdAt: subscriberEvents.createdAt,
+      }).from(subscriberEvents).where(and(eq(subscriberEvents.tenantId, session.tenantId), eq(subscriberEvents.customerId, customer.id)))
+        .orderBy(desc(subscriberEvents.createdAt)).limit(100),
+      db.select({
+        id: supportTickets.id,
+        subject: supportTickets.subject,
+        description: supportTickets.description,
+        status: supportTickets.status,
+        priority: supportTickets.priority,
+        createdAt: supportTickets.createdAt,
+        updatedAt: supportTickets.updatedAt,
+      }).from(supportTickets).where(and(eq(supportTickets.tenantId, session.tenantId), eq(supportTickets.customerId, customer.id)))
+        .orderBy(desc(supportTickets.updatedAt)).limit(50),
+      customer.radiusUsername
+        ? db.select({
+          id: hotspotPurchases.id,
+          productName: hotspotPurchases.productName,
+          amount: hotspotPurchases.amount,
+          status: hotspotPurchases.status,
+          receipt: hotspotPurchases.receipt,
+          createdAt: hotspotPurchases.createdAt,
+          paidAt: hotspotPurchases.paidAt,
+        }).from(hotspotPurchases).where(and(
+          eq(hotspotPurchases.tenantId, session.tenantId),
+          eq(hotspotPurchases.radiusUsername, customer.radiusUsername),
+        )).orderBy(desc(hotspotPurchases.createdAt)).limit(100)
+        : Promise.resolve([]),
+    ])
     return NextResponse.json({
       ...customer,
-      accountNumber: account[0] ? String(account[0].accountNumber) : null,
+      accountNumber: customer.accountNumber !== null
+        ? String(customer.accountNumber)
+        : account[0] ? String(account[0].accountNumber) : null,
+      accountSource: account[0] || plan[0]?.type === 'PPPoE' ? 'PPPoE setup' : 'Not recorded',
       radiusPassword: credential[0]?.password || null,
-      planDetails: plan[0] || null,
+      planDetails: plan[0] || (account[0] ? { type: 'PPPoE', rateLimit: '', downloadMbps: 0, uploadMbps: 0, fupEnabled: false, fupLimitBytes: null } : null),
       siteName: site[0]?.name || null,
+      siteLocation: site[0]?.location || null,
       billing: {
         lifetimeValue: Number(paidSummary[0]?.amount || 0) +
           Number(hotspotPaidSummary[0]?.amount || 0),
         paidThisMonth: Number(paidThisMonth[0]?.amount || 0) +
           Number(hotspotPaidThisMonth[0]?.amount || 0),
+        creditBalance: Number(creditBalanceRows[0]?.balance || 0),
+        creditEntries: creditRows.map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
+        invoices: invoiceRows.map((invoice) => ({ ...invoice, dueAt: invoice.dueAt.toISOString(), createdAt: invoice.createdAt.toISOString() })),
         payments: [
           ...paymentRows.map((payment) => ({
             id: payment.id,
@@ -268,10 +358,28 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         startedAt: serializeDatabaseTimestamp(row.startedAt),
         stoppedAt: serializeDatabaseTimestamp(row.stoppedAt),
       })),
+      events: eventRows.map((event) => ({ ...event, createdAt: event.createdAt.toISOString() })),
+      packageHistory: purchaseHistoryRows.map((purchase) => ({
+        ...purchase,
+        createdAt: purchase.createdAt.toISOString(),
+        paidAt: purchase.paidAt?.toISOString() || null,
+      })),
+      tickets: ticketRows.map((ticket) => ({
+        ...ticket,
+        createdAt: ticket.createdAt.toISOString(),
+        updatedAt: ticket.updatedAt.toISOString(),
+      })),
       activity: activityRows.rows,
       analytics: {
         paymentTrend: paymentTrendRows.rows,
         hourlyUsage: hourlyUsageRows.rows,
+        hourlyUsage24h: hourlyUsage24hRows.rows.map((entry) => ({
+          hourAt: serializeDatabaseTimestamp(entry.hourAt),
+          sessionCount: entry.sessionCount,
+          bytesIn: entry.bytesIn,
+          bytesOut: entry.bytesOut,
+        })),
+        dailyUsage: activityRows.rows,
       },
     }, { headers: { 'cache-control': 'no-store, private' } })
   } catch (error) {

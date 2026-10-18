@@ -16,8 +16,8 @@ body.hotspot-home { background: #123e72; color: #eff7ff; --portal-graphic-primar
 .hotspot-home .package-card:hover, .hotspot-home .package-card.selected { border-color: #71d8f0; background: #1b4b7c; box-shadow: inset 0 0 0 1px #71d8f0; }
 .hotspot-home .purchase-form > label, .hotspot-home .account-fields label, .hotspot-home .receipt-fields label { color: #d5e7f4; }
 .hotspot-home input { border-color: #7699b7; background: #f2f7fa; color: #153553; }
-.hotspot-home .purchase-button, .hotspot-home .account-button { background: #44b8d6; color: #103650; }
-.hotspot-home .purchase-button:hover:not(:disabled), .hotspot-home .account-button:hover { background: #71d8f0; }
+.hotspot-home .purchase-button, .hotspot-home .account-button { background: #00ff90; color: #06110d; }
+.hotspot-home .purchase-button:hover:not(:disabled), .hotspot-home .account-button:hover { background: #00e583; color: #06110d; }
 .hotspot-home .payment-hint, .hotspot-home .purchase-status { color: #c4d9e8; }
 .hotspot-home .voucher-link { border-color: #4d7da8; background: var(--portal-voucher-wash); color: #e4f0f9; }
 .hotspot-home .portal-footer { border-color: #5480a8; color: #c2d9e9; }

@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     const paymentSince = new Date(Date.now() - rangeMilliseconds)
     const now = new Date()
     const expiringBefore = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-    const [siteRows, customerRows, paymentRows, packageRows, expiringCustomerRows, activeCustomerCount, paidPaymentSummary, customerCountsBySite] = await Promise.all([
+    const [siteRows, customerRows, paymentRows, packageRows, expiringCustomerRows, activeCustomerCount, totalCustomerCount, paidPaymentSummary, customerCountsBySite] = await Promise.all([
       db.select().from(sites).where(eq(sites.tenantId, tenantId)).orderBy(desc(sites.createdAt)),
       db.select().from(customers).where(eq(customers.tenantId, tenantId)).orderBy(desc(customers.createdAt)).limit(100),
       db.select().from(payments).where(eq(payments.tenantId, tenantId)).orderBy(desc(payments.paidAt)).limit(100),
@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
         lte(customers.expiresAt, expiringBefore),
       )).orderBy(customers.expiresAt).limit(100),
       db.select({ value: count() }).from(customers).where(and(eq(customers.tenantId, tenantId), eq(customers.status, 'active'))),
+      db.select({ value: count() }).from(customers).where(eq(customers.tenantId, tenantId)),
       db.select({ amount: sum(payments.amount), count: count() }).from(payments).where(and(
         eq(payments.tenantId, tenantId),
         eq(payments.status, 'paid'),
@@ -49,6 +50,7 @@ export async function GET(request: NextRequest) {
       expiringCustomers: expiringCustomerRows,
       summary: {
         activeCustomers: activeCustomerCount[0]?.value ?? 0,
+        totalCustomers: totalCustomerCount[0]?.value ?? 0,
         siteCount: siteRows.length,
         activePackages: packageRows.filter((plan) => plan.active).length,
         paidRevenue: Number(paidPaymentSummary[0]?.amount ?? 0),

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { BrandWordmark } from '@/components/brand-wordmark'
 import { PaymentSettings } from '@/components/payment-settings'
 import { RouterProvisioning } from '@/components/admin-dashboard'
 
@@ -91,7 +92,7 @@ export default function GetStartedWizard() {
     <main className="get-started-page">
       <section className="get-started-shell">
         <header className="get-started-header">
-          <a className="get-started-brand" href="/" aria-label="LKTECH home">LKTECH <span>SETUP</span></a>
+          <a className="get-started-brand" href="/" aria-label="LKTECH home"><BrandWordmark primary="LKTECH" accent="SETUP" /></a>
           <p>Follow each step to set up your account, customer site, payments, and router.</p>
         </header>
         <ol className="get-started-steps" aria-label="Setup progress">

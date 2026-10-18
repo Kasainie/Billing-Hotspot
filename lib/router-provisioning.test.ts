@@ -157,14 +157,29 @@ test('captive portal status pages use the configured tenant brand safely', () =>
     .map((fileName) => readFileSync(new URL(`../public/hotspot-assets/${fileName}`, import.meta.url), 'utf8'))
   for (const page of pages) {
     assert.match(page, /\{\{PORTAL_COMPANY_NAME\}\}/)
-    assert.doesNotMatch(page, /LKTECH|LKTech/)
+    assert.match(page, /\{\{PORTAL_COMPANY_NAME_MARKUP\}\}/)
+    assert.doesNotMatch(page.replace(/<footer class="portal-copyright"[\s\S]*?<\/footer>/, ''), /LKTECH|LKTech/)
     const branded = prepareHotspotPortalBranding(page, 'Mari-Net <Guest & Wi-Fi>')
     assert.match(branded, /Mari-Net &lt;Guest &amp; Wi-Fi&gt;/)
+    assert.match(branded, /class="portal-brand-primary">Mari-Net<\/span> <span class="portal-brand-accent">&lt;Guest &amp; Wi-Fi&gt;<\/span>/)
     assert.doesNotMatch(branded, /\{\{PORTAL_COMPANY_NAME\}\}/)
+    assert.doesNotMatch(branded, /\{\{PORTAL_COMPANY_NAME_MARKUP\}\}/)
   }
+  assert.match(prepareHotspotPortalBranding('{{PORTAL_COMPANY_NAME_MARKUP}}', 'SingleName'), /SingleName<\/span> <span class="portal-brand-accent">\.<\/span>/)
   assert.equal(resolveHotspotCompanyName('LKTECH'), 'Mari-Net')
   assert.equal(resolveHotspotCompanyName(null), 'Mari-Net')
   assert.equal(resolveHotspotCompanyName('Custom Wi-Fi'), 'Custom Wi-Fi')
+})
+
+test('captive portal pages show the animated LKTECH 2026 copyright notice', () => {
+  const pages = ['login.html', 'alogin.html', 'status.html', 'logout.html', 'error.html']
+    .map((fileName) => readFileSync(new URL(`../public/hotspot-assets/${fileName}`, import.meta.url), 'utf8'))
+  for (const page of pages) {
+    assert.match(page, /class="portal-copyright-text">© 2026 LKTECH™\. All rights reserved\.<\/span>/)
+  }
+  const styles = readFileSync(new URL('../public/hotspot-assets/style.css', import.meta.url), 'utf8')
+  assert.match(styles, /@keyframes portal-copyright-shimmer/)
+  assert.match(styles, /prefers-reduced-motion: reduce/)
 })
 
 test('portal CHAP helper matches standard MD5 vectors', () => {
@@ -185,17 +200,20 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
   const errorPage = readFileSync(new URL('../public/hotspot-assets/error.html', import.meta.url), 'utf8')
   const logoutPage = readFileSync(new URL('../public/hotspot-assets/logout.html', import.meta.url), 'utf8')
 
-  assert.match(loginPage, /class="hotspot-home mari-net-portal"/)
+  assert.match(loginPage, /class="hotspot-home mari-net-portal portal-theme-pending"/)
+  assert.match(loginPage, /portalThemeState\.settings && portalThemeState\.stylesheet/)
+  assert.match(loginPage, /portal-theme-pending/)
   assert.match(loginPage, /class="marinet-brand">Mari-Net<\/h1>/)
   assert.match(loginPage, /action="\$\(link-login-only\)"/)
   assert.match(loginPage, /onsubmit="return doLogin\(this\)"/)
   assert.doesNotMatch(loginPage, /\$\(if chap-id\)|\$\(endif\)/)
   assert.match(loginPage, /billingBaseUrl = window\.location\.hostname === 'localhost' \|\| window\.location\.hostname === '127\.0\.0\.1'/)
   assert.match(loginPage, /fetch\(billingBaseUrl \+ '\/api\/hotspot\/portal-template'/)
+  assert.match(loginPage, /setProperty\('--portal-wallpaper', 'url\("' \+ billingBaseUrl \+ '\/hotspot-assets\/themes\/savannah-background\.png"\)'/)
   assert.match(loginPage, /portalSettings\.companyName/)
   assert.match(loginPage, /portalSettings\.supportMessage/)
   assert.match(loginPage, /setAttribute\('data-portal-template', portalSettings\.activeTemplate\)/)
-  assert.match(loginPage, /portal-theme'\)\.href = billingBaseUrl \+ '\/api\/hotspot\/portal-theme' \+ tenantQuery/)
+  assert.match(loginPage, /portalThemeLink\.href = billingBaseUrl \+ '\/api\/hotspot\/portal-theme' \+ tenantQuery/)
   assert.match(loginPage, /class="marinet-tabs"/)
   assert.match(loginPage, /class="portlet login-panel" name="voucherLogin" action="\$\(link-login-only\)" method="post" onsubmit="return doLogin\(this\)"/)
   assert.match(loginPage, /<h3>Connect with Voucher<\/h3>/)
@@ -203,7 +221,11 @@ test('captive portal keeps MikroTik login fields, CHAP submission, and success r
   assert.match(loginPage, /name="password"[^>]*placeholder="Enter voucher password"/)
   assert.doesNotMatch(loginPage, /\/hotspot\/redeem/)
   assert.match(loginPage, /name="code"/)
-  assert.match(loginPage, /class="support-line">Support:/)
+  assert.match(loginPage, /class="support-line" aria-label="Help and support"/)
+  assert.match(loginPage, /If you need help/)
+  assert.match(loginPage, /Network Engineer: Lekireu Kasainie/)
+  assert.match(loginPage, /href="tel:\+254795872528">0795872528<\/a>/)
+  assert.match(loginPage, /href="mailto:info@lktech\.life">info@lktech\.life<\/a>/)
   assert.match(loginPage, /id="portal-theme" rel="stylesheet"/)
   const portalStyles = readFileSync(new URL('../public/hotspot-assets/style.css', import.meta.url), 'utf8')
   for (const templateId of ['original', 'fresh', 'skyline', 'copperline', 'graphite', 'cobalt', 'lagoon', 'ember']) {
@@ -412,6 +434,24 @@ test('portal design catalog has a stylesheet for every non-default template', ()
   }
 })
 
+test('captive portal background image is available at its shared theme asset path', () => {
+  const portalStyles = readFileSync(new URL('../public/hotspot-assets/style.css', import.meta.url), 'utf8')
+  const wallpaper = readFileSync(new URL('../public/hotspot-assets/themes/savannah-background.png', import.meta.url))
+  assert.match(portalStyles, /--portal-wallpaper, url\("themes\/savannah-background\.png"\)/)
+  assert.match(portalStyles, /\.hotspot-home\.mari-net-portal \.portal-shell[\s\S]*?var\(--portal-wallpaper, url\("themes\/savannah-background\.png"\)\)/)
+  assert.match(portalStyles, /\.hotspot-home\.mari-net-portal\.portal-theme-pending \.portal-stack/)
+  assert.doesNotMatch(portalStyles, /radial-gradient\(ellipse at 50% -12%, var\(--marinet-page-glow/)
+  assert.match(portalStyles, /data-portal-template="graphite"[\s\S]*?--portal-panel-wash: rgba\(12, 27, 39, \.46\)/)
+  assert.match(portalStyles, /data-portal-template="graphite"\] \.marinet-card[\s\S]*?backdrop-filter: blur\(6px\) saturate\(125%\)/)
+  assert.match(portalStyles, /data-portal-template="graphite"\] \.package-card\.selected[\s\S]*?background: rgba\(39, 67, 48, \.62\)/)
+  assert.match(portalStyles, /--marinet-text: #f8fbff/)
+  assert.match(portalStyles, /color: #00bfff/)
+  assert.match(portalStyles, /font-family: Inter, "Segoe UI", Arial, sans-serif/)
+  assert.deepEqual([...wallpaper.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10])
+  assert.equal(wallpaper.readUInt32BE(16), 768)
+  assert.equal(wallpaper.readUInt32BE(20), 1365)
+})
+
 test('subscriber service script safely reuses matching bridge DHCP and configures Hotspot and PPPoE', () => {
   const script = buildSubscriberServiceScript({
     bridgeName: 'lktech',
@@ -534,7 +574,8 @@ test('existing 192.168.88.0/24 DHCP can be reused without creating a second serv
   assert.match(script, /ip dns set allow-remote-requests=yes/)
   assert.match(script, /dns-server=\$hotspotGateway/)
   assert.match(script, /common-name="login\.lktech\.life" and trusted=yes/)
-  assert.match(script, /ssl-certificate=\$hotspotCertificateName login-by=https,http-chap/)
+  assert.match(script, /ssl-certificate=\$hotspotCertificateName login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d/)
+  assert.match(script, /login-by=http-chap,mac-cookie mac-cookie-timeout=3d/)
   assert.match(script, /Android automatic captive-portal discovery remains unavailable/)
   assert.doesNotMatch(script, /https-redirect/)
 })

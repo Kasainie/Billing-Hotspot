@@ -2,6 +2,12 @@
 
 Each ISP operates in a tenant workspace. Staff create an owner account at `/signup`, verify the email with the six-digit code sent to the address (valid for 10 minutes), and continue to `/get-started` to confirm the ISP and captive portal identity, configure M-Pesa Daraja (required before paid checkouts), create the first network site, and provision and confirm its MikroTik router. Verification codes can be resent after a one-minute cooldown and allow five attempts. Email-and-password sign-in is blocked until verification; verified Google sign-in continues directly to guided setup. The final checklist links to the dashboard and captive portal preview. Workspace sessions are opaque, HTTP-only cookies; changing an `x-tenant-id` header cannot change the selected workspace. Each user can create more than one workspace and switch between memberships.
 
+## Workspace settings center
+
+Apply `20261018200000_add_tenant_workspace_settings.sql` and `20261018210000_split_workspace_settings_storage.sql` before deploying the Settings center. Non-secret workspace preferences are stored per tenant. Passwords, provider tokens, and webhook signing secrets are encrypted with `TENANT_SECRETS_ENCRYPTION_KEY`; configure the same stable key in every environment that needs to save those credentials. Without the key, ordinary preferences and portal settings remain available, but generic secrets and Daraja/SMS credential changes are rejected rather than stored unencrypted.
+
+The Settings center connects Branding and HotSpot portal name/copy to the live captive portal, Domain workspace-slug changes to the tenant record, Payments to Daraja settings, Communications to the Africa's Talking SMS configuration, and Profile/password changes to the authenticated account. Custom domains still require DNS and TLS setup at the hosting provider. SMTP, WhatsApp, AI, accounting, loyalty, operator-alert, developer-webhook, and message-template preferences can be saved, but external delivery, automation, token issuance, and template substitution are not enabled until their respective integrations are implemented. PPPoE options are workspace defaults only and do not alter existing plans or router provisioning. Two-factor authentication is not currently supported; the UI does not present it as enabled.
+
 ## Deploy
 
 1. Apply all migrations in `supabase/migrations`, including `20261004120000_make_multitenant.sql`, before deploying the tenant-aware application. Existing billing, RADIUS, and provisioning rows remain assigned to the `default` workspace.

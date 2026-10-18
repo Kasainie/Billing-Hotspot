@@ -22,7 +22,7 @@ All owned MikroTik access points must use the same RADIUS server and shared data
 
 Generated Hotspot and PPPoE configurations report RADIUS accounting every minute. Re-run the router service configuration to apply the new interval to routers provisioned previously.
 
-Free, zero-cost hotspot packages activate automatically when a visitor selects them. The portal uses MikroTik's client MAC and submits the issued RADIUS credentials in plain form only over HTTPS. If an HTTPS portal is given an HTTP login action, it upgrades that action to HTTPS; on HTTP it uses CHAP when the router supplies a challenge and refuses an insecure plain-password submission. After deploying a portal update, refresh the hotspot files on each existing router for this behavior to take effect.
+Free, zero-cost hotspot packages activate automatically when a visitor selects them. The portal uses MikroTik's client MAC and submits the issued RADIUS credentials in plain form only over HTTPS. If an HTTPS portal is given an HTTP login action, it upgrades that action to HTTPS; on HTTP it uses CHAP when the router supplies a challenge and refuses an insecure plain-password submission. Managed Hotspot profiles also enable RouterOS MAC-cookie authentication with a three-day cookie lifetime. After a successful sign-in, the same device can reconnect without opening the captive portal while its RADIUS account remains valid. The account's RADIUS expiration still limits the package; private/randomized MAC changes may require signing in through the portal again. Re-run the router service configuration on existing routers to apply MAC-cookie settings.
 
 Enable the FreeRADIUS `expiration` module in the `authorize` section after SQL. The application writes an absolute `Expiration` check item for each package, and this module rejects expired accounts and caps `Session-Timeout` to the remaining package time. Apply migration `20261001140000_hotspot_roaming_expiration.sql`, deploy the application, then refresh the hotspot portal files on each router. A user with an older paid package must sign in once at an owned hotspot so its device can be associated with that account.
 
@@ -77,15 +77,15 @@ The public DNS records for `login.lktech.life` currently point to Vercel, not th
    ```powershell
    $secureToken = Read-Host "Vercel DNS API token" -AsSecureString
    $env:VERCEL_API_TOKEN = [System.Net.NetworkCredential]::new("", $secureToken).Password
-   .\lego.exe --path .\lego-data --email "YOUR_EMAIL" --dns vercel --domains login.lktech.life run
+   .\lego.exe --path .\lego-data-rsa --email "YOUR_EMAIL" --dns vercel --domains login.lktech.life --key-type rsa2048 run
    Remove-Item Env:VERCEL_API_TOKEN
    ```
 
-   The certificate and key are written under `lego-data\certificates`. Do not share or upload the private key anywhere except directly to the router.
+   The certificate and key are written under `lego-data-rsa\certificates`. RSA issuance selects Let's Encrypt's YR intermediate chain, whose default path is cross-signed by the widely trusted ISRG Root X1. This is preferable for captive-portal clients that may not trust newer root chains. Keep the separate path when replacing a certificate so the currently installed certificate remains available until the replacement is tested. Do not share or upload the private key anywhere except directly to the router.
 3. Use OpenSSL to package the certificate, private key, and issuer chain as a password-protected PKCS#12 file:
 
    ```powershell
-   openssl pkcs12 -export -out login.lktech.life.p12 -inkey .\lego-data\certificates\login.lktech.life.key -in .\lego-data\certificates\login.lktech.life.crt -certfile .\lego-data\certificates\login.lktech.life.issuer.crt
+   openssl pkcs12 -export -out login.lktech.life-rsa.p12 -inkey .\lego-data-rsa\certificates\login.lktech.life.key -in .\lego-data-rsa\certificates\login.lktech.life.crt -certfile .\lego-data-rsa\certificates\login.lktech.life.issuer.crt
    ```
 
    Choose a strong export password. In WinBox, upload the `.p12` file to **Files**, then use **System → Certificates → Import** and enter the password locally.
@@ -99,7 +99,13 @@ The public DNS records for `login.lktech.life` currently point to Vercel, not th
    /import hotspot.rsc
    ```
 
-   Confirm `/ip hotspot profile print detail where name="billing-hotspot-profile"` shows the certificate and `login-by=https,http-chap`. Then forget and rejoin the Wi-Fi on an Android phone so it obtains a fresh DHCP lease. RouterOS should advertise the captive portal and Android can show its sign-in prompt. A new certificate must be issued and imported before the current one expires; importing a renewed certificate and rerunning `hotspot.rsc` updates the profile.
+   For a first installation, confirm `/ip hotspot profile print detail where name="billing-hotspot-profile"` shows the certificate, `login-by=https,http-chap,mac-cookie`, and `mac-cookie-timeout=3d`. When replacing a certificate, note the exact name of the newly imported leaf certificate and update the profile to use it:
+
+   ```routeros
+   /ip hotspot profile set [find where name="billing-hotspot-profile"] ssl-certificate="NEW_IMPORTED_LEAF_CERTIFICATE" login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d
+   ```
+
+   Do not rerun `hotspot.rsc` while both the old and new trusted leaf certificates have `common-name="login.lktech.life"`; that script expects exactly one matching certificate and otherwise falls back to HTTP. Confirm the profile points to the new certificate before removing the old leaf. Then forget and rejoin the Wi-Fi on an Android phone so it obtains a fresh DHCP lease. RouterOS should advertise the captive portal and Android can show its sign-in prompt. Renew and import a compatible certificate before the current one expires.
 
 Refresh the captive portal files on an existing router:
 

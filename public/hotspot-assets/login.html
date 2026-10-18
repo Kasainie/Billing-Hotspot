@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="style.css">
   <link id="portal-theme" rel="stylesheet">
 </head>
-<body class="hotspot-home mari-net-portal">
+<body class="hotspot-home mari-net-portal portal-theme-pending">
   <form id="sendin" action="$(link-login-only)" method="post" style="display:none">
     <input id="sendin-username" type="hidden" name="username">
     <input id="sendin-password" type="hidden" name="password">
@@ -150,17 +150,44 @@
         <button class="login-button" type="submit">Login</button>
       </form>
 
-      <div class="support-line">Support: +254795872528</div>
+      <section class="support-line" aria-label="Help and support">
+        <strong>If you need help</strong>
+        <span class="support-engineer">Network Engineer: Lekireu Kasainie</span>
+        <p class="support-message"></p>
+        <div class="support-contacts">
+          <a href="tel:+254795872528">0795872528</a>
+          <a href="mailto:info@lktech.life">info@lktech.life</a>
+        </div>
+      </section>
+      <footer class="portal-copyright" aria-label="Copyright">
+        <span class="portal-copyright-text">© 2026 LKTECH™. All rights reserved.</span>
+      </footer>
     </div>
   </main>
   <script>
     var billingBaseUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
       ? window.location.origin
       : 'https://billing.lktech.life';
+    document.documentElement.style.setProperty('--portal-wallpaper', 'url("' + billingBaseUrl + '/hotspot-assets/themes/savannah-background.png")');
     var portalTenantSlug = '';
     var portalClientMac = '$(mac)';
     var tenantSlug = new URLSearchParams(window.location.search).get('tenant') || portalTenantSlug;
     var tenantQuery = tenantSlug ? '?tenant=' + encodeURIComponent(tenantSlug) : '';
+    var portalThemeState = { settings: false, stylesheet: false, abandoned: false };
+    var portalThemeFallbackTimer = setTimeout(function () {
+      if (document.body.classList.contains('portal-theme-pending')) {
+        portalThemeState.abandoned = true;
+        document.getElementById('portal-theme').removeAttribute('href');
+        console.warn('Captive portal theme did not finish loading; showing the default portal styles.');
+        document.body.classList.remove('portal-theme-pending');
+      }
+    }, 8000);
+    function finishPortalThemeLoad() {
+      if (portalThemeState.settings && portalThemeState.stylesheet) {
+        clearTimeout(portalThemeFallbackTimer);
+        document.body.classList.remove('portal-theme-pending');
+      }
+    }
     document.querySelectorAll('.tenant-slug-field').forEach(function (field) {
       field.value = tenantSlug;
     });
@@ -170,7 +197,17 @@
     var selectedPackage = document.getElementById('selected-package');
     purchaseForm.action = billingBaseUrl + '/hotspot/checkout';
     document.querySelector('.action-panel[method="get"]').action = billingBaseUrl + '/hotspot/reconnect';
-    document.getElementById('portal-theme').href = billingBaseUrl + '/api/hotspot/portal-theme' + tenantQuery;
+    var portalThemeLink = document.getElementById('portal-theme');
+    portalThemeLink.addEventListener('load', function () {
+      portalThemeState.stylesheet = true;
+      finishPortalThemeLoad();
+    });
+    portalThemeLink.addEventListener('error', function () {
+      console.error('Unable to load captive portal theme stylesheet.');
+      portalThemeState.stylesheet = true;
+      finishPortalThemeLoad();
+    });
+    portalThemeLink.href = billingBaseUrl + '/api/hotspot/portal-theme' + tenantQuery;
 
     function selectPackage(product, button) {
       packageGrid.querySelectorAll('.package-card').forEach(function (card) {
@@ -339,6 +376,7 @@
         return response.json();
       })
       .then(function (portalSettings) {
+        if (portalThemeState.abandoned) return;
         if (portalSettings.activeTemplate) {
           document.body.setAttribute('data-portal-template', portalSettings.activeTemplate);
         }
@@ -347,11 +385,15 @@
           document.title = portalSettings.companyName + ' Hotspot';
         }
         if (portalSettings.supportMessage) {
-          document.querySelector('.support-line').textContent = portalSettings.supportMessage;
+          document.querySelector('.support-message').textContent = portalSettings.supportMessage;
         }
       })
       .catch(function (error) {
         console.error('Unable to load captive portal design settings', error);
+      })
+      .then(function () {
+        portalThemeState.settings = true;
+        finishPortalThemeLoad();
       });
   </script>
 </body>

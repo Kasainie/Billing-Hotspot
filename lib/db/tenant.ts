@@ -1,4 +1,5 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
+import { isIP } from 'node:net'
 import { promisify } from 'node:util'
 import { and, eq, gt } from 'drizzle-orm'
 import { cookies } from 'next/headers'
@@ -103,7 +104,7 @@ export async function getTenantMemberships(userId: string) {
 export async function resolvePublicTenantId(request: NextRequest): Promise<string | null> {
   const host = request.headers.get('host')?.split(':')[0]?.toLowerCase() || ''
   const labels = host.split('.')
-  const candidateSubdomain = labels.length > 2 ? labels[0] : ''
+  const candidateSubdomain = isIP(host) === 0 && labels.length > 2 ? labels[0] : ''
   const subdomain = ['www', 'app', 'billing', 'login'].includes(candidateSubdomain) ? '' : candidateSubdomain
   const slug = (
     request.nextUrl.searchParams.get('tenant') ||

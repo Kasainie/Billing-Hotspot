@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { customers, invoices, mobileMoneyTransactions, packages, payments, pppoeAccounts, radcheck, radreply, sites } from '@/lib/db/schema'
+import { customers, invoices, mobileMoneyTransactions, packages, payments, pppoeAccounts, radcheck, radreply, routerMonitors, routerRemoteSessions, sites, subscriberCredits } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { enqueueTenantSms } from '@/lib/db/tenant-sms'
@@ -44,6 +44,9 @@ function validate(entity: Entity, input: Record<string, unknown>) {
     if (input[key] === undefined || input[key] === null || (typeof input[key] === 'string' && !input[key].trim())) return `${key} is required`
   }
   if (entity === 'customers' && typeof input.email === 'string' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) return 'email is invalid'
+  if (entity === 'customers' && input.location !== undefined &&
+      (typeof input.location !== 'string' || input.location.trim().length > 240)) return 'Location must be 240 characters or fewer'
+  if (entity === 'customers' && input.siteId !== undefined && input.siteId !== null && typeof input.siteId !== 'string') return 'Select a valid site'
   if (entity === 'customers' && (typeof input.radiusUsername !== 'string' || !/^[a-zA-Z0-9._@-]{3,64}$/.test(input.radiusUsername.trim()))) return 'RADIUS username must be 3-64 letters, numbers, dots, underscores, @ signs, or hyphens'
   if (entity === 'customers' && (typeof input.password !== 'string' || input.password.trim().length < 12 || input.password.length > 128)) return 'RADIUS password must be 12-128 characters'
   if (entity === 'customers' && (typeof input.packageId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.packageId))) return 'Select a valid service plan'
@@ -89,7 +92,99 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
         !Number.isInteger(pageOffset) || pageOffset < 0 || pageOffset > 1_000_000) {
       return NextResponse.json({ error: 'Pagination must use a limit from 1 to 200 and a non-negative offset.' }, { status: 400 })
     }
-    const orderColumn = entity === 'payments' ? payments.paidAt : entity === 'packages' ? packages.createdAt : entity === 'customers' ? customers.createdAt : sites.createdAt
+    if (entity === 'customers') {
+      const customerRows = await db.select().from(customers).where(eq(customers.tenantId, tenantId))
+        .orderBy(desc(customers.createdAt)).limit(pageLimit).offset(pageOffset)
+      const usernames = customerRows.map((row) => row.radiusUsername).filter((username): username is string => Boolean(username))
+      const planNames = [...new Set(customerRows.map((row) => row.plan).filter((plan): plan is string => Boolean(plan)))]
+      const [activityRows, planRows, pppoeRows, routerSessionRows, routerCatalog, siteCatalog] = await Promise.all([
+        usernames.length
+          ? db.execute<{
+            username: string
+            firstOnlineAt: Date | string | null
+            lastOnlineAt: Date | string | null
+            hasBinding: boolean | null
+            isOnline: boolean | null
+          }>(sql`
+              select username,
+                min(acctstarttime) as "firstOnlineAt",
+                max(coalesce(acctstoptime, acctupdatetime, acctstarttime)) as "lastOnlineAt",
+                bool_or(nullif(btrim(callingstationid), '') is not null)
+                  filter (where acctstoptime is null) as "hasBinding",
+                bool_or(acctstoptime is null) as "isOnline"
+              from public.radacct
+              where username in (${sql.join(usernames.map((username) => sql`${username}`), sql`, `)})
+              group by username
+            `)
+          : Promise.resolve({ rows: [] }),
+        planNames.length
+          ? db.select({ name: packages.name, type: packages.type }).from(packages).where(and(
+            eq(packages.tenantId, tenantId),
+            inArray(packages.name, planNames),
+          ))
+          : Promise.resolve([]),
+        customerRows.length
+          ? db.select({ customerId: pppoeAccounts.customerId }).from(pppoeAccounts).where(and(
+            eq(pppoeAccounts.tenantId, tenantId),
+            inArray(pppoeAccounts.customerId, customerRows.map((row) => row.id)),
+          ))
+          : Promise.resolve([]),
+        usernames.length
+          ? db.select({
+            username: routerRemoteSessions.username,
+            routerName: routerMonitors.routerName,
+          }).from(routerRemoteSessions)
+            .innerJoin(routerMonitors, eq(routerRemoteSessions.routerId, routerMonitors.id))
+            .where(and(
+              eq(routerMonitors.tenantId, tenantId),
+              eq(routerMonitors.enabled, true),
+              inArray(routerRemoteSessions.username, usernames),
+              sql`${routerMonitors.connectorLastSeenAt} >= clock_timestamp() - interval '30 seconds'`,
+              sql`${routerRemoteSessions.observedAt} >= clock_timestamp() - interval '30 seconds'`,
+            ))
+          : Promise.resolve([]),
+        db.select({ siteId: routerMonitors.siteId, routerName: routerMonitors.routerName }).from(routerMonitors)
+          .where(and(eq(routerMonitors.tenantId, tenantId), eq(routerMonitors.enabled, true)))
+          .orderBy(routerMonitors.routerName),
+        db.select({ id: sites.id, name: sites.name, location: sites.location }).from(sites)
+          .where(eq(sites.tenantId, tenantId)),
+      ])
+      const activityByUsername = new Map(activityRows.rows.map((activity) => [activity.username, activity]))
+      const planTypeByName = new Map(planRows.map((plan) => [plan.name, plan.type]))
+      const pppoeCustomerIds = new Set(pppoeRows.map((account) => account.customerId))
+      const siteById = new Map(siteCatalog.map((site) => [site.id, site]))
+      const routersByUsername = new Map<string, Set<string>>()
+      const routersBySite = new Map<string, Set<string>>()
+      for (const router of routerCatalog) {
+        const routers = routersBySite.get(router.siteId) || new Set<string>()
+        routers.add(router.routerName)
+        routersBySite.set(router.siteId, routers)
+      }
+      for (const session of routerSessionRows) {
+        const routers = routersByUsername.get(session.username) || new Set<string>()
+        routers.add(session.routerName)
+        routersByUsername.set(session.username, routers)
+      }
+      return NextResponse.json(customerRows.map((row) => {
+        const activity = row.radiusUsername ? activityByUsername.get(row.radiusUsername) : null
+        const activeRouterNames = row.radiusUsername ? routersByUsername.get(row.radiusUsername) || new Set<string>() : new Set<string>()
+        const routerNames = new Set(row.siteId ? routersBySite.get(row.siteId) || [] : [])
+        for (const router of activeRouterNames) routerNames.add(router)
+        return {
+          ...row,
+          siteName: row.siteId ? siteById.get(row.siteId)?.name ?? null : null,
+          siteLocation: row.siteId ? siteById.get(row.siteId)?.location ?? null : null,
+          serviceType: pppoeCustomerIds.has(row.id) ? 'PPPoE' : row.plan ? planTypeByName.get(row.plan) ?? null : null,
+          firstOnlineAt: activity?.firstOnlineAt ?? null,
+          lastOnlineAt: activity?.lastOnlineAt ?? null,
+          hasBinding: activity?.hasBinding ?? false,
+          isOnline: activity?.isOnline === true || activeRouterNames.size > 0,
+          routerNames: [...routerNames],
+          availableRouters: routerCatalog.map((router) => router.routerName),
+        }
+      }))
+    }
+    const orderColumn = entity === 'payments' ? payments.paidAt : entity === 'packages' ? packages.createdAt : sites.createdAt
     const rows = await db.select().from(table).where(eq(table.tenantId, tenantId)).orderBy(desc(orderColumn as never)).limit(pageLimit).offset(pageOffset)
     return NextResponse.json(rows)
   } catch (error) {
@@ -158,6 +253,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
 
         const [createdCustomer] = await tx.insert(customers).values({
           tenantId,
+          siteId: typeof input.siteId === 'string' && input.siteId.trim() ? input.siteId.trim() : null,
+          location: typeof input.location === 'string' && input.location.trim() ? input.location.trim() : null,
           name: clean(input.name) as string,
           email: (clean(input.email) as string).toLowerCase(),
           phone: normalizedPhone || (phoneInput || null),
@@ -212,20 +309,30 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         await tx.insert(radreply).values(replyRules)
 
         if (plan.type === 'PPPoE' && normalizedPhone) {
-          await tx.insert(pppoeAccounts).values({
+          const [account] = await tx.insert(pppoeAccounts).values({
             tenantId,
             phone: normalizedPhone,
             name: createdCustomer.name,
             email: createdCustomer.email,
             customerId: createdCustomer.id,
-          })
+          }).returning({ accountNumber: pppoeAccounts.accountNumber })
+          await tx.update(customers).set({ accountNumber: account.accountNumber })
+            .where(and(eq(customers.id, createdCustomer.id), eq(customers.tenantId, tenantId)))
+          return { customer: createdCustomer, accountNumber: account.accountNumber, error: null, status: 201 }
         }
 
-        return { customer: createdCustomer, error: null, status: 201 }
+        const allocatedAccount = await tx.execute<{ accountNumber: number }>(sql`
+          select nextval(pg_get_serial_sequence('public.pppoe_accounts', 'account_number'))::integer as "accountNumber"
+        `)
+        const accountNumber = allocatedAccount.rows[0]?.accountNumber
+        if (!accountNumber) throw new Error('Unable to allocate a subscriber account number.')
+        await tx.update(customers).set({ accountNumber })
+          .where(and(eq(customers.id, createdCustomer.id), eq(customers.tenantId, tenantId)))
+        return { customer: createdCustomer, accountNumber, error: null, status: 201 }
       })
 
       if (!result.customer) return NextResponse.json({ error: result.error }, { status: result.status })
-      return NextResponse.json(result.customer, { status: 201 })
+      return NextResponse.json({ ...result.customer, accountNumber: result.accountNumber }, { status: 201 })
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
         return NextResponse.json({ error: 'RADIUS username already exists' }, { status: 409 })
@@ -347,6 +454,10 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
           .where(and(eq(invoices.customerId, id), eq(invoices.tenantId, tenantId)))
           .limit(1)
         if (invoice) return { invoiceConflict: true as const }
+        const [credit] = await tx.select({ id: subscriberCredits.id }).from(subscriberCredits)
+          .where(and(eq(subscriberCredits.customerId, id), eq(subscriberCredits.tenantId, tenantId)))
+          .limit(1)
+        if (credit) return { creditConflict: true as const }
         if (customer.radiusUsername) {
           await tx.delete(radcheck).where(and(eq(radcheck.username, customer.radiusUsername), eq(radcheck.tenantId, tenantId)))
           await tx.delete(radreply).where(and(eq(radreply.username, customer.radiusUsername), eq(radreply.tenantId, tenantId)))
@@ -364,6 +475,9 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
       })
       if ('invoiceConflict' in deleted) {
         return NextResponse.json({ error: 'This subscriber has invoices and cannot be deleted. Suspend the account to preserve its billing history.' }, { status: 409 })
+      }
+      if ('creditConflict' in deleted) {
+        return NextResponse.json({ error: 'This subscriber has account credit history and cannot be deleted. Suspend the account to preserve the financial audit trail.' }, { status: 409 })
       }
       if (!deleted.deleted) return NextResponse.json({ error: 'Subscriber not found' }, { status: 404 })
       return NextResponse.json({ ok: true })
