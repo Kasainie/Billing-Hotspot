@@ -23,6 +23,8 @@ type HotspotSession = {
   routerId: string | null
   routerSessionId: string | null
   routerSessionType: 'hotspot' | 'pppoe' | null
+  downloadBps: string | null
+  uploadBps: string | null
   downloadBytes: string
   uploadBytes: string
 }
@@ -100,6 +102,15 @@ function formatBytes(value: string | number) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
   return `${(bytes / 1024 ** exponent).toLocaleString('en-KE', { maximumFractionDigits: 1 })} ${units[exponent]}`
+}
+
+function formatSpeed(value: string | null) {
+  if (value === null) return '—'
+  const bitsPerSecond = Number(value)
+  if (!Number.isFinite(bitsPerSecond) || bitsPerSecond < 0) return '—'
+  if (bitsPerSecond >= 1_000_000) return `${(bitsPerSecond / 1_000_000).toLocaleString('en-KE', { maximumFractionDigits: 1 })} Mbps`
+  if (bitsPerSecond >= 1_000) return `${(bitsPerSecond / 1_000).toLocaleString('en-KE', { maximumFractionDigits: 1 })} Kbps`
+  return `${Math.round(bitsPerSecond)} bps`
 }
 
 function formatStartTime(value: string | null) {
@@ -539,7 +550,7 @@ export function LiveHotspotSessions({ onOpenSubscriber, onOnlineCountChange }: {
         {loading ? <p className="live-sessions-empty" role="status">Loading live sessions…</p> : visibleSessions.length === 0 ? <p className="live-sessions-empty">{search || filter !== 'All' ? 'No sessions match your filters.' : 'No subscribers are online right now.'}</p> : <>
           <div className="live-sessions-result-count">{visibleSessions.length} online {visibleSessions.length === 1 ? 'session' : 'sessions'}{data && data.activeSessions > data.sessions.length ? ` · showing ${data.sessions.length} of ${data.activeSessions}` : ''}</div>
           <div className="live-sessions-table-scroll"><table>
-            <thead><tr><th aria-label="Select session"><span className="live-session-checkbox" /></th><th>SUBSCRIBER</th><th>DOWN · UP</th><th>DEVICE · IP</th><th>ROUTER</th><th>ONLINE FOR</th><th>EXPIRY</th><th aria-label="Open details" /></tr></thead>
+            <thead><tr><th aria-label="Select session"><span className="live-session-checkbox" /></th><th>SUBSCRIBER</th><th>USED · DOWN / UP</th><th>SPEED · DOWN / UP</th><th>DEVICE · IP</th><th>ROUTER</th><th>ONLINE FOR</th><th>EXPIRY</th><th aria-label="Open details" /></tr></thead>
             <tbody>{visibleSessions.map((session) => {
               const expiry = formatExpiry(session.expiresAt)
               return <tr key={session.id} className={selectedSession?.id === session.id ? 'is-selected' : ''} tabIndex={0} aria-label={`Open ${session.customerName || session.username || 'subscriber'} session details`} onClick={() => { setSelectedSession(session); setSmsOpen(false); setActionMessage(''); setActionError(false) }} onKeyDown={(event) => {
@@ -555,6 +566,7 @@ export function LiveHotspotSessions({ onOpenSubscriber, onOnlineCountChange }: {
               <td><span className="live-session-checkbox" aria-hidden="true" /></td>
               <td><strong>{session.customerName || session.username || 'Unknown subscriber'}</strong><small>{session.username || session.phone || 'No username on record'}</small></td>
               <td><b className="live-session-download">{formatBytes(session.downloadBytes)}</b><span className="live-session-traffic-separator"> · </span>{formatBytes(session.uploadBytes)}</td>
+              <td className="live-session-speed"><strong>↓ {formatSpeed(session.downloadBps)}</strong><small>↑ {formatSpeed(session.uploadBps)}</small></td>
               <td><span className="live-session-device">{session.mac?.trim() || '—'}</span><small className="live-session-ip">{session.ipAddress || '—'}</small></td>
               <td><strong>{session.router || '—'}</strong></td>
               <td>{formatDuration(session.startedAt)}</td>
@@ -565,7 +577,7 @@ export function LiveHotspotSessions({ onOpenSubscriber, onOnlineCountChange }: {
         </>}
       </section>
       }
-      {view === 'live' && <p className="live-sessions-footnote">Session data refreshes automatically every 30 seconds.</p>}
+      {view === 'live' && <p className="live-sessions-footnote">Session data refreshes automatically every 30 seconds. Live speeds require an active router connector; — means no recent counter sample is available.</p>}
       {selectedSession && <div className="live-session-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDetails() }}>
         <aside className="live-session-drawer" role="dialog" aria-modal="true" aria-labelledby="live-session-drawer-title">
           <header className="live-session-drawer-header">
@@ -597,6 +609,8 @@ export function LiveHotspotSessions({ onOpenSubscriber, onOnlineCountChange }: {
             <div className="live-session-detail-metrics">
               <article><span>DOWNLOAD</span><strong>{formatBytes(selectedSession.downloadBytes)}</strong><i style={{ width: `${downloadShare}%` }} /></article>
               <article><span>UPLOAD</span><strong>{formatBytes(selectedSession.uploadBytes)}</strong><i style={{ width: `${uploadShare}%` }} /></article>
+              <article><span>DOWNLOAD SPEED</span><strong>{formatSpeed(selectedSession.downloadBps)}</strong><small>live router rate</small></article>
+              <article><span>UPLOAD SPEED</span><strong>{formatSpeed(selectedSession.uploadBps)}</strong><small>live router rate</small></article>
               <article className="live-session-elapsed-card"><span>{selectedIsOnline ? 'TIME USED · ELAPSED' : 'SESSION DURATION'}</span><strong>{selectedIsOnline ? formatElapsedClock(selectedSession.startedAt, clockNow) : formatDuration(selectedSession.startedAt)}</strong><small>{selectedIsOnline ? 'since this session connected · updates every second' : 'session is no longer active'}</small></article>
               <article className="live-session-elapsed-card"><span>TIME REMAINING</span><strong>{formatTimeRemaining(selectedSession.expiresAt, clockNow)}</strong><small>{selectedSession.expiresAt ? 'until account expiry · live countdown' : 'no account expiry is recorded'}</small></article>
               <article><span>ACCOUNT</span><strong>{selectedSession.customerStatus || (selectedSession.customerId ? 'Active' : 'Voucher')}</strong><small>{selectedSession.customerId ? 'subscriber status' : 'hotspot login'}</small></article>

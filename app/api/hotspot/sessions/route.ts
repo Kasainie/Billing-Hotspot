@@ -65,6 +65,8 @@ export async function GET(request: NextRequest) {
         routerId: string | null
         routerSessionId: string | null
         routerSessionType: 'hotspot' | 'pppoe' | null
+        downloadBps: string | null
+        uploadBps: string | null
         downloadBytes: string
         uploadBytes: string
       }>(sql`
@@ -143,6 +145,8 @@ export async function GET(request: NextRequest) {
           router_session."routerId",
           router_session."routerSessionId",
           router_session."routerSessionType",
+          router_session."downloadBps",
+          router_session."uploadBps",
           coalesce(accounting.acctoutputoctets, 0)::text as "downloadBytes",
           coalesce(accounting.acctinputoctets, 0)::text as "uploadBytes"
         from public.radacct as accounting
@@ -161,7 +165,9 @@ export async function GET(request: NextRequest) {
           select
             remote.router_id as "routerId",
             remote.router_session_id as "routerSessionId",
-            remote.session_type as "routerSessionType"
+            remote.session_type as "routerSessionType",
+            remote.download_bps::text as "downloadBps",
+            remote.upload_bps::text as "uploadBps"
           from public.router_remote_sessions as remote
           inner join public.router_monitors as monitor
             on monitor.id = remote.router_id

@@ -10,6 +10,7 @@ export const metadata: Metadata = {
   },
   description: 'Manage hotspot and PPPoE billing, subscriber access, M-Pesa payments, and MikroTik network operations with LKTECH.',
   applicationName: 'LKTECH',
+  manifest: '/manifest.webmanifest',
   keywords: [
     'hotspot billing',
     'ISP billing software',
@@ -32,19 +33,25 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
+        url: '/icon.svg?v=20261019',
         type: 'image/svg+xml',
+      },
+      {
+        url: '/favicon.ico',
+        type: 'image/x-icon',
+      },
+      {
+        url: '/favicon.png',
+        type: 'image/png',
+        sizes: '256x256',
       },
     ],
     apple: '/apple-icon.png',
+  },
+  appleWebApp: {
+    capable: true,
+    title: 'LKTECH',
+    statusBarStyle: 'black-translucent',
   },
 }
 

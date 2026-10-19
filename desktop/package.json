@@ -1,0 +1,11 @@
+{
+  "name": "lktech-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LKTECH desktop application",
+  "author": "LKTECH",
+  "main": "main.cjs",
+  "dependencies": {
+    "electron-window-state": "^5.0.3"
+  }
+}

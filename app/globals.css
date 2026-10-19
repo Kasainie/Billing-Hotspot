@@ -84,6 +84,8 @@ button { cursor: pointer; }
 .auth-submit:disabled { cursor: wait; opacity: .65; }
 .auth-switch { margin: 22px 0 0; color: #6d7a80; text-align: center; font-size: 12px; }
 .auth-switch a { color: #16765f; font-weight: 700; text-decoration: none; }
+.auth-terms { margin: 16px 0 0; color: #64748b; font-size: 11px; line-height: 1.6; text-align: center; }
+.auth-terms a { color: #1d4ed8; font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
 .auth-code-input { min-height: 56px !important; text-align: center; font-size: 24px !important; font-weight: 700; letter-spacing: .45em; font-variant-numeric: tabular-nums; }
 .auth-text-button { align-self: center; border: 0; padding: 6px 8px; color: #16765f; background: transparent; font-size: 12px; font-weight: 650; }
 .auth-text-button:disabled { cursor: wait; opacity: .6; }
@@ -1486,13 +1488,15 @@ td { color: #5e6469; }
 .live-sessions-empty { display: grid; min-height: 186px; place-items: center; margin: 0; padding: 20px; color: #68737d; font-size: 13px; text-align: center; }
 .live-sessions-result-count { padding: 13px 16px 9px; color: #69747e; font-size: 11px; }
 .live-sessions-table-scroll { width: 100%; overflow-x: auto; }
-.live-sessions-table-scroll table { width: 100%; min-width: 1000px; border-collapse: collapse; }
+.live-sessions-table-scroll table { width: 100%; min-width: 1120px; border-collapse: collapse; }
 .live-sessions-table-scroll th, .live-sessions-table-scroll td { border-bottom: 1px solid #edf0f2; padding: 11px 12px; color: #526069; font-size: 11px; text-align: left; white-space: nowrap; }
 .live-sessions-table-scroll th { background: #fafbfc; color: #737e87; font-size: 9px; font-weight: 700; letter-spacing: .06em; }
 .live-sessions-table-scroll tbody tr:last-child td { border-bottom: 0; }
 .live-sessions-table-scroll td > strong, .live-sessions-table-scroll td > small { display: block; }
 .live-sessions-table-scroll td > strong { color: #25313a; font-size: 12px; }
 .live-sessions-table-scroll td > small { margin-top: 4px; color: #78838c; font-size: 10px; }
+.live-sessions-table-scroll td.live-session-speed > strong { color: #087d65; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+.live-sessions-table-scroll td.live-session-speed > small { color: #425b67; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; }
 .live-session-type { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #dce6f4; border-radius: 14px; background: #f4f8fd; padding: 4px 8px; color: #42628b; font-size: 10px; font-weight: 650; }
 .live-session-type.hotspot { border-color: #f8dfbd; background: #fff8ef; color: #ad670d; }
 .live-session-duration { display: inline-flex; align-items: center; gap: 5px; }
@@ -5684,6 +5688,411 @@ html[data-dashboard-theme="light"] .settings-unavailable p { color: #475569; }
   .copyright-notice-text { animation: none; }
   .copyright-notice-text { color: #f8fafc; background: none; }
 }
+
+html[data-dashboard-theme="light"] .ops-shell {
+  --theme-surface: #ffffff;
+  --theme-surface-raised: #f8fafc;
+  --theme-border: #d9e2ec;
+  --theme-text: #0f172a;
+  --theme-muted: #475569;
+  --theme-accent: #2563eb;
+  --theme-accent-bright: #2563eb;
+  color-scheme: light;
+  background: #f4f7fa;
+  color: #0f172a;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  h1, h2, h3, h4, h5, h6, p, small, time, dt, dd, th, td, span, strong, b,
+  label, code, kbd, button, a
+) {
+  color: #334155 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .ops-content, .page-wrap, .workspace, .workspace-picker select, .topbar,
+  .header-search .search-box, .header-popover, .panel, .metric-card, .crud-form,
+  .crud-table, .module-state, .payment-settings-panel, .sms-summary-card,
+  .sms-report-setup, .get-started-card, .get-started-router, .checkout-panel,
+  .router-metrics, .router-table-wrap, .router-detail-stats article,
+  .router-monitor-chart, .router-monitor-health, .router-monitor-tab-panel,
+  .router-script-modal, .router-business-stats article, .router-data-loading,
+  .router-resource-empty, .router-payment-total, .router-diagnosis-results li,
+  .plan-table-wrap, .plan-tabs, .availability-control, .router-list-filters,
+  .router-monitor-tabs, .router-monitor-ranges, .live-session-summary,
+  .live-session-filters, .live-session-search, .live-sessions-summary,
+  .live-sessions-table-panel, .live-sessions-table-scroll, .live-session-drawer,
+  .live-session-report-controls, .subscriber-profile, .subscriber-profile-metrics,
+  .subscriber-profile-tabs, .subscriber-profile-panel, .subscriber-lifecycle,
+  .subscriber-activity-content, .subscriber-profile-inset, .subscriber-profile-facts,
+  .subscriber-profile-payments > div, .subscriber-profile-table-scroll,
+  .subscriber-sort-menu, .voucher-create-form, .voucher-stat-card, .voucher-register,
+  .generated-vouchers, .voucher-register .table-scroll,
+  .generated-vouchers .table-scroll, .dashboard-customize-dialog,
+  .dashboard-section-option, .operations-form, .operations-panel,
+  .operations-breakdown > div, .plan-stats, .package-stats > div,
+  .reconciliation-stats, .platform-admin .panel
+) {
+  border-color: #d9e2ec !important;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  box-shadow: 0 3px 12px #0f172a0a;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .ops-sidebar, .topbar, .ops-content
+) {
+  border-color: #d9e2ec;
+  background: #ffffff;
+}
+html[data-dashboard-theme="light"] .ops-shell .ops-content {
+  background: #f4f7fa;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .page-heading h1, .section-toolbar h2, .panel-heading h3, .metric-value,
+  .site-info strong, .site-stat strong, .health strong, .table-user strong,
+  td strong, .revenue-total strong, .payment-info strong, .payment-amount strong,
+  .expiry-list strong, .activity-list strong, .router-resource-primary,
+  .router-payment-total strong, .router-diagnosis-results strong,
+  .subscriber-profile-name h3, .subscriber-profile-meta > strong,
+  .subscriber-profile-metrics article > strong, .subscriber-profile-panel > h4,
+  .subscriber-lifecycle strong, .subscriber-profile-inset strong,
+  .subscriber-profile-facts dd, .subscriber-profile-payments strong,
+  .voucher-workspace .operations-breakdown strong
+) {
+  color: #0f172a !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .nav-item, .nav-child, .nav-item:hover, .nav-item.active, .nav-child:hover,
+  .nav-child.active, .breadcrumbs, .breadcrumbs strong, .nav-label, .live-label,
+  .router-management-breadcrumb, .router-detail-facts, .router-detail-back,
+  .router-monitor-last-updated, .router-monitor-loading,
+  .router-detail-script-status, .footer-bar, .page-heading p, .section-toolbar p,
+  .panel-heading span, .metric-bottom, .site-info span, .site-stat span,
+  .health span, .payment-info span, .payment-amount span, .payment-row time,
+  .expiry-list small, .activity-list small, .package-stats span,
+  .package-stats small, .package-page-heading p, .operations-stat-caption,
+  .live-session-summary article > span, .live-sessions-summary article > span,
+  .live-sessions-summary article > small, .live-sessions-result-count,
+  .live-sessions-footnote, .live-sessions-empty,
+  .live-sessions-table-scroll th, .live-sessions-table-scroll td,
+  .live-sessions-table-scroll td > small, .voucher-register th,
+  .generated-vouchers th, .voucher-register td, .generated-vouchers td,
+  .subscriber-profile-breadcrumb, .subscriber-profile-contact,
+  .subscriber-profile-metrics article > span, .subscriber-profile-metrics article > small,
+  .subscriber-profile-panel > p, .subscriber-lifecycle small, .subscriber-lifecycle p,
+  .subscriber-activity-content > p, .subscriber-activity-content > small,
+  .subscriber-activity-legend, .subscriber-profile-inset p,
+  .subscriber-profile-facts dt, .subscriber-profile-payments small,
+  .subscriber-profile-table-scroll th, .subscriber-profile-table-scroll td,
+  .router-monitor-chart-heading > span, .router-chart-endpoints,
+  .router-health-ring span, .router-data-heading > div:first-child > p,
+  .router-data-title p, .router-resource-footnote, .router-payment-total span,
+  .router-payment-total small, .router-diagnosis-results small,
+  .router-diagnosis-updated, .router-mini-trend-empty
+) {
+  color: #475569 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .nav-item.active, .nav-child.active, .nav-item:hover, .nav-child:hover
+) {
+  background: #eaf2ff !important;
+  color: #0f172a !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .nav-item > svg:first-child, .nav-chevron, .collapse-button,
+  .nav-item.active > svg:first-child, .nav-child.active > svg,
+  .metric-icon, .site-icon, .module-state-icon, .router-data-title > svg,
+  .router-resource-empty svg, .subscriber-profile-panel > h4 svg
+) {
+  color: #2563eb !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  input, select, textarea, .record-filter, .subscriber-filter-field select,
+  .subscriber-filter-date-range input, .live-session-report-controls input,
+  .live-session-report-controls select, .voucher-register-tools select
+) {
+  border-color: #cbd5e1 !important;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  color-scheme: light;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  input, textarea
+)::placeholder {
+  color: #64748b !important;
+  opacity: 1;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .crud-table th, .crud-table td, .live-sessions-table-scroll th,
+  .live-sessions-table-scroll td, .voucher-register th, .voucher-register td,
+  .generated-vouchers th, .generated-vouchers td,
+  .subscriber-profile-table-scroll th, .subscriber-profile-table-scroll td,
+  .router-data-panel th, .router-data-panel td
+) {
+  border-color: #e2e8f0 !important;
+  background-color: #ffffff !important;
+  color: #334155 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .crud-table th, .live-sessions-table-scroll th, .voucher-register th,
+  .generated-vouchers th, .subscriber-profile-table-scroll th,
+  .router-data-panel th
+) {
+  background-color: #f1f5f9 !important;
+  color: #475569 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .crud-table tbody tr:hover td, .live-sessions-table-scroll tbody tr:hover td,
+  .live-sessions-table-scroll tbody tr.is-selected td,
+  .voucher-register tbody tr:hover td, .generated-vouchers tbody tr:hover td
+) {
+  background-color: #f8fafc !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .plan-tabs button, .router-monitor-tabs button, .router-monitor-ranges button,
+  .router-list-filters button, .live-session-filters button:not(.selected),
+  .live-sessions-view-tabs button:not(.selected), .subscriber-profile-tabs button:not(.selected),
+  .subscriber-sort-menu button, .router-diagnosis-filters button
+) {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #334155 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .plan-tabs button.selected, .router-monitor-tabs button.active,
+  .router-monitor-ranges button.active, .router-list-filters button.active,
+  .live-session-filters button.selected, .live-sessions-view-tabs button.selected,
+  .subscriber-profile-tabs button.selected, .router-diagnosis-filters button.active
+) {
+  border-color: #2563eb !important;
+  background: #dbeafe !important;
+  color: #1e3a8a !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  a, .text-button, .router-learn-link, .router-name-open:hover,
+  .router-web-console:hover, .checkout-plans-link, .get-started-portal-link,
+  .router-management-heading h1 span, .package-page-heading h1 span,
+  .plan-editor-heading h2 span, .provisioning-heading h1 span,
+  .portal-template-heading h1 span, .router-script-modal-heading span
+) {
+  color: #1d4ed8 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .form-message, .table-status, .positive, .status-strip strong, .status-services,
+  .last-sync, .health span, .router-monitoring-status.online, .plan-status-live,
+  .sms-status-delivered, .provision-notice, .get-started-checklist li.complete,
+  .voucher-state-ready, .subscriber-profile-badge.online
+) {
+  color: #15803d !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .form-message.is-error, .auth-error, .router-discovery-status.error,
+  .sms-delivery-error, .router-monitoring-status.offline, .sms-status-failed,
+  .danger-text
+) {
+  color: #b91c1c !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .status-strip, .provision-notice, .sms-status-delivered,
+  .plan-status-live, .sms-status-queued, .sms-status-sending,
+  .router-monitoring-status.not_configured, .plan-status-hidden,
+  .plan-status-off, .router-monitoring-status.offline, .sms-status-failed,
+  .table-status, .plan-type, .plan-status, .sms-status-badge,
+  .voucher-state-ready, .voucher-state-in_use, .voucher-state-expired,
+  .voucher-state-disabled, .subscriber-profile-badge,
+  .router-diagnosis-summary, .router-diagnosis-summary.has-unknown
+) {
+  border-color: #cbd5e1 !important;
+  background-color: #f1f5f9 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .status-strip,
+html[data-dashboard-theme="light"] .ops-shell .provision-notice,
+html[data-dashboard-theme="light"] .ops-shell :is(.sms-status-delivered, .plan-status-live, .voucher-state-ready, .subscriber-profile-badge.online, .router-diagnosis-summary) {
+  border-color: #bbf7d0 !important;
+  background-color: #f0fdf4 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .sms-status-failed, .plan-status-off, .router-monitoring-status.offline,
+  .voucher-state-expired
+) {
+  border-color: #fecaca !important;
+  background-color: #fef2f2 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .copyright-notice,
+html[data-dashboard-theme="light"] .ops-shell .copyright-notice * {
+  color: #f8fafc !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .subscriber-info-card, .subscriber-type-filters, .subscriber-sort-menu,
+  .subscriber-filter-menu, .subscriber-detail-card, .subscriber-login-details,
+  .subscriber-account-number-preview
+) {
+  border-color: #d9e2ec !important;
+  background: #ffffff !important;
+  color: #334155 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-info-card {
+  border-color: #bbf7d0 !important;
+  background: #f0fdf4 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .subscriber-type-filters button, .subscriber-sort-menu button,
+  .subscriber-filter-chips button, .subscriber-details-toggle,
+  .subscriber-filter-trigger, .subscriber-filter-menu button
+) {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #334155 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .subscriber-type-filters button.active, .subscriber-filter-chips button.selected
+) {
+  border-color: #86efac !important;
+  background: #dcfce7 !important;
+  color: #166534 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-type-filters button > span {
+  background: #e2e8f0 !important;
+  color: #334155 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-type-filters button.active > span {
+  background: #bbf7d0 !important;
+  color: #166534 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-details-toggle {
+  border-color: #bbf7d0 !important;
+  background: #f0fdf4 !important;
+  color: #166534 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .subscriber-status, .subscriber-status-active, .subscriber-status-suspended,
+  .subscriber-status-expired, .subscriber-status-inactive, .subscriber-vip-badge
+) {
+  border-color: #bbf7d0 !important;
+  background: #f0fdf4 !important;
+  color: #166534 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .subscriber-status-suspended, .subscriber-status-expired
+) {
+  border-color: #fde68a !important;
+  background: #fffbeb !important;
+  color: #92400e !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-status-inactive {
+  border-color: #cbd5e1 !important;
+  background: #f1f5f9 !important;
+  color: #475569 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-vip-badge {
+  border-color: #f5d27c !important;
+  background: #fffbeb !important;
+  color: #92400e !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-detail-row > td {
+  background: #f8fafc !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-account-number-preview {
+  border-color: #bbf7d0 !important;
+  background: #f0fdf4 !important;
+  color: #166534 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-profile-tabs button span {
+  background: #e2e8f0 !important;
+  color: #334155 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-profile-tabs button.selected span {
+  background: #bfdbfe !important;
+  color: #1e3a8a !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .subscriber-profile-facts dd button {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #334155 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-drawer {
+  border-color: #d9e2ec;
+  background: #ffffff;
+  color: #0f172a;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-drawer-header {
+  border-color: #d9e2ec;
+  background: linear-gradient(155deg, #eff6ff, #ffffff 78%);
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .live-session-eyebrow, .live-session-profile-link
+) {
+  color: #1d4ed8 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-drawer-identity h2 {
+  color: #0f172a !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-drawer-meta {
+  color: #475569 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-plan-card {
+  border-color: #bfdbfe;
+  background: radial-gradient(circle at 94% 10%, rgb(37 99 235 / 9%), transparent 23%), #f8fafc;
+  color: #334155;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-plan-card > span {
+  color: #475569 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-plan-card > strong {
+  color: #0f172a !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-plan-card > small,
+html[data-dashboard-theme="light"] .ops-shell .live-session-plan-expiry {
+  color: #475569 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-plan-expiry {
+  border-color: #d9e2ec;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-plan-expiry b {
+  background: #dbeafe;
+  color: #1e40af !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-status.online {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534 !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-status.offline {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-type,
+html[data-dashboard-theme="light"] .ops-shell .live-session-type.pppoe {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1e40af !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-type.hotspot {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-drawer-close:hover,
+html[data-dashboard-theme="light"] .ops-shell .live-session-drawer-actions button:hover:not(:disabled) {
+  background: #eff6ff;
+  color: #1e40af;
+}
+html[data-dashboard-theme="light"] .ops-shell .live-session-drawer-actions button.is-danger {
+  color: #b91c1c !important;
+}
+html[data-dashboard-theme="light"] .ops-shell .voucher-stat-card {
+  border-color: #d9e2ec !important;
+  background: #ffffff !important;
+  color: #0f172a !important;
+}
+html[data-dashboard-theme="light"] .ops-shell :is(
+  .voucher-stat-icon, .voucher-expiry-icon, .voucher-expiry-check, .voucher-form-icon,
+  .subscriber-info-icon
+) {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+
 @media (max-width: 900px) {
   .settings-layout { grid-template-columns: minmax(170px, 220px) minmax(0, 1fr); gap: 18px; }
   .settings-topbar { top: 58px; }
@@ -5706,4 +6115,162 @@ html[data-dashboard-theme="light"] .settings-unavailable p { color: #475569; }
   .settings-back-button { margin-top: 8px; }
   .settings-heading { margin-bottom: 12px; }
   .settings-form { grid-template-columns: minmax(0, 1fr); }
+}
+
+.legal-page {
+  min-height: 100vh;
+  background: #f8fafc;
+  color: #334155;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.legal-header {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0 clamp(18px, 5vw, 72px);
+  background: rgb(255 255 255 / 94%);
+  backdrop-filter: blur(14px);
+}
+.legal-brand {
+  color: #0f172a !important;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -.045em;
+  text-decoration: none;
+}
+.legal-brand span { color: #2563eb; }
+.legal-header nav { display: flex; align-items: center; gap: 20px; }
+.legal-header nav a,
+.legal-footer a {
+  color: #475569 !important;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.legal-header nav a:hover,
+.legal-footer a:hover { color: #2563eb !important; }
+.legal-layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 760px);
+  justify-content: center;
+  gap: clamp(28px, 6vw, 76px);
+  padding: 54px 24px 72px;
+}
+.legal-toc {
+  position: sticky;
+  top: 92px;
+  display: flex;
+  align-self: start;
+  flex-direction: column;
+  gap: 12px;
+  border-left: 1px solid #cbd5e1;
+  padding: 2px 0 2px 14px;
+}
+.legal-toc span,
+.legal-eyebrow {
+  color: #2563eb;
+  font: 700 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .1em;
+}
+.legal-toc a {
+  color: #475569 !important;
+  font-size: 11px;
+  line-height: 1.45;
+  text-decoration: none;
+}
+.legal-toc a:hover { color: #1d4ed8 !important; }
+.legal-content { min-width: 0; }
+.legal-eyebrow { margin: 0 0 10px; }
+.legal-content > h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: clamp(32px, 5vw, 48px);
+  font-weight: 800;
+  letter-spacing: -.055em;
+  line-height: 1.08;
+}
+.legal-intro {
+  max-width: 650px;
+  margin: 14px 0 8px;
+  color: #475569;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.legal-updated { margin: 0 0 24px; color: #64748b; font-size: 11px; }
+.legal-notice {
+  margin: 0 0 38px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 17px 19px;
+  background: #eff6ff;
+}
+.legal-notice strong { color: #1e3a8a; font-size: 13px; }
+.legal-notice p { margin: 6px 0 0; color: #334155; font-size: 12px; line-height: 1.7; }
+.legal-group { margin: 0 0 44px; scroll-margin-top: 90px; }
+.legal-group-title {
+  margin: 0 0 22px;
+  border-bottom: 1px solid #dbe3ed;
+  padding-bottom: 12px;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -.035em;
+}
+.legal-section { margin: 0 0 25px; scroll-margin-top: 90px; }
+.legal-section h2 {
+  margin: 0 0 8px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+}
+.legal-section p {
+  margin: 0 0 9px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.legal-section a { color: #1d4ed8 !important; font-weight: 600; }
+.legal-disclaimer {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 17px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.legal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid #e2e8f0;
+  padding: 20px clamp(18px, 5vw, 72px);
+  background: #ffffff;
+}
+.legal-footer span { color: #64748b; font-size: 11px; }
+.footer-bar a { color: #00e5ff; font: 10px monospace; text-decoration: none; }
+.footer-bar a:hover { text-decoration: underline; }
+.ops-shell[data-dashboard-theme="light"] .footer-bar a { color: #1d4ed8; }
+.portal-copyright { align-items: center; gap: 12px; flex-wrap: wrap; }
+.portal-copyright a { color: #f8fafc; font-size: 11px; font-weight: 650; text-underline-offset: 3px; }
+.portal-copyright a:hover { color: #00ff90; }
+@media (max-width: 760px) {
+  .legal-layout { grid-template-columns: minmax(0, 1fr); gap: 28px; padding: 34px 18px 48px; }
+  .legal-toc { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+  .legal-toc span { grid-column: 1 / -1; }
+}
+@media (max-width: 480px) {
+  .legal-header { min-height: 58px; padding-inline: 16px; }
+  .legal-header nav { gap: 12px; }
+  .legal-header nav a { font-size: 11px; }
+  .legal-content > h1 { font-size: 34px; }
+  .legal-intro { font-size: 14px; }
+  .legal-toc { grid-template-columns: 1fr; }
+  .legal-footer { align-items: flex-start; flex-direction: column; padding-inline: 18px; }
 }

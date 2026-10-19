@@ -5,6 +5,10 @@ __v0_jsx-dev-runtime.ts
 .snowflake/
 .v0-trash/
 .vercel/
+release/
+android/.gradle/
+android/local.properties
+android/**/build/
 
 # Environment variables
 .env*.local

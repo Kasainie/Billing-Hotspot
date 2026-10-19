@@ -412,6 +412,8 @@ export const routerRemoteSessions = pgTable('router_remote_sessions', {
   uptimeSeconds: integer('uptime_seconds'),
   downloadBytes: bigint('download_bytes', { mode: 'bigint' }),
   uploadBytes: bigint('upload_bytes', { mode: 'bigint' }),
+  downloadBps: bigint('download_bps', { mode: 'bigint' }),
+  uploadBps: bigint('upload_bps', { mode: 'bigint' }),
   observedAt: timestamp('observed_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex('router_remote_sessions_identity_unique_idx').on(table.routerId, table.sessionType, table.routerSessionId),

@@ -177,6 +177,7 @@ test('captive portal pages show the animated LKTECH 2026 copyright notice', () =
   for (const page of pages) {
     assert.match(page, /class="portal-copyright-text">© 2026 LKTECH™\. All rights reserved\.<\/span>/)
   }
+  assert.match(pages[0], /href="https:\/\/billing\.lktech\.life\/terms#hotspot-service-terms"[^>]*>Hotspot terms<\/a>/)
   const styles = readFileSync(new URL('../public/hotspot-assets/style.css', import.meta.url), 'utf8')
   assert.match(styles, /@keyframes portal-copyright-shimmer/)
   assert.match(styles, /prefers-reduced-motion: reduce/)

@@ -157,6 +157,10 @@ const defaultDashboardSections: DashboardSections = { metrics: true, network: tr
 const dashboardSectionsStorageKey = 'lktech-dashboard-sections'
 const dashboardThemeStorageKey = 'lktech-dashboard-theme'
 type DashboardTheme = 'light' | 'dark' | 'system'
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
+}
 
 function escapeCsvField(value: unknown) {
   const text = String(value ?? '')
@@ -193,7 +197,7 @@ function MetricCard({ label, value, icon: Icon, tone, detail }: { label: string;
 
 export function AdminDashboard() {
   const [activeNav, setActiveNav] = useState('Overview')
-  const [expandedNav, setExpandedNav] = useState(['Tickets', 'Devices', 'Billing', 'Vouchers'])
+  const [expandedNav, setExpandedNav] = useState<string[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -206,6 +210,8 @@ export function AdminDashboard() {
   const [themePreference, setThemePreference] = useState<DashboardTheme>('system')
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('dark')
   const [profileNotice, setProfileNotice] = useState('')
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [appInstalled, setAppInstalled] = useState(false)
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([])
   const [dashboardData, setDashboardData] = useState<DashboardData>(emptyDashboardData)
   const [onlineClientCount, setOnlineClientCount] = useState<number | null>(null)
@@ -234,6 +240,60 @@ export function AdminDashboard() {
   const customizeButtonRef = useRef<HTMLButtonElement>(null)
   const customizeCloseRef = useRef<HTMLButtonElement>(null)
   const wasCustomizeOpenRef = useRef(false)
+
+  useEffect(() => {
+    const updateInstalledState = () => {
+      setAppInstalled(
+        window.matchMedia('(display-mode: standalone)').matches ||
+        ('standalone' in navigator && Boolean(navigator.standalone)),
+      )
+    }
+    const captureInstallPrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as BeforeInstallPromptEvent)
+    }
+    const markAppInstalled = () => {
+      setAppInstalled(true)
+      setInstallPrompt(null)
+      setProfileNotice('LKTECH has been installed on this device.')
+    }
+
+    updateInstalledState()
+    window.addEventListener('beforeinstallprompt', captureInstallPrompt)
+    window.addEventListener('appinstalled', markAppInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', captureInstallPrompt)
+      window.removeEventListener('appinstalled', markAppInstalled)
+    }
+  }, [])
+
+  const installApp = async () => {
+    if (appInstalled) {
+      setProfileNotice('LKTECH is already installed on this device.')
+      return
+    }
+
+    if (!installPrompt) {
+      const isAppleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      setProfileNotice(isAppleMobile
+        ? 'To install on iPhone or iPad, open LKTECH in Safari, tap Share, then choose Add to Home Screen.'
+        : 'To install LKTECH, open your browser menu and choose Install app or Add to Home screen.')
+      return
+    }
+
+    try {
+      await installPrompt.prompt()
+      const choice = await installPrompt.userChoice
+      setInstallPrompt(null)
+      setProfileNotice(choice.outcome === 'accepted'
+        ? 'LKTECH is being installed on this device.'
+        : 'Installation was cancelled. You can install LKTECH later from your browser menu.')
+    } catch (error) {
+      console.error('Unable to start LKTECH app installation', error)
+      setProfileNotice('The browser could not start installation. Try installing LKTECH from the browser menu.')
+    }
+  }
 
   useEffect(() => {
     const updateGreeting = () => setTimeGreeting(getTimeGreeting())
@@ -679,7 +739,7 @@ export function AdminDashboard() {
               <div className="profile-menu-section">
                 <span className="profile-menu-label">ACCOUNT</span>
                 <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Profile'); setProfileOpen(false) }}><UserRound size={16} /> Profile</button>
-                <button type="button" className="profile-menu-item" onClick={() => setProfileNotice('App installation is not enabled yet. You can bookmark this page for quick access.')}><Download size={16} /> Install app</button>
+                <button type="button" className="profile-menu-item" onClick={() => void installApp()}><Download size={16} /> {appInstalled ? 'App installed' : 'Install app'}</button>
               </div>
               <div className="profile-menu-section">
                 <span className="profile-menu-label">WORKSPACE</span>
@@ -738,7 +798,7 @@ export function AdminDashboard() {
             <section className="panel activity-panel"><div className="panel-heading"><div><h3>Available plans</h3><span>Plans configured in this workspace</span></div><button type="button" className="text-button" onClick={() => setActiveNav('Plans')}>Manage plans <ArrowUpRight size={13} /></button></div><div className="activity-list">{dataStatus === 'live' && dashboardData.packages.length ? dashboardData.packages.slice(0, 5).map((plan) => <div key={plan.id}><div className={`activity-icon ${plan.active ? 'green' : 'amber'}`}><Package size={14} /></div><span><strong>{plan.name}</strong><small>{plan.downloadMbps}/{plan.uploadMbps} Mbps · {plan.active ? 'Active' : 'Inactive'}</small></span></div>) : <p className="header-empty">{dataStatus === 'live' ? 'No plans have been configured.' : dataStatus === 'loading' ? 'Loading plans…' : 'Plan records are unavailable.'}</p>}</div></section>
           </div>}
           </> : null}
-          <footer className="footer-bar"><span className="copyright-notice"><span className="copyright-notice-text">© 2026 LKTECH™. All rights reserved.</span></span><span>{dataStatus === 'live' ? 'Live workspace records' : dataStatus === 'error' ? 'Workspace data unavailable' : 'Loading workspace data'}</span></footer>
+          <footer className="footer-bar"><span className="copyright-notice"><span className="copyright-notice-text">© 2026 LKTECH™. All rights reserved.</span></span><span>{dataStatus === 'live' ? 'Live workspace records' : dataStatus === 'error' ? 'Workspace data unavailable' : 'Loading workspace data'}</span><a href="/terms">Terms</a></footer>
         </div>
         {customizeOpen && <div className="dashboard-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCustomizeOpen(false) }}>
           <section className="dashboard-customize-dialog" role="dialog" aria-modal="true" aria-labelledby="dashboard-customize-title" onKeyDown={(event) => {

@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { routerConnectorCommands, routerConnectorQueries, routerMetricSamples, routerMonitors, routerRemoteSessions } from '@/lib/db/schema'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { isValidProvisioningBaseUrl } from '@/lib/router-provisioning'
+import { calculateSessionSpeedBps } from '@/lib/router-session-speed'
 import {
   matchesRouterConnectorToken,
   parseRouterConnectorCommandResults,
@@ -110,6 +111,17 @@ async function report(request: NextRequest, routerId: string) {
         })
       if (!heartbeat?.observedAt) throw new Error('Router connector heartbeat timestamp was not recorded.')
       const { observedAt } = heartbeat
+      const previousSessions = await tx.select({
+        sessionType: routerRemoteSessions.sessionType,
+        routerSessionId: routerRemoteSessions.routerSessionId,
+        downloadBytes: routerRemoteSessions.downloadBytes,
+        uploadBytes: routerRemoteSessions.uploadBytes,
+        observedAt: routerRemoteSessions.observedAt,
+      }).from(routerRemoteSessions).where(eq(routerRemoteSessions.routerId, monitor.id))
+      const previousSessionById = new Map(previousSessions.map((item) => [
+        `${item.sessionType}:${item.routerSessionId}`,
+        item,
+      ]))
       if (telemetry) {
         await tx.insert(routerMetricSamples).values({
           id: telemetry.sampleId,
@@ -134,19 +146,25 @@ async function report(request: NextRequest, routerId: string) {
         ))
       }
       const reportedSessions = sessions.length
-        ? await tx.insert(routerRemoteSessions).values(sessions.map((item) => ({
-          routerId: monitor.id,
-          sessionType: item.sessionType,
-          routerSessionId: item.routerSessionId,
-          username: item.username,
-          macAddress: item.macAddress,
-          ipAddress: item.ipAddress,
-          callerId: item.callerId,
-          uptimeSeconds: item.uptimeSeconds,
-          downloadBytes: item.downloadBytes,
-          uploadBytes: item.uploadBytes,
-          observedAt,
-        }))).onConflictDoUpdate({
+        ? await tx.insert(routerRemoteSessions).values(sessions.map((item) => {
+          const previous = previousSessionById.get(`${item.sessionType}:${item.routerSessionId}`)
+          const sampleIntervalMs = previous ? observedAt.getTime() - previous.observedAt.getTime() : 0
+          return {
+            routerId: monitor.id,
+            sessionType: item.sessionType,
+            routerSessionId: item.routerSessionId,
+            username: item.username,
+            macAddress: item.macAddress,
+            ipAddress: item.ipAddress,
+            callerId: item.callerId,
+            uptimeSeconds: item.uptimeSeconds,
+            downloadBytes: item.downloadBytes,
+            uploadBytes: item.uploadBytes,
+            downloadBps: calculateSessionSpeedBps(item.downloadBytes, previous?.downloadBytes ?? null, sampleIntervalMs),
+            uploadBps: calculateSessionSpeedBps(item.uploadBytes, previous?.uploadBytes ?? null, sampleIntervalMs),
+            observedAt,
+          }
+        })).onConflictDoUpdate({
           target: [
             routerRemoteSessions.routerId,
             routerRemoteSessions.sessionType,
@@ -160,6 +178,8 @@ async function report(request: NextRequest, routerId: string) {
             uptimeSeconds: sql`excluded.uptime_seconds`,
             downloadBytes: sql`excluded.download_bytes`,
             uploadBytes: sql`excluded.upload_bytes`,
+            downloadBps: sql`excluded.download_bps`,
+            uploadBps: sql`excluded.upload_bps`,
             observedAt: sql`excluded.observed_at`,
           },
         }).returning({ id: routerRemoteSessions.id })

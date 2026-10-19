@@ -191,6 +191,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
           <button type="submit" className="auth-submit" disabled={busy}>{busy ? 'Please wait…' : isSignup ? 'Create account' : 'Sign in'}</button>
         </form>}
         {!verificationPending && !isSignup && <p className="auth-switch"><a href="/forgot-password">Forgot your password?</a></p>}
+        {!verificationPending && isSignup && <p className="auth-terms">By creating an account, you agree to the <a href="/terms#platform-terms">LKTECH Platform Terms</a>.</p>}
         {!verificationPending && <p className="auth-switch">{isSignup ? 'Already have an account?' : 'New to LKTECH?'} <a href={isSignup ? '/login' : '/signup'}>{isSignup ? 'Sign in' : 'Create an account'}</a></p>}
       </section>
     </main>

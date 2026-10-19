@@ -266,6 +266,7 @@ export function MarketingHome() {
           <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-6 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-8 lg:px-10">
             <span className="copyright-notice"><span className="copyright-notice-text">© 2026 LKTECH™. All rights reserved.</span></span>
             <nav aria-label="Footer navigation" className="flex gap-5">
+              <Link href="/terms" className="marketing-link transition-colors hover:text-[#2563EB]">Terms</Link>
               <Link href="/login" className="marketing-link transition-colors hover:text-[#2563EB]">Sign in</Link>
               <Link href="/signup" className="marketing-link transition-colors hover:text-[#2563EB]">Create account</Link>
             </nav>
