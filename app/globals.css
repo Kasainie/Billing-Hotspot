@@ -1506,13 +1506,13 @@ td { color: #5e6469; }
 .live-sessions-view-tabs button.selected { background: #111820; color: #fff; }
 .live-session-report-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .live-session-report-summary article:last-child { border-right: 0; }
-.live-session-report-controls { display: flex; align-items: flex-end; gap: 10px; }
-.live-session-report-controls > label:not(.live-session-search) { display: flex; min-width: 145px; flex-direction: column; gap: 5px; color: #59656e; font-size: 11px; font-weight: 650; }
+.live-session-report-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.live-session-report-controls > label:not(.live-session-search) { display: flex; min-width: 145px; flex: 1 1 145px; flex-direction: column; gap: 5px; color: #59656e; font-size: 11px; font-weight: 650; }
 .live-session-report-controls > label > span { color: #87919a; font-size: 9px; font-weight: 400; }
 .live-session-report-controls input[type="date"],
 .live-session-report-controls select { width: 100%; min-height: 40px; border: 1px solid #d5dbe0; border-radius: 9px; background: #fff; padding: 0 10px; color: #26313a; font: inherit; font-size: 12px; }
 .report-export-format { min-height: 40px; cursor: pointer; }
-.live-session-report-controls .live-session-search { flex: 1 1 240px; }
+.live-session-report-controls .live-session-search { min-width: min(100%, 260px); flex: 2 1 260px; }
 .live-session-report-controls > .outline-button { display: inline-flex; min-height: 40px; flex: 0 0 auto; align-items: center; gap: 7px; border-radius: 22px; padding: 0 14px; color: #26313a; font-size: 12px; }
 .live-session-report-controls > .report-export-format { width: auto; min-width: 132px; }
 .live-session-report-table { min-width: 1700px !important; }

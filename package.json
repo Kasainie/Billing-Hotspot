@@ -9,7 +9,7 @@
     "start": "next start",
     "app:android:sync": "cap sync android",
     "app:android:apk": "npm run app:android:sync && cd android && gradlew.bat assembleDebug",
-    "app:windows": "electron-builder --win nsis --x64",
+    "app:windows": "cd desktop && ..\\node_modules\\.bin\\electron-builder.cmd --win nsis --x64",
     "db:check": "node --env-file=.env.local scripts/check-database.mjs"
   },
   "dependencies": {
@@ -47,28 +47,5 @@
     "tailwindcss": "^4.3.3",
     "typescript": "5.7.3"
   },
-  "main": "desktop/main.cjs",
-  "build": {
-    "appId": "life.lktech.billing",
-    "productName": "LKTECH",
-    "directories": {
-      "app": "desktop",
-      "output": "release/windows"
-    },
-    "files": [
-      "**/*"
-    ],
-    "win": {
-      "icon": "public/favicon.ico",
-      "target": [
-        "nsis"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    }
-  }
+  "main": "desktop/main.cjs"
 }

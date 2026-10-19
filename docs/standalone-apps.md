@@ -1,6 +1,6 @@
 # LKTECH desktop and Android apps
 
-The Android and Windows apps wrap the hosted LKTECH service at `https://login.lktech.life`. They need an internet connection; application data and backend services remain hosted.
+The Android and Windows apps wrap the hosted LKTECH service at `https://billing.lktech.life`. They need an internet connection; application data and backend services remain hosted.
 
 ## Android APK
 
@@ -26,4 +26,4 @@ corepack pnpm install
 corepack pnpm run app:windows
 ```
 
-The installer is written to `release/windows/LKTECH Setup 1.0.0.exe`. It is currently unsigned; Windows may display a SmartScreen warning until the installer is signed with an organization code-signing certificate.
+The installer is written to `release/windows/LKTECH Setup 1.0.0.exe`. Its Navigation menu and shortcuts provide Back, Forward, Reload, and LKTECH Home if a Wi-Fi captive portal opens inside the app. It is currently unsigned; Windows may display a SmartScreen warning until the installer is signed with an organization code-signing certificate.

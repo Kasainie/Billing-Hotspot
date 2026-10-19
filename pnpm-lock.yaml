@@ -111,6 +111,10 @@ importers:
       electron-window-state:
         specifier: ^5.0.3
         version: 5.0.3
+    devDependencies:
+      electron:
+        specifier: ^41.0.0
+        version: 41.10.7
 
 packages:
 

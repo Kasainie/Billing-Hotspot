@@ -5,7 +5,32 @@
   "description": "LKTECH desktop application",
   "author": "LKTECH",
   "main": "main.cjs",
+  "build": {
+    "appId": "life.lktech.billing",
+    "productName": "LKTECH",
+    "directories": {
+      "output": "../release/windows"
+    },
+    "files": [
+      "**/*"
+    ],
+    "win": {
+      "icon": "../public/favicon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
   "dependencies": {
     "electron-window-state": "^5.0.3"
+  },
+  "devDependencies": {
+    "electron": "^41.0.0"
   }
 }

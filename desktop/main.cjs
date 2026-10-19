@@ -1,8 +1,8 @@
-const { app, BrowserWindow, shell } = require('electron')
+const { app, BrowserWindow, Menu, shell } = require('electron')
 const path = require('node:path')
 const windowStateKeeper = require('electron-window-state')
 
-const appUrl = 'https://login.lktech.life'
+const appUrl = 'https://billing.lktech.life/login'
 const trustedHosts = new Set(['login.lktech.life', 'billing.lktech.life'])
 const isTrustedUrl = (value) => {
   try {
@@ -39,7 +39,8 @@ const createWindow = () => {
     minWidth: 960,
     minHeight: 640,
     show: false,
-    autoHideMenuBar: true,
+    autoHideMenuBar: false,
+    title: 'LKTECH Desktop',
     backgroundColor: '#090812',
     icon: path.join(__dirname, 'assets', 'favicon.png'),
     webPreferences: {
@@ -50,6 +51,54 @@ const createWindow = () => {
   })
 
   windowState.manage(window)
+  const navigationMenu = Menu.buildFromTemplate([
+    {
+      label: 'Back',
+      accelerator: 'Alt+Left',
+      enabled: false,
+      click: () => {
+        if (window.webContents.canGoBack()) window.webContents.goBack()
+      },
+    },
+    {
+      label: 'Forward',
+      accelerator: 'Alt+Right',
+      enabled: false,
+      click: () => {
+        if (window.webContents.canGoForward()) window.webContents.goForward()
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Reload',
+      accelerator: 'Ctrl+R',
+      click: () => window.webContents.reload(),
+    },
+    {
+      label: 'LKTECH Home',
+      accelerator: 'Alt+Home',
+      click: () => {
+        void window.loadURL(appUrl).catch((error) => {
+          console.error('Unable to open LKTECH home', error)
+        })
+      },
+    },
+  ])
+  const applicationMenu = Menu.buildFromTemplate([
+    { label: 'File', submenu: [{ role: 'quit' }] },
+    { label: 'Navigation', submenu: navigationMenu },
+  ])
+  app.setApplicationMenu(applicationMenu)
+  const updateNavigationMenu = () => {
+    navigationMenu.items[0].enabled = window.webContents.canGoBack()
+    navigationMenu.items[1].enabled = window.webContents.canGoForward()
+  }
+  window.webContents.on('did-navigate', updateNavigationMenu)
+  window.webContents.on('did-navigate-in-page', updateNavigationMenu)
+  window.webContents.on('page-title-updated', (event) => {
+    event.preventDefault()
+    window.setTitle('LKTECH Desktop')
+  })
   window.once('ready-to-show', () => window.show())
   window.webContents.setWindowOpenHandler(({ url }) => {
     openExternalUrl(url)
