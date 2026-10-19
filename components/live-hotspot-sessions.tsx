@@ -238,6 +238,9 @@ export function LiveHotspotSessions({ onOpenSubscriber, onOnlineCountChange }: {
       const result = await response.json() as HotspotSessionsResponse
       if (!response.ok) throw new Error(result.error || 'Unable to load live sessions.')
       setData(result)
+      setSelectedSession((current) => current
+        ? result.sessions.find((session) => session.id === current.id) ?? current
+        : null)
       onOnlineCountChange(result.connectedDevices)
       setRefreshedAt(new Date())
     } catch (reason) {
@@ -250,7 +253,7 @@ export function LiveHotspotSessions({ onOpenSubscriber, onOnlineCountChange }: {
 
   useEffect(() => {
     void load()
-    const interval = window.setInterval(() => void load(), 30_000)
+    const interval = window.setInterval(() => void load(), 5_000)
     return () => window.clearInterval(interval)
   }, [load])
 
@@ -577,7 +580,7 @@ export function LiveHotspotSessions({ onOpenSubscriber, onOnlineCountChange }: {
         </>}
       </section>
       }
-      {view === 'live' && <p className="live-sessions-footnote">Session data refreshes automatically every 30 seconds. Live speeds require an active router connector; — means no recent counter sample is available.</p>}
+      {view === 'live' && <p className="live-sessions-footnote">Session data refreshes every 5 seconds. Live speeds require an active router connector; — means no recent counter sample is available.</p>}
       {selectedSession && <div className="live-session-drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDetails() }}>
         <aside className="live-session-drawer" role="dialog" aria-modal="true" aria-labelledby="live-session-drawer-title">
           <header className="live-session-drawer-header">
