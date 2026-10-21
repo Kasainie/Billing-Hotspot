@@ -5,6 +5,7 @@ import {
   findWanBridgeConflict,
   findWanBridgeSubnetConflict,
   findWanSubnetConflict,
+  resolveRouterLanBridgeName,
   resolveRouterSubscriberBridgeName,
 } from '@/lib/router-provisioning'
 import { db } from '@/lib/db'
@@ -41,6 +42,11 @@ export async function GET(_request: Request, context: RouteContext<'/provision/[
 
     const wanInterfaces = routerData.wanInterfaces || []
     const bridgeName = resolveRouterSubscriberBridgeName(routerData.bridgeName, routerData.bridges, wanInterfaces)
+    const lanBridgeName = configuration.lanBridgeName ?? resolveRouterLanBridgeName(
+      [...new Set([...(routerData.bridges || []), ...(routerData.bridgeName ? [routerData.bridgeName] : [])])],
+      wanInterfaces,
+      bridgeName,
+    )
     const validNames = (names: unknown): names is string[] => Array.isArray(names) &&
       names.length > 0 &&
       names.length <= 64 &&
@@ -94,6 +100,7 @@ export async function GET(_request: Request, context: RouteContext<'/provision/[
         managedPorts,
         movablePorts,
         wanPorts: protectedWanPorts,
+        lanBridgeName,
         services,
         hotspotAntiSharing: configuration.hotspotAntiSharing,
         hotspotSubnet: configuration.hotspotSubnet || undefined,

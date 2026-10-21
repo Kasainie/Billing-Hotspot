@@ -55,7 +55,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { parseServiceSubnet, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
+import { parseServiceSubnet, resolveRouterLanBridgeName, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
 import { defaultHotspotPortalBranding, hotspotPortalTemplates, isHotspotPortalTemplateId, type HotspotPortalTemplateId } from '@/lib/hotspot-templates'
 import { PaymentSettings } from '@/components/payment-settings'
 import { SmsSettings } from '@/components/sms-settings'
@@ -835,6 +835,7 @@ type RouterInventory = {
   bridgeName: string | null
   serviceConfiguration?: {
     bridgeName: string
+    lanBridgeName: string | null
     ports: string[]
     managedPorts: string[]
     wanPorts: string[]
@@ -874,7 +875,6 @@ export function RouterProvisioning({
   const [step, setStep] = useState(0)
   const [routerName, setRouterName] = useState(initialRouterName)
   const [siteName, setSiteName] = useState(initialSiteName)
-  const [provisioningAdminKey, setProvisioningAdminKey] = useState('')
   const hotspotProfile = 'default'
   const [provisioningId, setProvisioningId] = useState('')
   const [fetchCommand, setFetchCommand] = useState('')
@@ -905,13 +905,17 @@ export function RouterProvisioning({
 
   const safeIdentity = routerName.trim().replace(/[^a-zA-Z0-9 _-]/g, '').replace(/\s+/g, ' ').slice(0, 48) || 'MikroTik Main'
   const steps = ['Identity', 'Provision', 'Services', 'Done']
-  const requiresProvisioningKey = process.env.NODE_ENV !== 'development'
   const activeHotspotSubnet = useCustomSubnet ? hotspotSubnet : defaultHotspotSubnet
   const activePppoeSubnet = useCustomSubnet ? pppoeSubnet : defaultPppoeSubnet
   const activeBridgeName = resolveRouterSubscriberBridgeName(
     routerInventory?.bridgeName,
     routerInventory?.bridges,
     routerInventory?.wanInterfaces,
+  )
+  const activeLanBridgeName = resolveRouterLanBridgeName(
+    [...new Set([...(routerInventory?.bridges || []), ...(routerInventory?.bridgeName ? [routerInventory.bridgeName] : [])])],
+    routerInventory?.wanInterfaces || [],
+    activeBridgeName,
   )
   const hotspotNetwork = parseServiceSubnet(activeHotspotSubnet)
   const pppoeNetwork = parseServiceSubnet(activePppoeSubnet)
@@ -975,7 +979,7 @@ export function RouterProvisioning({
 
       const response = await fetch('/api/routers/provisioning', {
         method: 'PUT',
-        headers: { 'content-type': 'application/json', ...(requiresProvisioningKey ? { 'x-provisioning-admin-key': provisioningAdminKey } : {}) },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ token: provisioningToken, configuration }),
       })
       const result = await response.json()
@@ -1008,11 +1012,6 @@ export function RouterProvisioning({
 
   const createProvisioningScript = async () => {
     if (!routerName.trim()) return
-    if (requiresProvisioningKey && provisioningAdminKey.length < 32) {
-      setProvisioningState('error')
-      setProvisioningMessage('Enter the deployment provisioning key configured in Vercel.')
-      return
-    }
     setProvisioningId('')
     setFetchCommand('')
     setProvisioningState('creating')
@@ -1021,7 +1020,7 @@ export function RouterProvisioning({
     try {
       const response = await fetch('/api/routers/provisioning', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(requiresProvisioningKey ? { 'x-provisioning-admin-key': provisioningAdminKey } : {}) },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           routerName: safeIdentity,
           siteName: siteName.trim(),
@@ -1048,7 +1047,6 @@ export function RouterProvisioning({
     try {
       const response = await fetch(`/api/routers/provisioning?id=${encodeURIComponent(provisioningId)}`, {
         cache: 'no-store',
-        headers: requiresProvisioningKey ? { 'x-provisioning-admin-key': provisioningAdminKey } : undefined,
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Could not check router status.')
@@ -1076,14 +1074,16 @@ export function RouterProvisioning({
   const refreshRouterInventory = async () => {
     if (!provisioningId) return
     try {
-      const response = await fetch(`/api/routers/provisioning?id=${encodeURIComponent(provisioningId)}`, { cache: 'no-store', headers: requiresProvisioningKey ? { 'x-provisioning-admin-key': provisioningAdminKey } : undefined })
+      const response = await fetch(`/api/routers/provisioning?id=${encodeURIComponent(provisioningId)}`, { cache: 'no-store' })
       const result = await response.json()
       if (!response.ok || !result.routerData) return
       const inventory = result.routerData as RouterInventory
       setRouterInventory(inventory)
       if (!inventoryInitialized) {
         const bridgeName = resolveRouterSubscriberBridgeName(inventory.bridgeName, inventory.bridges, inventory.wanInterfaces)
-        setSelectedPorts(inventory.bridgePorts.filter((port) => port.bridge === bridgeName && !inventory.wanInterfaces.includes(port.interface)).map((port) => port.interface))
+        const lanBridgeName = resolveRouterLanBridgeName([...new Set([...(inventory.bridges || []), ...(inventory.bridgeName ? [inventory.bridgeName] : [])])], inventory.wanInterfaces, bridgeName)
+        const initialBridge = inventory.bridges?.includes(bridgeName) ? bridgeName : lanBridgeName || bridgeName
+        setSelectedPorts(inventory.bridgePorts.filter((port) => port.bridge === initialBridge && !inventory.wanInterfaces.includes(port.interface)).map((port) => port.interface))
         setInventoryInitialized(true)
       }
     } catch {
@@ -1096,7 +1096,7 @@ export function RouterProvisioning({
     let active = true
     const checkStatus = async () => {
       try {
-        const response = await fetch(`/api/routers/provisioning?id=${encodeURIComponent(provisioningId)}`, { cache: 'no-store', headers: requiresProvisioningKey ? { 'x-provisioning-admin-key': provisioningAdminKey } : undefined })
+        const response = await fetch(`/api/routers/provisioning?id=${encodeURIComponent(provisioningId)}`, { cache: 'no-store' })
         const result = await response.json()
         if (!response.ok || !active) return
         setProvisioningState(result.status)
@@ -1113,8 +1113,10 @@ export function RouterProvisioning({
           setRouterInventory(inventory)
           if (!inventoryInitialized) {
             const bridgeName = resolveRouterSubscriberBridgeName(inventory.bridgeName, inventory.bridges, inventory.wanInterfaces)
+            const lanBridgeName = resolveRouterLanBridgeName([...new Set([...(inventory.bridges || []), ...(inventory.bridgeName ? [inventory.bridgeName] : [])])], inventory.wanInterfaces, bridgeName)
+            const initialBridge = inventory.bridges?.includes(bridgeName) ? bridgeName : lanBridgeName || bridgeName
             const existingPorts = inventory.bridgePorts
-              .filter((port) => port.bridge === bridgeName && !inventory.wanInterfaces.includes(port.interface))
+              .filter((port) => port.bridge === initialBridge && !inventory.wanInterfaces.includes(port.interface))
               .map((port) => port.interface)
             setSelectedPorts(existingPorts)
             setInventoryInitialized(true)
@@ -1135,7 +1137,7 @@ export function RouterProvisioning({
     void checkStatus()
     const timer = window.setInterval(checkStatus, 2500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [provisioningId, provisioningAdminKey, requiresProvisioningKey, inventoryInitialized, activeBridgeName])
+  }, [provisioningId, inventoryInitialized, activeBridgeName])
 
   const createScriptButtonLabel = provisioningState === 'creating' ? 'Creating script...' : fetchCommand ? 'Create a new script' : 'Create WinBox script'
   const provisionExpiryNote = 'This one-time script link expires in 15 minutes.'
@@ -1174,10 +1176,9 @@ export function RouterProvisioning({
           <div className="provision-fields">
             <label>Router name<input value={routerName} maxLength={48} onChange={(event) => setRouterName(event.target.value)} placeholder="e.g. MikroTik Main" /></label>
             <label>Network site<input value={siteName} maxLength={64} onChange={(event) => setSiteName(event.target.value)} placeholder="e.g. Central Hub" /></label>
-            {requiresProvisioningKey && <label>Provisioning admin key<input type="password" value={provisioningAdminKey} onChange={(event) => setProvisioningAdminKey(event.target.value)} placeholder="Vercel PROVISIONING_ADMIN_KEY" autoComplete="off" /></label>}
           </div>
 
-          <button className="primary-button provision-subscribers-button" onClick={createProvisioningScript} disabled={!routerName.trim() || !siteName.trim() || provisioningState === 'creating' || (requiresProvisioningKey && provisioningAdminKey.length < 32)}>{createScriptButtonLabel}</button>
+          <button className="primary-button provision-subscribers-button" onClick={createProvisioningScript} disabled={!routerName.trim() || !siteName.trim() || provisioningState === 'creating'}>{createScriptButtonLabel}</button>
           {provisioningState === 'error' && <p className="router-discovery-status error" role="status">{provisioningMessage}</p>}
         </>}
 
@@ -1221,7 +1222,9 @@ export function RouterProvisioning({
 
           <section className="router-setup-section">
             <div className="router-setup-title"><div><h2>Subscriber ports</h2><p>Choose which physical ports carry Hotspot or PPPoE traffic.</p></div><button type="button" className="text-button" onClick={refreshRouterInventory}>Refresh ports</button></div>
-            <div className="subscriber-bridge-target"><span>Subscriber bridge</span><strong>{activeBridgeName}</strong><small>Selected automatically; the WAN bridge will not be used for subscriber services.</small></div>
+            <div className="subscriber-bridge-target"><span>Dedicated subscriber bridge</span><strong>{activeBridgeName}</strong><small>{activeLanBridgeName
+              ? `Selected ports move here for billing. Unselected ports use the existing ${activeLanBridgeName} LAN for regular, unbilled internet.`
+              : 'No existing non-WAN LAN bridge was detected; unselected ports cannot be guaranteed normal internet access until a LAN bridge is configured.'}</small></div>
             <ol className="port-setup-steps">
               <li><span>1</span><div><strong>Protect your internet connection</strong><small>Mark the port connected to your modem or ISP as WAN.</small></div></li>
               <li><span>2</span><div><strong>Choose subscriber ports</strong><small>Select every port where subscriber devices will connect.</small></div></li>
@@ -1242,13 +1245,13 @@ export function RouterProvisioning({
               return <div className="router-port-row" key={portName}>
                 <label className={`router-port${selectedPorts.includes(portName) ? ' selected' : ''}${isWan || moveNotConfirmed ? ' unavailable' : ''}`}>
                   <input type="checkbox" checked={selectedPorts.includes(portName)} disabled={isWan || moveNotConfirmed} onChange={() => togglePort(portName)} />
-                  <span><strong>{portName}</strong><small>{isWan ? 'Internet uplink · excluded from subscriber bridge' : lockedToOtherBridge ? `${existingBridge} · ${allowMovingBridgePorts ? `will move to ${activeBridgeName}` : 'approve moving above to select'}` : existingBridge ? `Currently on ${existingBridge}` : `Will join ${activeBridgeName}`}</small></span>
+                  <span><strong>{portName}</strong><small>{isWan ? 'Internet uplink · excluded from subscriber bridge' : lockedToOtherBridge ? `${existingBridge} · ${allowMovingBridgePorts ? `will move to ${activeBridgeName}` : 'approve moving above to select'}` : existingBridge ? `Currently on ${existingBridge}` : selectedPorts.includes(portName) ? `Will join ${activeBridgeName}` : activeLanBridgeName ? `Will join ${activeLanBridgeName} for unbilled internet` : 'No LAN bridge detected'}</small></span>
                   {isWan && <b>WAN · PROTECTED</b>}
                 </label>
                 {!isWan && <button type="button" className="router-port-wan-toggle" aria-label={`${manualWanPort === portName ? 'Unmark' : 'Mark'} ${portName} as WAN`} aria-pressed={manualWanPort === portName} onClick={() => toggleWanPort(portName)}>{manualWanPort === portName ? 'WAN selected' : 'Mark WAN'}</button>}
               </div>
             })}</div> : <p className="router-setup-hint">{routerInventory ? 'No ports were received from the router. Add the interface names shown in WinBox below.' : 'Waiting for router interface discovery. Keep the provisioning page open.'}</p>}
-            <p className="router-setup-hint port-setup-footnote">Only selected ports carry subscriber traffic. WAN ports are protected. Unchecked members already on {activeBridgeName} will be removed from that bridge when you apply.</p>
+            <p className="router-setup-hint port-setup-footnote">Only selected ports carry billed subscriber traffic. Unselected ports stay on or return to the existing LAN bridge. WAN ports are protected.</p>
             {!hasDiscoveredPorts && <div className="manual-port-entry">
               <label htmlFor="manual-router-port">Interface name</label>
               <div><input id="manual-router-port" value={manualPortName} maxLength={48} onChange={(event) => setManualPortName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addManualPort() } }} placeholder="e.g. ether2" /><button type="button" className="manual-port-add" onClick={addManualPort}>Add port</button></div>
@@ -1310,7 +1313,7 @@ export function RouterProvisioning({
 
       {!(step === 3 && provisioningState === 'configured') && <div className="provision-footer">
         <button type="button" className="wizard-back" onClick={goToPreviousStep}><ArrowLeft size={15} />{step === 1 ? 'Back to router identity' : 'Back'}</button>
-        {step < steps.length - 1 && step !== 2 && <button type="button" className="wizard-next" disabled={(step === 0 && (!routerName.trim() || !fetchCommand || (requiresProvisioningKey && provisioningAdminKey.length < 32))) || (step === 1 && provisioningState !== 'applied')} onClick={() => setStep((current) => current + 1)}>{step === 0 ? 'Provision' : 'Configure services'}<ArrowRight size={15} /></button>}
+        {step < steps.length - 1 && step !== 2 && <button type="button" className="wizard-next" disabled={(step === 0 && (!routerName.trim() || !fetchCommand)) || (step === 1 && provisioningState !== 'applied')} onClick={() => setStep((current) => current + 1)}>{step === 0 ? 'Provision' : 'Configure services'}<ArrowRight size={15} /></button>}
         {step === steps.length - 1 && <button type="button" className="wizard-next" disabled={provisioningState !== 'configured'} onClick={() => onProvision()}>Go live<Check size={15} /></button>}
       </div>}
     </section>
@@ -1591,7 +1594,7 @@ function RouterManagement() {
         <div>
           <div className="router-management-breadcrumb"><span>NETWORK</span><span aria-hidden="true">—</span><span>ROUTERS</span></div>
           <h1>NAS &amp; <span>routers.</span></h1>
-          <p>Link a router, paste the script, go live with PPPoE or Hotspot. <button type="button" className="router-learn-link" onClick={beginNewProvision}>Learn more <ArrowRight size={12} /></button></p>
+          <p>Link a router, paste the script, go live with PPPoE or Hotspot. <button type="button" className="router-learn-link" onClick={beginNewProvision}>Start router setup <ArrowRight size={12} /></button></p>
         </div>
         <button type="button" className="router-link-button" onClick={beginNewProvision}><Plus size={15} /> Link MikroTik</button>
       </div>

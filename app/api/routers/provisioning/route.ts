@@ -1,12 +1,11 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { isIPv4 } from 'node:net'
 import { and, eq, lt, or } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getProvisioningDbErrorMessage } from '@/lib/provisioning-errors'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, isValidProvisioningBaseUrl, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, isValidProvisioningBaseUrl, resolveRouterLanBridgeName, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
 import { routerMonitors, routerProvisioningTokens, sites } from '@/lib/db/schema'
-import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
 
@@ -33,31 +32,22 @@ function tokenHash(token: string) {
   return createHash('sha256').update(token).digest('hex')
 }
 
-function hasProvisioningAdminKey(request: NextRequest) {
-  const expected = process.env.PROVISIONING_ADMIN_KEY || ''
-  const provided = request.headers.get('x-provisioning-admin-key') || ''
-  if (expected.length < 32 || !provided) return false
-  const expectedHash = createHash('sha256').update(expected).digest()
-  const providedHash = createHash('sha256').update(provided).digest()
-  return timingSafeEqual(expectedHash, providedHash)
+function isProvisioningConfigured(request: NextRequest) {
+  const localDevelopment = process.env.NODE_ENV === 'development' && isLocalRequest(request)
+  return localDevelopment || (process.env.PROVISIONING_ADMIN_KEY || '').trim().length >= 32
 }
 
-function isAuthorized(request: NextRequest) {
-  return process.env.NODE_ENV === 'development' ? isLocalRequest(request) : hasProvisioningAdminKey(request)
-}
-
-function authorizationError() {
-  if (process.env.NODE_ENV !== 'development' && !process.env.PROVISIONING_ADMIN_KEY) {
-    return NextResponse.json({ error: 'Set PROVISIONING_ADMIN_KEY in the deployment environment before creating router scripts' }, { status: 503 })
-  }
-  return NextResponse.json({ error: 'Provisioning admin key is missing or invalid' }, { status: 401 })
+function provisioningConfigurationError() {
+  return NextResponse.json({
+    error: 'Router provisioning is not configured. Ask your network administrator.',
+  }, { status: 503 })
 }
 
 export async function POST(request: NextRequest) {
   const access = await requireTenantAdmin(request)
   if (access.response) return access.response
   const session = access.session
-  if (!isAuthorized(request)) return authorizationError()
+  if (!isProvisioningConfigured(request)) return provisioningConfigurationError()
 
   let input: ProvisionInput
   try {
@@ -166,9 +156,10 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to view router provisioning for this workspace.' }, { status: 401 })
-  if (!isAuthorized(request)) return authorizationError()
+  const access = await requireTenantAdmin(request)
+  if (access.response) return access.response
+  const session = access.session
+  if (!isProvisioningConfigured(request)) return provisioningConfigurationError()
 
   const id = request.nextUrl.searchParams.get('id') || ''
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
@@ -216,7 +207,7 @@ export async function PUT(request: NextRequest) {
   const access = await requireTenantAdmin(request)
   if (access.response) return access.response
   const session = access.session
-  if (!isAuthorized(request)) return authorizationError()
+  if (!isProvisioningConfigured(request)) return provisioningConfigurationError()
 
   let input: { token?: unknown; configuration?: unknown }
   try {
@@ -280,6 +271,11 @@ export async function PUT(request: NextRequest) {
     record.routerData?.bridges,
     discoveredWanPorts,
   )
+  const lanBridgeName = resolveRouterLanBridgeName(
+    [...new Set([...(record.routerData?.bridges || []), ...(record.routerData?.bridgeName ? [record.routerData.bridgeName] : [])])],
+    discoveredWanPorts,
+    bridgeName,
+  )
   const protectedWanPorts = [...new Set([...discoveredWanPorts, ...wanPorts])]
   const inventoryBridgePorts = record.routerData?.bridgePorts || []
   const invalidMove = movablePorts.find((port) =>
@@ -323,6 +319,7 @@ export async function PUT(request: NextRequest) {
       managedPorts,
       movablePorts,
       wanPorts: protectedWanPorts,
+      lanBridgeName,
       services,
       hotspotAntiSharing,
       hotspotSubnet,
@@ -353,6 +350,7 @@ export async function PUT(request: NextRequest) {
           ...(record.routerData || { interfaces: [], bridgePorts: [], wanInterfaces: [], bridgeName: null }),
           serviceConfiguration: {
             bridgeName,
+            lanBridgeName,
             ports,
             managedPorts,
             movablePorts,

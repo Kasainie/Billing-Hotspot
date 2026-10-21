@@ -88,7 +88,7 @@ const createWindow = () => {
     { label: 'File', submenu: [{ role: 'quit' }] },
     { label: 'Navigation', submenu: navigationMenu },
   ])
-  app.setApplicationMenu(applicationMenu)
+  Menu.setApplicationMenu(applicationMenu)
   const updateNavigationMenu = () => {
     navigationMenu.items[0].enabled = window.webContents.canGoBack()
     navigationMenu.items[1].enabled = window.webContents.canGoForward()

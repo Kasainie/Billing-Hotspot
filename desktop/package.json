@@ -16,6 +16,7 @@
     ],
     "win": {
       "icon": "../public/favicon.ico",
+      "artifactName": "${productName} Setup ${version} (${arch}).${ext}",
       "target": [
         "nsis"
       ]

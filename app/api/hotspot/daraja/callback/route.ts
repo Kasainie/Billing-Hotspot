@@ -23,7 +23,7 @@ function metadataValue(items: Array<{ Name?: unknown; Value?: unknown }>, name: 
 
 async function processPppoePayment(callback: DarajaCallback, checkoutRequestId: string) {
   const [payment] = await db.select().from(pppoePayments)
-    .where(eq(pppoePayments.checkoutRequestId, checkoutRequestId))
+    .where(and(eq(pppoePayments.checkoutRequestId, checkoutRequestId), eq(pppoePayments.gatewayProvider, 'daraja')))
     .limit(1)
   if (!payment) return null
   if (payment.status === 'completed' || payment.status === 'failed') {
@@ -236,7 +236,7 @@ export async function POST(request: NextRequest) {
     if (pppoeResponse) return pppoeResponse
 
     const [purchase] = await db.select().from(hotspotPurchases)
-      .where(eq(hotspotPurchases.checkoutRequestId, checkoutRequestId))
+      .where(and(eq(hotspotPurchases.checkoutRequestId, checkoutRequestId), eq(hotspotPurchases.gatewayProvider, 'daraja')))
       .limit(1)
     if (!purchase) return NextResponse.json({ ResultCode: 0, ResultDesc: 'Accepted' })
     if (purchase.status === 'completed' || purchase.status === 'failed') return NextResponse.json({ ResultCode: 0, ResultDesc: 'Accepted' })

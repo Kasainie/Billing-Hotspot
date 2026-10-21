@@ -47,6 +47,8 @@ The integration currently uses the PayBill STK transaction type (`CustomerPayBil
 
 ## Router
 
+Router service setup isolates billed subscriber ports on a dedicated Hotspot/PPPoE bridge. The existing non-WAN LAN bridge remains the normal, unbilled network: unchecked ports stay there, and a port selected for subscribers moves only after the admin confirms the move. Ports that are later unchecked are returned to that LAN bridge. Confirm the physical WAN port before applying service changes.
+
 New Hotspot configuration scripts add `billing.lktech.life` to the MikroTik Hotspot walled garden. For routers already configured, add this once from RouterOS:
 
 ```routeros
@@ -63,11 +65,13 @@ Hotspot clients must use the MikroTik Hotspot gateway as their DNS server so cap
 
 The portal bundle includes `redirect.html` to return an HTTP 302 with the captive login URL; Windows NCSI and other captive-network checks rely on a real redirect response. If a laptop does not open its sign-in window automatically, connect to the hotspot and visit `http://neverssl.com` in a browser. This triggers the HTTP captive redirect without using HTTPS, which routers cannot transparently redirect. After deploying portal-file changes, refresh the router's hotspot files and renew the laptop's Wi-Fi connection.
 
-The router service wizard uses the checked ports as the complete subscriber-bridge membership: checked ports receive Hotspot/PPPoE services, and unchecked interfaces already on that selected bridge are removed from it. Ports on other bridges and marked WAN ports are not moved. Removing a port interrupts devices connected through it. An interface left outside the subscriber bridge is not given this Hotspot DHCP/NAT service; to give a downstream router internet, add its uplink to the subscriber bridge (and it will use the captive/billed service) or configure a separate routed service explicitly.
+The router service wizard isolates checked subscriber ports on a dedicated bridge for Hotspot/PPPoE services. The existing non-WAN LAN bridge remains the regular unbilled network. Unchecked ports stay on that LAN bridge, and ports deselected after a previous setup return there. Selected ports move only after explicit admin confirmation; marked WAN ports are never moved. If no existing non-WAN LAN bridge is detected, configure one before expecting unselected ports to have ordinary internet access.
 
 ### Android automatic sign-in
 
 RouterOS can advertise captive-portal discovery to clients using DHCP (RFC 7710/8910). Android requires the advertised portal hostname to present a trusted TLS certificate. The managed router profile enables HTTPS login and selects the certificate only when it finds exactly one trusted certificate whose common name is `login.lktech.life`; without it, provisioning retains HTTP-CHAP and prints a warning rather than configuring a broken HTTPS endpoint.
+
+The provisioning scripts do not download or distribute a shared TLS private key. Import a certificate and matching private key on each router using the steps below, trust the imported certificate, and rerun `hotspot.rsc`; the certificate and key must be present locally for RouterOS to serve HTTPS.
 
 The public DNS records for `login.lktech.life` currently point to Vercel, not the router, so RouterOS's inbound HTTP ACME challenge cannot issue this certificate. Use DNS-01 instead; it validates a temporary TXT record and does not require changing the A records or exposing router management/HTTP to the internet:
 
@@ -99,10 +103,10 @@ The public DNS records for `login.lktech.life` currently point to Vercel, not th
    /import hotspot.rsc
    ```
 
-   For a first installation, confirm `/ip hotspot profile print detail where name="billing-hotspot-profile"` shows the certificate, `login-by=https,http-chap,mac-cookie`, and `mac-cookie-timeout=3d`. When replacing a certificate, note the exact name of the newly imported leaf certificate and update the profile to use it:
+   For a first installation, confirm `/ip hotspot profile print detail where name="billing-hotspot-profile"` shows the certificate and `login-by=https,http-chap,mac-cookie`. RouterOS uses its default 3-day MAC-cookie timeout. When replacing a certificate, note the exact name of the newly imported leaf certificate and update the profile to use it:
 
    ```routeros
-   /ip hotspot profile set [find where name="billing-hotspot-profile"] ssl-certificate="NEW_IMPORTED_LEAF_CERTIFICATE" login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d
+   /ip hotspot profile set [find where name="billing-hotspot-profile"] ssl-certificate="NEW_IMPORTED_LEAF_CERTIFICATE" login-by=https,http-chap,mac-cookie
    ```
 
    Do not rerun `hotspot.rsc` while both the old and new trusted leaf certificates have `common-name="login.lktech.life"`; that script expects exactly one matching certificate and otherwise falls back to HTTP. Confirm the profile points to the new certificate before removing the old leaf. Then forget and rejoin the Wi-Fi on an Android phone so it obtains a fresh DHCP lease. RouterOS should advertise the captive portal and Android can show its sign-in prompt. Renew and import a compatible certificate before the current one expires.

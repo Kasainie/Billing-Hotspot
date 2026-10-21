@@ -10,7 +10,7 @@ import { hotspotPortalTemplates } from './hotspot-templates.ts'
 import { normalizeKenyanPhone } from './daraja.ts'
 import { getProvisioningDbErrorMessage } from './provisioning-errors.ts'
 import { buildRouterMonitorScript } from './router-monitor-script.ts'
-import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, DEFAULT_ROUTER_BRIDGE_NAME, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, resolveRouterSubscriberBridgeName, selectRouterBridgeName } from './router-provisioning.ts'
+import { buildFetchCommand, buildProvisioningScript, buildServiceConfigFetchCommand, buildSubscriberServiceScript, DEFAULT_ROUTER_BRIDGE_NAME, findWanBridgeConflict, findWanBridgeSubnetConflict, findWanSubnetConflict, getHotspotBundleScript, isValidProvisioningBaseUrl, parseServiceSubnet, readRouterInventoryPayload, resolveRouterLanBridgeName, resolveRouterSubscriberBridgeName, selectRouterBridgeName } from './router-provisioning.ts'
 
 test('production WinBox command fetches and imports one self-contained provisioning script', () => {
   const scriptUrl = 'https://billing.example.com/provision/token123'
@@ -72,9 +72,12 @@ test('detected LKTech bridge is preferred over the legacy Centipid bridge', () =
 })
 
 test('stale WAN bridge selection resolves to a separate subscriber bridge', () => {
-  assert.equal(resolveRouterSubscriberBridgeName('bridgeLocal', ['bridgeLocal'], ['bridgeLocal']), 'lktech')
-  assert.equal(resolveRouterSubscriberBridgeName('bridgeLocal', ['bridgeLocal', 'lktech'], ['bridgeLocal']), 'lktech')
-  assert.equal(resolveRouterSubscriberBridgeName('subscriber', ['bridgeLocal', 'subscriber'], ['bridgeLocal']), 'subscriber')
+  assert.equal(resolveRouterSubscriberBridgeName('bridgeLocal', ['bridgeLocal'], ['bridgeLocal']), 'lktech-subscriber')
+  assert.equal(resolveRouterSubscriberBridgeName('bridgeLocal', ['bridgeLocal', 'lktech'], ['bridgeLocal']), 'lktech-subscriber')
+  assert.equal(resolveRouterLanBridgeName(['bridgeLocal', 'lktech-subscriber'], ['wan1'], 'lktech-subscriber'), 'bridgeLocal')
+  assert.equal(resolveRouterSubscriberBridgeName('lktech', ['lktech'], []), 'lktech-subscriber')
+  assert.equal(resolveRouterSubscriberBridgeName('subscriber', ['bridgeLocal', 'subscriber'], ['bridgeLocal']), 'lktech-subscriber')
+  assert.equal(resolveRouterSubscriberBridgeName('lktech', ['lktech', 'lktech-subscriber'], []), 'lktech-subscriber')
 })
 
 test('all RouterOS bundle files resolve to valid content', () => {
@@ -89,6 +92,14 @@ test('standalone RouterOS files match the generated default-tenant bundle', () =
     const source = readFileSync(new URL(`../public/routeros/${fileName}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     assert.equal(source, getHotspotBundleScript(fileName))
   }
+})
+
+test('certificate bundle explains the manual private-key import required for HTTPS', () => {
+  const certificateScript = getHotspotBundleScript('certificates.rsc')
+  const hotspotScript = getHotspotBundleScript('hotspot.rsc')
+  assert.match(certificateScript!, /certificate and its private key are not distributed/)
+  assert.match(certificateScript!, /import a trusted login\.lktech\.life certificate with its private key/)
+  assert.match(hotspotScript!, /No trusted login\.lktech\.life certificate found; import its certificate and private key locally/)
 })
 
 test('MikroTik Hotspot and PPPoE accounting report every minute', () => {
@@ -181,6 +192,13 @@ test('captive portal pages show the animated LKTECH 2026 copyright notice', () =
   const styles = readFileSync(new URL('../public/hotspot-assets/style.css', import.meta.url), 'utf8')
   assert.match(styles, /@keyframes portal-copyright-shimmer/)
   assert.match(styles, /prefers-reduced-motion: reduce/)
+})
+
+test('mobile dashboard styles keep the copyright text visible', () => {
+  const styles = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8')
+  assert.match(styles, /\.ops-shell \.footer-bar \.copyright-notice/)
+  assert.match(styles, /\.copyright-notice-text/)
+  assert.doesNotMatch(styles, /\.footer-bar span:last-child\s*\{\s*display:\s*none/)
 })
 
 test('portal CHAP helper matches standard MD5 vectors', () => {
@@ -492,13 +510,18 @@ test('subscriber service selection removes unchecked bridge ports and protects W
     bridgeName: 'bridge',
     ports: ['ether2', 'ether3', 'ether4'],
     managedPorts: ['ether2', 'ether3', 'ether4', 'ether5'],
+    lanBridgeName: 'bridgeLocal',
+    movablePorts: ['ether2', 'ether3', 'ether4'],
     wanPorts: ['wan1'],
     services: ['Hotspot'],
     hotspotSubnet: '192.168.88.0/24',
   })
 
   assert.match(script, /interface="ether5" and bridge="bridge"\]\] > 0\) do=\{\/interface bridge port remove/)
-  assert.doesNotMatch(script, /interface="ether2" and bridge="bridge"\]\] > 0\) do=\{\/interface bridge port remove/)
+  assert.match(script, /interface="ether5"\]\] = 0\) do=\{\/interface bridge port add bridge="bridgeLocal" interface="ether5"/)
+  assert.match(script, /hotspot remove \[find where name="billing-hotspot" and interface="bridgeLocal"\]/)
+  assert.match(script, /pppoe-server server remove \[find where service-name="billing-pppoe" and interface="bridgeLocal"\]/)
+  assert.match(script, /interface="ether2" and bridge!="bridge"\]\] > 0\) do=\{\/interface bridge port remove/)
   assert.match(script, /Uplink wan1 is already on bridge; remove it from the subscriber bridge/)
   assert.doesNotMatch(script, /interface="wan1" and bridge="bridge"\]\] > 0\) do=\{\/interface bridge port remove/)
   assert.doesNotMatch(script, /interface="ether5" and bridge!/)
@@ -519,6 +542,21 @@ test('subscriber service script moves only explicitly approved ports from anothe
   assert.match(script, /interface="ether2" and bridge!="lktech"\]\] > 0\) do=\{\/interface bridge port remove/)
   assert.match(script, /interface="ether2"\]\] = 0\) do=\{\/interface bridge port add bridge="lktech"/)
   assert.doesNotMatch(script, /interface="ether1" and bridge!="lktech"/)
+})
+
+test('unselected subscriber ports return to the existing normal LAN bridge', () => {
+  const script = buildSubscriberServiceScript({
+    bridgeName: 'lktech-subscriber',
+    lanBridgeName: 'bridgeLocal',
+    ports: ['ether2'],
+    managedPorts: ['ether2', 'ether3'],
+    movablePorts: ['ether2'],
+    services: ['PPPoE'],
+    pppoeSubnet: '172.31.1.0/24',
+  })
+
+  assert.match(script, /interface="ether3" and bridge="lktech-subscriber".*remove.*add bridge="bridgeLocal" interface="ether3"/)
+  assert.doesNotMatch(script, /interface="ether3" and bridge!="lktech-subscriber"/)
 })
 
 test('subscriber service script rejects WAN or unselected ports marked for movement', () => {
@@ -579,9 +617,10 @@ test('existing 192.168.88.0/24 DHCP can be reused without creating a second serv
   assert.match(script, /ip dns set allow-remote-requests=yes/)
   assert.match(script, /dns-server=\$hotspotGateway/)
   assert.match(script, /common-name="login\.lktech\.life" and trusted=yes/)
-  assert.match(script, /ssl-certificate=\$hotspotCertificateName login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d/)
-  assert.match(script, /login-by=http-chap,mac-cookie mac-cookie-timeout=3d/)
-  assert.match(script, /Android automatic captive-portal discovery remains unavailable/)
+  assert.match(script, /ssl-certificate=\$hotspotCertificateName login-by=https,http-chap,mac-cookie use-radius=yes/)
+  assert.match(script, /login-by=http-chap,mac-cookie use-radius=yes/)
+  assert.doesNotMatch(script, /mac-cookie-timeout=/)
+  assert.match(script, /Android captive-portal discovery remains unavailable until then/)
   assert.doesNotMatch(script, /https-redirect/)
 })
 

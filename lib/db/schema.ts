@@ -48,6 +48,42 @@ export const tenantSessions = pgTable('tenant_sessions', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+export const passkeyCredentials = pgTable('passkey_credentials', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => tenantUsers.id, { onDelete: 'cascade' }),
+  credentialId: text('credential_id').notNull().unique(),
+  publicKey: text('public_key').notNull(),
+  counter: bigint('counter', { mode: 'number' }).notNull().default(0),
+  transports: jsonb('transports').$type<string[]>().notNull().default([]),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('passkey_credentials_user_created_idx').on(table.userId, table.createdAt),
+])
+
+export const passkeyChallenges = pgTable('passkey_challenges', {
+  challengeHash: text('challenge_hash').primaryKey(),
+  challenge: text('challenge').notNull(),
+  userId: uuid('user_id').references(() => tenantUsers.id, { onDelete: 'cascade' }),
+  purpose: text('purpose').notNull(),
+  origin: text('origin').notNull(),
+  rpId: text('rp_id').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('passkey_challenges_expires_idx').on(table.expiresAt),
+])
+
+export const passkeyMobileHandoffs = pgTable('passkey_mobile_handoffs', {
+  tokenHash: text('token_hash').primaryKey(),
+  codeChallenge: text('code_challenge').notNull(),
+  userId: uuid('user_id').notNull().references(() => tenantUsers.id, { onDelete: 'cascade' }),
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('passkey_mobile_handoffs_expires_idx').on(table.expiresAt),
+])
+
 export const passwordResetTokens = pgTable('password_reset_tokens', {
   tokenHash: text('token_hash').notNull().primaryKey(),
   userId: uuid('user_id').notNull().references(() => tenantUsers.id, { onDelete: 'cascade' }),
@@ -67,6 +103,18 @@ export const tenantPaymentSettings = pgTable('tenant_payment_settings', {
   callbackUrl: text('callback_url').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const tenantPaymentGateways = pgTable('tenant_payment_gateways', {
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),
+  environment: text('environment').notNull().default('sandbox'),
+  enabled: boolean('enabled').notNull().default(false),
+  publicSettings: jsonb('public_settings').$type<Record<string, string>>().notNull().default({}),
+  secretsEncrypted: text('secrets_encrypted').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.tenantId, table.provider], name: 'tenant_payment_gateways_pkey' }),
+])
 
 export const tenantSmsSettings = pgTable('tenant_sms_settings', {
   tenantId: text('tenant_id').notNull().primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
@@ -360,12 +408,15 @@ export const routerProvisioningTokens = pgTable('router_provisioning_tokens', {
     interfaces: Array<{ name: string; running: boolean; disabled: boolean }>
     bridgePorts: Array<{ interface: string; bridge: string }>
     wanInterfaces: string[]
+    bridges?: string[]
     interfaceNetworks?: Array<{ interface: string; network: string }>
     bridgeName: string | null
     serviceConfiguration?: {
       bridgeName: string
+      lanBridgeName?: string | null
       ports: string[]
       managedPorts: string[]
+      movablePorts?: string[]
       wanPorts: string[]
       services: string[]
       hotspotSubnet: string | null
@@ -514,6 +565,7 @@ export const pppoePayments = pgTable('pppoe_payments', {
     devicesPerAccount: number
   }>().notNull(),
   status: text('status').notNull().default('initiating'),
+  gatewayProvider: text('gateway_provider').notNull().default('daraja'),
   merchantRequestId: text('merchant_request_id'),
   checkoutRequestId: text('checkout_request_id'),
   receipt: text('receipt'),
@@ -552,6 +604,7 @@ export const hotspotPurchases = pgTable('hotspot_purchases', {
     nasRestrictions: string[]
   }>(),
   status: text('status').notNull().default('initiating'),
+  gatewayProvider: text('gateway_provider').notNull().default('daraja'),
   merchantRequestId: text('merchant_request_id'),
   checkoutRequestId: text('checkout_request_id'),
   receipt: text('receipt'),
@@ -565,7 +618,7 @@ export const hotspotPurchases = pgTable('hotspot_purchases', {
   uniqueIndex('hotspot_purchases_receipt_unique_idx').on(table.receipt),
 ])
 
-export const schema = { tenants, tenantUsers, emailVerificationCodes, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, tenantSmsSettings, tenantWorkspaceSettings, smsMessages, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerConnectorQueries, routerMetricSamples }
+export const schema = { tenants, tenantUsers, emailVerificationCodes, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, tenantPaymentGateways, tenantSmsSettings, tenantWorkspaceSettings, smsMessages, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerConnectorQueries, routerMetricSamples }
 export type Site = typeof sites.$inferSelect
 export type Customer = typeof customers.$inferSelect
 export type Payment = typeof payments.$inferSelect

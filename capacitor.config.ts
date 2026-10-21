@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: 'LKTECH',
   webDir: 'www',
   server: {
-    url: 'https://login.lktech.life',
+    url: 'https://billing.lktech.life/login',
     cleartext: false,
     allowNavigation: ['*.lktech.life'],
   },

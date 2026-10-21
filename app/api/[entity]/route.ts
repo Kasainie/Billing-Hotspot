@@ -251,10 +251,28 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
           if (existingPppoeAccount) return { customer: null, error: 'This phone number already has a PPPoE account.', status: 409 }
         }
 
+        let accountNumber: number | undefined
+        if (plan.type === 'PPPoE' && normalizedPhone) {
+          const [account] = await tx.insert(pppoeAccounts).values({
+            tenantId,
+            phone: normalizedPhone,
+            name: clean(input.name) as string,
+            email: (clean(input.email) as string).toLowerCase(),
+          }).returning({ accountNumber: pppoeAccounts.accountNumber })
+          accountNumber = account.accountNumber
+        } else {
+          const allocatedAccount = await tx.execute<{ accountNumber: number }>(sql`
+            select nextval(pg_get_serial_sequence('public.pppoe_accounts', 'account_number'))::integer as "accountNumber"
+          `)
+          accountNumber = allocatedAccount.rows[0]?.accountNumber
+        }
+        if (!accountNumber) throw new Error('Unable to allocate a subscriber account number.')
+
         const [createdCustomer] = await tx.insert(customers).values({
           tenantId,
           siteId: typeof input.siteId === 'string' && input.siteId.trim() ? input.siteId.trim() : null,
           location: typeof input.location === 'string' && input.location.trim() ? input.location.trim() : null,
+          accountNumber,
           name: clean(input.name) as string,
           email: (clean(input.email) as string).toLowerCase(),
           phone: normalizedPhone || (phoneInput || null),
@@ -309,33 +327,23 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         await tx.insert(radreply).values(replyRules)
 
         if (plan.type === 'PPPoE' && normalizedPhone) {
-          const [account] = await tx.insert(pppoeAccounts).values({
-            tenantId,
-            phone: normalizedPhone,
-            name: createdCustomer.name,
-            email: createdCustomer.email,
-            customerId: createdCustomer.id,
-          }).returning({ accountNumber: pppoeAccounts.accountNumber })
-          await tx.update(customers).set({ accountNumber: account.accountNumber })
-            .where(and(eq(customers.id, createdCustomer.id), eq(customers.tenantId, tenantId)))
-          return { customer: createdCustomer, accountNumber: account.accountNumber, error: null, status: 201 }
+          await tx.update(pppoeAccounts).set({ customerId: createdCustomer.id })
+            .where(and(eq(pppoeAccounts.accountNumber, accountNumber), eq(pppoeAccounts.tenantId, tenantId)))
         }
 
-        const allocatedAccount = await tx.execute<{ accountNumber: number }>(sql`
-          select nextval(pg_get_serial_sequence('public.pppoe_accounts', 'account_number'))::integer as "accountNumber"
-        `)
-        const accountNumber = allocatedAccount.rows[0]?.accountNumber
-        if (!accountNumber) throw new Error('Unable to allocate a subscriber account number.')
-        await tx.update(customers).set({ accountNumber })
-          .where(and(eq(customers.id, createdCustomer.id), eq(customers.tenantId, tenantId)))
         return { customer: createdCustomer, accountNumber, error: null, status: 201 }
       })
 
       if (!result.customer) return NextResponse.json({ error: result.error }, { status: result.status })
       return NextResponse.json({ ...result.customer, accountNumber: result.accountNumber }, { status: 201 })
     } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error && error.code === '23505') {
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505' &&
+          'constraint' in error && error.constraint === 'customers_radius_username_unique_idx') {
         return NextResponse.json({ error: 'RADIUS username already exists' }, { status: 409 })
+      }
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505' &&
+          'constraint' in error && error.constraint === 'pppoe_accounts_tenant_phone_unique_idx') {
+        return NextResponse.json({ error: 'This phone number already has a PPPoE account.' }, { status: 409 })
       }
       console.error('Failed to create subscriber and RADIUS login', error)
       return NextResponse.json({ error: 'Unable to create subscriber and RADIUS login' }, { status: 500 })

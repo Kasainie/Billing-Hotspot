@@ -1,10 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Fingerprint, Eye, EyeOff } from 'lucide-react'
+import { startAuthentication } from '@simplewebauthn/browser'
+import { App } from '@capacitor/app'
+import { Browser } from '@capacitor/browser'
+import { Capacitor } from '@capacitor/core'
 import { PasswordRequirement, PasswordRequirements } from '@/components/password-requirements'
 import { BrandWordmark } from '@/components/brand-wordmark'
 import { getPasswordValidationErrors } from '@/lib/password-policy'
+import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/server'
 
 export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
   const [error, setError] = useState('')
@@ -17,6 +22,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
   const [verificationEmail, setVerificationEmail] = useState('')
   const [verificationCode, setVerificationCode] = useState('')
   const [notice, setNotice] = useState('')
+  const handoffInProgress = useRef(false)
   const isSignup = mode === 'signup'
 
   useEffect(() => {
@@ -33,6 +39,79 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
       google_signin_failed: 'Google sign-in failed. Please try again.',
     }
     setError(messages[code] || 'Sign-in failed. Please try again.')
+  }, [])
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let active = true
+    let listener: { remove: () => Promise<void> } | undefined
+
+    const handleAppUrl = async (url: string) => {
+      let callback: URL
+      try {
+        callback = new URL(url)
+      } catch {
+        return
+      }
+      if (callback.protocol !== 'life.lktech.billing:' ||
+          callback.hostname !== 'auth' ||
+          callback.pathname !== '/passkey') return
+      const token = callback.searchParams.get('token')
+      if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token) || handoffInProgress.current) return
+      const codeVerifier = window.localStorage.getItem('lktech_passkey_code_verifier')
+      if (!codeVerifier) {
+        setError('Passkey sign-in could not be securely linked to this app. Please try again.')
+        return
+      }
+
+      handoffInProgress.current = true
+      setBusy(true)
+      setError('')
+      try {
+        const response = await fetch('/api/auth/passkey/mobile-handoff', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ token, codeVerifier }),
+        })
+        const result = await response.json() as { error?: string }
+        if (!response.ok) throw new Error(result.error || 'Unable to finish passkey sign-in.')
+        window.localStorage.removeItem('lktech_passkey_code_verifier')
+        try {
+          await Browser.close()
+        } catch (closeError) {
+          console.warn('Unable to close passkey browser tab', closeError)
+        }
+        window.location.assign('/')
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : 'Unable to finish passkey sign-in.'
+        setError(message)
+        setBusy(false)
+        handoffInProgress.current = false
+        try {
+          await Browser.close()
+        } catch (closeError) {
+          console.warn('Unable to close passkey browser tab', closeError)
+        }
+      }
+    }
+
+    void App.addListener('appUrlOpen', ({ url }) => handleAppUrl(url)).then((handle) => {
+      if (active) listener = handle
+      else void handle.remove()
+    }).catch((error: unknown) => {
+      console.error('Unable to register passkey app link handler', error)
+    })
+    void App.getLaunchUrl().then((launchUrl) => {
+      if (launchUrl?.url) return handleAppUrl(launchUrl.url)
+    }).catch((error: unknown) => {
+      console.error('Unable to read passkey app launch URL', error)
+    })
+
+    return () => {
+      active = false
+      void listener?.remove()
+    }
   }, [])
 
   async function submit(formData: FormData) {
@@ -78,6 +157,64 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
       window.location.assign('/')
     } catch {
       setError('Unable to reach the server. Check your connection and try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function signInWithPasskey() {
+    setBusy(true)
+    setError('')
+    try {
+      if (Capacitor.isNativePlatform()) {
+        const random = crypto.getRandomValues(new Uint8Array(32))
+        const codeVerifier = btoa(Array.from(random, (byte) => String.fromCharCode(byte)).join(''))
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/g, '')
+        const challengeDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier))
+        const codeChallenge = btoa(Array.from(new Uint8Array(challengeDigest), (byte) => String.fromCharCode(byte)).join(''))
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/g, '')
+        window.localStorage.setItem('lktech_passkey_code_verifier', codeVerifier)
+        const browserUrl = new URL('/login', window.location.origin)
+        browserUrl.searchParams.set('mobilePasskey', '1')
+        browserUrl.searchParams.set('codeChallenge', codeChallenge)
+        await Browser.open({ url: browserUrl.toString() })
+        return
+      }
+      if (!window.isSecureContext || !('PublicKeyCredential' in window)) {
+        throw new Error('Passkey sign-in requires a supported browser and a secure HTTPS connection.')
+      }
+      const optionsResponse = await fetch('/api/auth/passkey/login-options', { method: 'POST' })
+      const optionsResult = await optionsResponse.json() as { options?: PublicKeyCredentialRequestOptionsJSON; error?: string }
+      if (!optionsResponse.ok || !optionsResult.options) throw new Error(optionsResult.error || 'Unable to start passkey sign-in.')
+      const credential = await startAuthentication({ optionsJSON: optionsResult.options })
+      const mobileHandoff = new URLSearchParams(window.location.search).get('mobilePasskey') === '1'
+      const response = await fetch('/api/auth/passkey/login-verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          response: credential,
+          mobileHandoff,
+          ...(mobileHandoff ? {
+            mobileCodeChallenge: new URLSearchParams(window.location.search).get('codeChallenge'),
+          } : {}),
+        }),
+      })
+      const result = await response.json() as { error?: string; mobileRedirectUrl?: string }
+      if (!response.ok) throw new Error(result.error || 'Passkey sign-in failed.')
+      if (result.mobileRedirectUrl) {
+        window.location.assign(result.mobileRedirectUrl)
+        return
+      }
+      window.location.assign('/')
+    } catch (reason) {
+      const error = reason instanceof Error ? reason : new Error('Passkey sign-in failed.')
+      setError(error.name === 'NotAllowedError'
+        ? 'Passkey sign-in was cancelled or timed out. Try again or use your password.'
+        : error.message)
     } finally {
       setBusy(false)
     }
@@ -190,6 +327,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
           {error && <p className="auth-error" role="alert">{error}</p>}
           <button type="submit" className="auth-submit" disabled={busy}>{busy ? 'Please wait…' : isSignup ? 'Create account' : 'Sign in'}</button>
         </form>}
+        {!verificationPending && !isSignup && <button type="button" className="auth-passkey-button" onClick={() => void signInWithPasskey()} disabled={busy}><Fingerprint size={17} />{busy ? (Capacitor.isNativePlatform() ? 'Opening secure browser…' : 'Waiting for passkey…') : 'Sign in with a passkey'}</button>}
         {!verificationPending && !isSignup && <p className="auth-switch"><a href="/forgot-password">Forgot your password?</a></p>}
         {!verificationPending && isSignup && <p className="auth-terms">By creating an account, you agree to the <a href="/terms#platform-terms">LKTECH Platform Terms</a>.</p>}
         {!verificationPending && <p className="auth-switch">{isSignup ? 'Already have an account?' : 'New to LKTECH?'} <a href={isSignup ? '/login' : '/signup'}>{isSignup ? 'Sign in' : 'Create an account'}</a></p>}

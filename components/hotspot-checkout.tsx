@@ -22,6 +22,8 @@ type PurchaseResult = {
   error?: string
 }
 
+type PaymentMethod = { provider: string; name: string }
+
 export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 'reconnect' }) {
   const [products, setProducts] = useState<PortalPackage[]>([])
   const [catalogError, setCatalogError] = useState('')
@@ -35,6 +37,10 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
   const [message, setMessage] = useState('')
   const [credentials, setCredentials] = useState<{ username: string; password: string; receipt?: string | null } | null>(null)
   const [tenantQuery, setTenantQuery] = useState('')
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
+  const [paymentMethodsLoaded, setPaymentMethodsLoaded] = useState(false)
+  const [paymentProvider, setPaymentProvider] = useState('')
+  const [hostedCheckoutUrl, setHostedCheckoutUrl] = useState('')
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -43,6 +49,12 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
     setClientMac(params.get('mac') || '')
     setPhone(params.get('phone') || '')
     setReceipt(params.get('receipt') || '')
+    const pendingPayment = params.get('payment')
+    if (pendingPayment && /^[0-9a-f-]{36}$/i.test(pendingPayment)) {
+      setPurchaseId(pendingPayment)
+      setStatus('pending')
+      setMessage('Confirming your payment with the provider. Keep this page open.')
+    }
     const candidateReturnUrl = params.get('return') || ''
     try {
       const returnUrl = new URL(candidateReturnUrl)
@@ -66,6 +78,28 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
   }, [mode, tenantQuery])
 
   useEffect(() => {
+    if (mode !== 'purchase') return
+    let active = true
+    fetch(`/api/payment-methods${tenantQuery}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json() as { methods?: PaymentMethod[]; error?: string }
+        if (!response.ok || !Array.isArray(result.methods)) throw new Error(result.error || 'Unable to load payment methods.')
+        if (active) {
+          setPaymentMethods(result.methods)
+          setPaymentProvider(result.methods[0]?.provider || '')
+          setPaymentMethodsLoaded(true)
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setCatalogError(error instanceof Error ? error.message : 'Unable to load payment methods.')
+          setPaymentMethodsLoaded(true)
+        }
+      })
+    return () => { active = false }
+  }, [mode, tenantQuery])
+
+  useEffect(() => {
     if (status !== 'pending' || !purchaseId) return
     let active = true
     let timer: number
@@ -83,7 +117,7 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
           setStatus('failed')
           setMessage(result.failureReason || 'Payment was not completed. You can try again.')
         } else {
-          setMessage('Approve the M-Pesa request on your phone. Keep this page open while we confirm payment.')
+          setMessage('Complete the payment in the provider window. Keep this page open while we confirm payment.')
           timer = window.setTimeout(poll, 3000)
         }
       } catch (error) {
@@ -105,18 +139,21 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
       return
     }
     setStatus('starting')
-    setMessage('Sending a secure payment request to your phone...')
+    setHostedCheckoutUrl('')
+    const selectedMethod = paymentMethods.find((item) => item.provider === paymentProvider)
+    setMessage(paymentProvider === 'daraja' ? 'Sending a secure payment request to your phone...' : `Starting secure ${selectedMethod?.name || 'payment'} checkout...`)
     try {
       const response = await fetch(`/api/hotspot/purchases${tenantQuery}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ packageId: productId, phone, mac: clientMac }),
+        body: JSON.stringify({ packageId: productId, phone, mac: clientMac, provider: paymentProvider }),
       })
-      const result = await response.json() as { id?: string; message?: string; error?: string }
+      const result = await response.json() as { id?: string; message?: string; error?: string; checkoutUrl?: string }
       if (!response.ok || !result.id) throw new Error(result.error || 'Unable to start M-Pesa payment.')
       setPurchaseId(result.id)
+      setHostedCheckoutUrl(result.checkoutUrl || '')
       setStatus('pending')
-      setMessage(result.message || 'Check your phone and approve the M-Pesa prompt.')
+      setMessage(result.message || (paymentProvider === 'daraja' ? 'Check your phone and approve the M-Pesa prompt.' : 'Continue to the secure payment page.'))
     } catch (error) {
       setStatus('failed')
       setMessage(error instanceof Error ? error.message : 'Unable to start M-Pesa payment.')
@@ -155,24 +192,31 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
           <p className="checkout-eyebrow success-eyebrow">PAYMENT CONFIRMED</p>
           <h1>You&apos;re ready to connect.</h1>
           <p className="checkout-copy">{message}</p>
-          <div className="credential-box"><div><span>Username</span><strong>{credentials.username}</strong></div><div><span>Password</span><strong>{credentials.password}</strong></div>{credentials.receipt && <div><span>M-Pesa receipt</span><strong>{credentials.receipt}</strong></div>}</div>
+          <div className="credential-box"><div><span>Username</span><strong>{credentials.username}</strong></div><div><span>Password</span><strong>{credentials.password}</strong></div>{credentials.receipt && <div><span>Payment receipt</span><strong>{credentials.receipt}</strong></div>}</div>
           <p className="checkout-hint">Return to the hotspot sign-in page and enter these details. Keep them private.</p>
           <button className="checkout-submit" type="button" onClick={returnToPortal}>Return to hotspot <span aria-hidden="true">&#8594;</span></button>
         </> : <>
-          <p className="checkout-eyebrow">{mode === 'purchase' ? 'SECURE M-PESA CHECKOUT' : 'ACCOUNT RECOVERY'}</p>
+          <p className="checkout-eyebrow">{mode === 'purchase' ? 'SECURE ONLINE CHECKOUT' : 'ACCOUNT RECOVERY'}</p>
           <h1>{mode === 'purchase' ? 'Connect in a few steps.' : 'Find your hotspot login.'}</h1>
-          <p className="checkout-copy">{mode === 'purchase' ? 'We’ll send an STK Push to your Safaricom phone. Approve it in the official M-Pesa prompt; never enter your M-Pesa PIN on this page.' : 'Use the phone number and M-Pesa receipt from your package payment.'}</p>
+          <p className="checkout-copy">{mode === 'purchase' ? 'Choose a payment method and follow the provider’s secure checkout. Never enter your M-Pesa PIN on this page.' : 'Use the phone number and payment receipt from your package payment.'}</p>
           {mode === 'purchase' && selectedProduct && <div className="selected-package"><span>{selectedProduct.name}</span><strong>KSh {selectedProduct.price}</strong><small>{selectedProduct.speedLabel} · {selectedProduct.durationLabel}</small></div>}
           {mode === 'purchase' && catalogError && <p className="checkout-message is-error" role="alert">{catalogError}</p>}
+          {mode === 'purchase' && paymentMethodsLoaded && paymentMethods.length === 0 && !catalogError && <p className="checkout-message" role="status">No online payment methods are enabled for this workspace yet.</p>}
           {mode === 'purchase' && !selectedProduct && !catalogError && <p className="checkout-message" role="status">Return to the hotspot page and choose an available package.</p>}
           <form className="checkout-form" onSubmit={mode === 'purchase' ? startPayment : findByReceipt}>
-            <label>Safaricom phone number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="07XX XXX XXX" value={phone} onChange={(event) => setPhone(event.target.value)} required disabled={status === 'pending'} /></label>
+            <label>Mobile phone number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="07XX XXX XXX" value={phone} onChange={(event) => setPhone(event.target.value)} required disabled={status === 'pending'} /></label>
+            {mode === 'purchase' && <label>Payment method
+              <select value={paymentProvider} onChange={(event) => setPaymentProvider(event.target.value)} disabled={status === 'pending' || paymentMethods.length === 0} required>
+                {paymentMethods.map((method) => <option key={method.provider} value={method.provider}>{method.name}</option>)}
+              </select>
+            </label>}
             {mode === 'reconnect' && <label>M-Pesa receipt code<input type="text" autoCapitalize="characters" placeholder="e.g. RTA12ABC34" value={receipt} onChange={(event) => setReceipt(event.target.value.toUpperCase())} required /></label>}
-            <button className="checkout-submit" type="submit" disabled={status === 'starting' || status === 'pending' || (mode === 'purchase' && (!selectedProduct || Boolean(catalogError)))}>{mode === 'purchase' ? status === 'pending' ? 'Waiting for M-Pesa approval...' : 'Send M-Pesa prompt' : 'Find my account'}</button>
+            <button className="checkout-submit" type="submit" disabled={status === 'starting' || status === 'pending' || (mode === 'purchase' && (!selectedProduct || !paymentProvider || Boolean(catalogError)))}>{mode === 'purchase' ? status === 'pending' ? 'Waiting for payment...' : paymentProvider === 'daraja' ? 'Send M-Pesa prompt' : 'Continue to checkout' : 'Find my account'}</button>
           </form>
+          {hostedCheckoutUrl && status === 'pending' && <a className="checkout-submit" href={hostedCheckoutUrl} target="_blank" rel="noopener noreferrer">Open secure checkout <span aria-hidden="true">&#8599;</span></a>}
           {message && <p className={`checkout-message ${status === 'failed' ? 'is-error' : ''}`} role="status">{message}</p>}
           {status === 'failed' && mode === 'purchase' && <button className="checkout-retry" type="button" onClick={() => { setStatus('idle'); setMessage('') }}>Try payment again</button>}
-          <p className="checkout-hint">M-Pesa PINs are entered only in the Safaricom prompt. This page never asks for your PIN.</p>
+          <p className="checkout-hint">Payments are confirmed directly with the provider before access is issued. This page never asks for your M-Pesa PIN.</p>
         </>}
       </section>
       <button className="checkout-back" type="button" onClick={returnToPortal}>Back to hotspot</button>

@@ -6,18 +6,18 @@
 :if ([:len $hotspotCertificates] = 1) do={
   :local hotspotCertificateName [/certificate get [:pick $hotspotCertificates 0] name]
   :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={
-    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m
+    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m
   } else={
-    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m
+    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m
   }
   :put "Trusted portal certificate configured; renew DHCP leases to advertise captive-portal discovery"
 } else={
   :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={
-    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m
+    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m
   } else={
-    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m
+    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m
   }
-  :put "No trusted login.lktech.life certificate found; Android automatic captive-portal discovery remains unavailable"
+  :put "No trusted login.lktech.life certificate found; import its certificate and private key locally, mark it trusted, then rerun hotspot.rsc. Android captive-portal discovery remains unavailable until then."
 }
 :local hotspotGateway [/ip hotspot profile get [find where name="billing-hotspot-profile"] hotspot-address]
 :if ([:len $hotspotGateway] > 0) do={

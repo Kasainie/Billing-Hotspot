@@ -14,6 +14,7 @@ import {
 import { Inter, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google'
 import Link from 'next/link'
 import { BrandWordmark } from '@/components/brand-wordmark'
+import { marketingFeatures } from '@/lib/marketing-features'
 
 const landingSans = Inter({ subsets: ['latin'], variable: '--font-landing-sans' })
 const landingHeading = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-landing-heading' })
@@ -31,32 +32,12 @@ const productSchema = {
 
 const productSchemaJson = JSON.stringify(productSchema).replace(/</g, '\\u003c')
 
-const features = [
-  {
-    number: '01',
-    label: 'ACCESS',
-    title: 'One view of every subscriber',
-    description: 'Manage hotspot and PPPoE accounts, plans, sessions, and customer details from one clear workspace.',
-    icon: Wifi,
-    iconStyle: 'bg-blue-50 text-blue-600',
-  },
-  {
-    number: '02',
-    label: 'PAYMENTS',
-    title: 'Payments that stay in sync',
-    description: 'Connect M-Pesa payments to internet packages and reconcile activity without jumping between tools.',
-    icon: CreditCard,
-    iconStyle: 'bg-emerald-50 text-emerald-700',
-  },
-  {
-    number: '03',
-    label: 'NETWORK',
-    title: 'Know what’s happening on your network',
-    description: 'Provision MikroTik routers and keep an eye on network status, active sessions, and operations.',
-    icon: Router,
-    iconStyle: 'bg-indigo-50 text-indigo-700',
-  },
-]
+const featureIcons = { access: Wifi, payments: CreditCard, network: Router } as const
+const featureIconStyles = {
+  access: 'bg-blue-50 text-blue-600',
+  payments: 'bg-emerald-50 text-emerald-700',
+  network: 'bg-indigo-50 text-indigo-700',
+} as const
 
 const chartBars = [34, 49, 38, 59, 45, 70, 54, 80, 60, 72, 52, 91, 66, 84, 58, 76, 96, 72, 88, 63, 79, 100, 73, 90]
 
@@ -226,21 +207,21 @@ export function MarketingHome() {
                 <h2 className="mt-4 font-[var(--font-landing-heading)] text-3xl font-bold tracking-[-0.055em] text-[#0F172A] sm:text-[42px]">Less switching. More signal.</h2>
                 <p className="mt-4 max-w-xl text-[15px] leading-7 text-[#334155]">The essential tools to run your ISP, thoughtfully brought together.</p>
               </div>
-              <a href="#get-started" className="marketing-link inline-flex items-center gap-2 pb-1 text-sm font-semibold text-[#2563EB] transition-all hover:gap-3">See what you can do <ArrowRight size={15} /></a>
+              <Link href="/features" className="marketing-link inline-flex items-center gap-2 pb-1 text-sm font-semibold text-[#2563EB] transition-all hover:gap-3">See what you can do <ArrowRight size={15} /></Link>
             </div>
 
             <div className="mt-10 grid gap-4 md:grid-cols-3">
-              {features.map((feature) => {
-                const Icon = feature.icon
+              {marketingFeatures.map((feature) => {
+                const Icon = featureIcons[feature.icon]
                 return (
                   <article key={feature.number} className="group rounded-2xl border border-[#E2E8F0] bg-white p-6 shadow-[0_2px_8px_rgba(15,23,42,0.025)] transition-all duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_18px_42px_rgba(15,23,42,0.08)] sm:p-7">
                     <div className="flex items-center justify-between">
                       <span className="landing-mono text-[10px] font-medium tracking-[0.1em] text-slate-500">{feature.label} / {feature.number}</span>
-                      <span className={`grid size-10 place-items-center rounded-xl transition-transform duration-300 group-hover:scale-105 ${feature.iconStyle}`}><Icon size={18} /></span>
+                      <span className={`grid size-10 place-items-center rounded-xl transition-transform duration-300 group-hover:scale-105 ${featureIconStyles[feature.icon]}`}><Icon size={18} /></span>
                     </div>
                     <h3 className="mt-9 font-[var(--font-landing-heading)] text-[19px] font-bold tracking-[-0.04em] text-[#0F172A]">{feature.title}</h3>
-                    <p className="mt-3 text-[13px] leading-6 text-[#334155]">{feature.description}</p>
-                    <a href="#get-started" aria-label={`Learn more about ${feature.title}`} className="marketing-link mt-6 inline-flex items-center gap-2 text-xs font-semibold text-[#2563EB] opacity-80 transition-all group-hover:gap-3 group-hover:opacity-100">Learn more <ArrowRight size={13} /></a>
+                    <p className="mt-3 text-[13px] leading-6 text-[#334155]">{feature.summary}</p>
+                    <Link href={`/features/${feature.slug}`} aria-label={`Learn more about ${feature.title}`} className="marketing-link mt-6 inline-flex items-center gap-2 text-xs font-semibold text-[#2563EB] opacity-80 transition-all group-hover:gap-3 group-hover:opacity-100">Learn more <ArrowRight size={13} /></Link>
                   </article>
                 )
               })}
@@ -267,6 +248,7 @@ export function MarketingHome() {
             <span className="copyright-notice"><span className="copyright-notice-text">© 2026 LKTECH™. All rights reserved.</span></span>
             <nav aria-label="Footer navigation" className="flex gap-5">
               <Link href="/terms" className="marketing-link transition-colors hover:text-[#2563EB]">Terms</Link>
+              <Link href="/downloads" className="marketing-link transition-colors hover:text-[#2563EB]">Download apps</Link>
               <Link href="/login" className="marketing-link transition-colors hover:text-[#2563EB]">Sign in</Link>
               <Link href="/signup" className="marketing-link transition-colors hover:text-[#2563EB]">Create account</Link>
             </nav>

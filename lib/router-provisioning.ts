@@ -160,8 +160,9 @@ export function buildProvisioningScript({
 const hotspotBundleScripts: Record<string, string> = {
   'certificates.rsc': [
     '# certificates.rsc',
-    '# Android captive-portal discovery requires a trusted certificate matching login.lktech.life.',
-    '# Import that certificate, then rerun hotspot.rsc to enable HTTPS login and portal discovery.',
+    '# A TLS certificate and its private key are not distributed by this script.',
+    '# Import a trusted login.lktech.life certificate and its private key locally, then rerun hotspot.rsc.',
+    ':put "Certificate import is a manual step: import a trusted login.lktech.life certificate with its private key, then rerun hotspot.rsc to enable HTTPS captive portal discovery."',
     '',
   ].join('\n'),
   'config.rsc': [
@@ -180,18 +181,18 @@ const hotspotBundleScripts: Record<string, string> = {
     ':if ([:len $hotspotCertificates] = 1) do={',
     '  :local hotspotCertificateName [/certificate get [:pick $hotspotCertificates 0] name]',
     '  :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={',
-    '    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m',
+    '    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m',
     '  } else={',
-    '    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m',
+    '    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m',
     '  }',
     '  :put "Trusted portal certificate configured; renew DHCP leases to advertise captive-portal discovery"',
     '} else={',
     '  :if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={',
-    '    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m',
+    '    /ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m',
     '  } else={',
-    '    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m',
+    '    /ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory dns-name="login.lktech.life" login-by=http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m',
     '  }',
-    '  :put "No trusted login.lktech.life certificate found; Android automatic captive-portal discovery remains unavailable"',
+    '  :put "No trusted login.lktech.life certificate found; import its certificate and private key locally, mark it trusted, then rerun hotspot.rsc. Android captive-portal discovery remains unavailable until then."',
     '}',
     ':local hotspotGateway [/ip hotspot profile get [find where name="billing-hotspot-profile"] hotspot-address]',
     ':if ([:len $hotspotGateway] > 0) do={',
@@ -264,8 +265,30 @@ export function resolveRouterSubscriberBridgeName(
   wanInterfaces: string[] = [],
 ) {
   const candidates = [...new Set([...bridgeNames, ...(bridgeName ? [bridgeName] : [])])]
-  if (candidates.length === 0) candidates.push(DEFAULT_ROUTER_BRIDGE_NAME)
-  return selectRouterBridgeName(candidates, wanInterfaces) || DEFAULT_ROUTER_BRIDGE_NAME
+  const subscriberBridge = candidates.find((name) =>
+    /^lktech-subscriber\d*$/.test(name) && !wanInterfaces.includes(name),
+  )
+  if (subscriberBridge) return subscriberBridge
+
+  const baseName = `${DEFAULT_ROUTER_BRIDGE_NAME}-subscriber`
+  if (!candidates.includes(baseName)) return baseName
+
+  let suffix = 1
+  while (candidates.includes(`${baseName}${suffix}`)) suffix += 1
+  return `${baseName}${suffix}`
+}
+
+export function resolveRouterLanBridgeName(
+  bridgeNames: string[] = [],
+  wanInterfaces: string[] = [],
+  subscriberBridgeName?: string,
+) {
+  const lanBridges = bridgeNames.filter((name) =>
+    name !== subscriberBridgeName &&
+    !wanInterfaces.includes(name) &&
+    !/^lktech-subscriber\d*$/.test(name),
+  )
+  return selectRouterBridgeName(lanBridges, wanInterfaces)
 }
 
 export function parseServiceSubnet(value: string) {
@@ -324,6 +347,7 @@ export function buildSubscriberServiceScript({
   managedPorts = ports,
   movablePorts = [],
   wanPorts = [],
+  lanBridgeName,
   services,
   hotspotAntiSharing = false,
   hotspotSubnet,
@@ -334,6 +358,7 @@ export function buildSubscriberServiceScript({
   managedPorts?: string[]
   movablePorts?: string[]
   wanPorts?: string[]
+  lanBridgeName?: string | null
   services: string[]
   hotspotAntiSharing?: boolean
   hotspotSubnet?: string
@@ -347,6 +372,8 @@ export function buildSubscriberServiceScript({
       selectedPorts.size !== ports.length ||
       movablePortSet.size !== movablePorts.length ||
       movablePorts.some((port) => !selectedPorts.has(port) || protectedWanPorts.has(port)) ||
+      (lanBridgeName !== undefined && lanBridgeName !== null && !/^[a-zA-Z0-9_.-]{1,48}$/.test(lanBridgeName)) ||
+      (lanBridgeName !== undefined && lanBridgeName !== null && lanBridgeName === bridgeName) ||
       managedPorts.some((port) => protectedWanPorts.has(port)) ||
       ports.some((port) => !managedPorts.includes(port) || protectedWanPorts.has(port))) {
     throw new Error('Bridge or interface name is invalid.')
@@ -401,6 +428,12 @@ export function buildSubscriberServiceScript({
   }
 
   commands.push(`:if ([:len [/interface bridge find where name="${bridgeName}"]] = 0) do={/interface bridge add name="${bridgeName}"}`)
+  if (lanBridgeName) {
+    commands.push(
+      `:if ([:len [/ip hotspot find where name="billing-hotspot" and interface="${lanBridgeName}"]] > 0) do={/ip hotspot remove [find where name="billing-hotspot" and interface="${lanBridgeName}"]}`,
+      `:if ([:len [/interface pppoe-server server find where service-name="billing-pppoe" and interface="${lanBridgeName}"]] > 0) do={/interface pppoe-server server remove [find where service-name="billing-pppoe" and interface="${lanBridgeName}"]}`,
+    )
+  }
   for (const port of managedPorts) {
     if (selectedPorts.has(port)) {
       if (movablePortSet.has(port)) {
@@ -418,9 +451,15 @@ export function buildSubscriberServiceScript({
         `:if ([:len [/interface bridge port find where interface="${port}"]] = 0) do={/interface bridge port add bridge="${bridgeName}" interface="${port}"}`,
       )
     } else {
-      commands.push(
-        `:if ([:len [/interface bridge port find where interface="${port}" and bridge="${bridgeName}"]] > 0) do={/interface bridge port remove [find where interface="${port}" and bridge="${bridgeName}"]}`,
-      )
+      if (lanBridgeName) {
+        commands.push(
+          `:if ([:len [/interface bridge port find where interface="${port}" and bridge="${bridgeName}"]] > 0) do={/interface bridge port remove [find where interface="${port}" and bridge="${bridgeName}"]}; :if ([:len [/interface bridge port find where interface="${port}"]] = 0) do={/interface bridge port add bridge="${lanBridgeName}" interface="${port}"}`,
+        )
+      } else {
+        commands.push(
+          `:if ([:len [/interface bridge port find where interface="${port}" and bridge="${bridgeName}"]] > 0) do={/interface bridge port remove [find where interface="${port}" and bridge="${bridgeName}"]}`,
+        )
+      }
     }
   }
 
@@ -436,11 +475,11 @@ export function buildSubscriberServiceScript({
       ':local hotspotCertificates [/certificate find where common-name="login.lktech.life" and trusted=yes]',
       ':if ([:len $hotspotCertificates] = 1) do={',
       '  :local hotspotCertificateName [/certificate get [:pick $hotspotCertificates 0] name]',
-      `:if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m}`,
+      `:if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" ssl-certificate=$hotspotCertificateName login-by=https,http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m}`,
       '  :put "Trusted portal certificate configured; renew DHCP leases to advertise captive-portal discovery"',
       '} else={',
-      `:if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" login-by=http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" login-by=http-chap,mac-cookie mac-cookie-timeout=3d use-radius=yes radius-accounting=yes radius-interim-update=1m}`,
-      '  :put "No trusted login.lktech.life certificate found; Android automatic captive-portal discovery remains unavailable"',
+      `:if ([:len [/ip hotspot profile find where name="billing-hotspot-profile"]] = 0) do={/ip hotspot profile add name="billing-hotspot-profile" html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" login-by=http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m} else={/ip hotspot profile set [find where name="billing-hotspot-profile"] html-directory=$hotspotDirectory hotspot-address="${hotspotNetwork.gateway}" dns-name="login.lktech.life" login-by=http-chap,mac-cookie use-radius=yes radius-accounting=yes radius-interim-update=1m}`,
+      '  :put "No trusted login.lktech.life certificate found; import its certificate and private key locally, mark it trusted, then rerun hotspot.rsc. Android captive-portal discovery remains unavailable until then."',
       '}',
       ':local hotspotGateway [/ip hotspot profile get [find where name="billing-hotspot-profile"] hotspot-address]',
       ':if ([:len $hotspotGateway] > 0) do={',
