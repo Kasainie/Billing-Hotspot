@@ -41,6 +41,9 @@ export function PasskeySettings() {
       if (!window.isSecureContext || !('PublicKeyCredential' in window)) {
         throw new Error('Passkeys require a supported browser and a secure HTTPS connection.')
       }
+      if (process.env.NODE_ENV === 'development' && window.location.hostname === '127.0.0.1') {
+        throw new Error('For local passkey setup, open this app at http://localhost:3000 instead of 127.0.0.1.')
+      }
       const optionsResult = await readResponse(await fetch('/api/auth/passkey/register-options', { method: 'POST' }))
       const optionsJSON = optionsResult.options
       if (!optionsJSON) throw new Error('Unable to start passkey setup.')
@@ -53,7 +56,13 @@ export function PasskeySettings() {
       await loadCredentials()
       setNotice('Passkey added. You can use it to sign in to LKTECH.')
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to add a passkey.')
+      if (reason instanceof DOMException && reason.name === 'NotAllowedError') {
+        setError('The browser or Windows could not save the passkey. If prompted, use your Windows Hello PIN or biometrics; for local development, open the app at http://localhost:3000.')
+      } else if (reason instanceof DOMException && reason.name === 'SecurityError') {
+        setError('The passkey host does not match its configured security domain. Check the address and PASSKEY_RP_ID.')
+      } else {
+        setError(reason instanceof Error ? reason.message : 'Unable to add a passkey.')
+      }
     } finally {
       setBusy(false)
     }

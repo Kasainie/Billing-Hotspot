@@ -1,9 +1,12 @@
-import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, isNull, or, sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { customers, hotspotPurchases, invoices, packages, payments, pppoeAccounts, radcheck, sites, subscriberCredits, subscriberEvents, supportTickets } from '@/lib/db/schema'
+import { customers, hotspotPurchases, invoices, packages, payments, pppoeAccounts, radcheck, sites, smsMessages, subscriberCredits, subscriberEvents, supportTickets } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { serializeDatabaseTimestamp } from '@/lib/database-timestamp'
+import { radiusAccountingFreshnessPredicate } from '@/lib/radius-accounting'
+import { decryptTenantSecret, getTenantSecretConfigurationError, tryDecryptTenantSecret } from '@/lib/db/tenant-secrets'
+import { normalizeKenyanPhone } from '@/lib/daraja'
 
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await getTenantSession(_request)
@@ -133,7 +136,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         }>(sql`
           select
             count(*)::int as "sessionCount",
-            count(*) filter (where acctstoptime is null)::int as "activeSessions",
+            count(*) filter (where acctstoptime is null
+              and ${radiusAccountingFreshnessPredicate(sql`acctupdatetime`, sql`acctstarttime`)})::int as "activeSessions",
             min(acctstarttime) as "firstSessionAt",
             max(coalesce(acctstoptime, acctupdatetime, acctstarttime)) as "lastSessionAt",
             coalesce(sum(acctinputoctets), 0)::text as "bytesIn",
@@ -168,7 +172,11 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
             framedipaddress::text as "ipAddress",
             callingstationid as "macAddress",
             acctstarttime as "startedAt",
-            acctstoptime as "stoppedAt",
+            case when acctstoptime is null
+              and not (${radiusAccountingFreshnessPredicate(sql`acctupdatetime`, sql`acctstarttime`)})
+              then coalesce(acctupdatetime, acctstarttime)
+              else acctstoptime
+            end as "stoppedAt",
             acctsessiontime as "sessionSeconds",
             coalesce(acctinputoctets, 0)::text as "bytesIn",
             coalesce(acctoutputoctets, 0)::text as "bytesOut",
@@ -254,7 +262,8 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         : Promise.resolve({ rows: [] }),
     ])
     const sessionTotals = sessionSummary.rows[0]
-    const [invoiceRows, creditRows, creditBalanceRows, eventRows, ticketRows, purchaseHistoryRows] = await Promise.all([
+    const normalizedPhone = customer.phone ? normalizeKenyanPhone(customer.phone) : null
+    const [invoiceRows, creditRows, creditBalanceRows, eventRows, smsRows, ticketRows, purchaseHistoryRows] = await Promise.all([
       db.select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -283,6 +292,23 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         createdAt: subscriberEvents.createdAt,
       }).from(subscriberEvents).where(and(eq(subscriberEvents.tenantId, session.tenantId), eq(subscriberEvents.customerId, customer.id)))
         .orderBy(desc(subscriberEvents.createdAt)).limit(100),
+      db.select({
+        id: smsMessages.id,
+        status: smsMessages.status,
+        deliveryStatus: smsMessages.deliveryStatus,
+        recipient: smsMessages.recipient,
+        messageEncrypted: smsMessages.messageEncrypted,
+        lastError: smsMessages.lastError,
+        createdAt: smsMessages.createdAt,
+        sentAt: smsMessages.sentAt,
+        deliveryReportedAt: smsMessages.deliveryReportedAt,
+      }).from(smsMessages).where(and(
+        eq(smsMessages.tenantId, session.tenantId),
+        or(
+          eq(smsMessages.customerId, customer.id),
+          ...(normalizedPhone ? [and(isNull(smsMessages.customerId), eq(smsMessages.recipient, normalizedPhone))] : []),
+        ),
+      )).orderBy(desc(smsMessages.createdAt)).limit(100),
       db.select({
         id: supportTickets.id,
         subject: supportTickets.subject,
@@ -359,6 +385,21 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         stoppedAt: serializeDatabaseTimestamp(row.stoppedAt),
       })),
       events: eventRows.map((event) => ({ ...event, createdAt: event.createdAt.toISOString() })),
+      smsMessages: smsRows.map((message) => {
+        const decrypted = tryDecryptTenantSecret(message.messageEncrypted)
+        return {
+          id: message.id,
+          status: message.status,
+          deliveryStatus: message.deliveryStatus,
+          recipient: message.recipient,
+          message: decrypted.value,
+          messageError: decrypted.error,
+          lastError: message.lastError,
+          createdAt: message.createdAt.toISOString(),
+          sentAt: message.sentAt?.toISOString() || null,
+          deliveryReportedAt: message.deliveryReportedAt?.toISOString() || null,
+        }
+      }),
       packageHistory: purchaseHistoryRows.map((purchase) => ({
         ...purchase,
         createdAt: purchase.createdAt.toISOString(),
@@ -384,7 +425,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     }, { headers: { 'cache-control': 'no-store, private' } })
   } catch (error) {
     console.error('Failed to load tenant subscriber details', error)
-    return NextResponse.json({ error: 'Unable to load subscriber details.' }, { status: 503 })
+    return NextResponse.json({ error: getTenantSecretConfigurationError(error) || 'Unable to load subscriber details.' }, { status: 503 })
   }
 }
 

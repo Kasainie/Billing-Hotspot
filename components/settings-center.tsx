@@ -2,15 +2,16 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
-  Activity, Bell, Cable, Check, CreditCard, FileText, Globe2, Mail, MessageCircle,
+  Activity, Bell, Cable, Check, CreditCard, FileText, Globe2, Mail, MessageCircle, RotateCcw,
   Network, Palette, Search, Settings2, ShieldCheck, Smartphone, UserRound, Wifi,
   type LucideIcon,
 } from 'lucide-react'
 import { PaymentSettings } from '@/components/payment-settings'
 import { AdditionalPaymentGateways } from '@/components/additional-payment-gateways'
-import { SmsSettings } from '@/components/sms-settings'
 import { PasskeySettings } from '@/components/passkey-settings'
+import { SmsSettings } from '@/components/sms-settings'
 import { tenantSettingSections, type TenantSettingField, type TenantSettingSection } from '@/lib/tenant-settings'
+import { messageTemplateDefaults, messageTemplateDefinitions } from '@/lib/message-templates'
 
 type SavedSettings = Record<string, Record<string, string | number | boolean>>
 type Profile = { id: string; name: string; email: string; tenant: { id: string; name: string; slug: string; role: string } }
@@ -18,7 +19,7 @@ type SettingsItem = (TenantSettingSection & { icon: LucideIcon }) | { id: string
 
 const extraSections: SettingsItem[] = [
   { id: 'payments', group: 'BILLING & MESSAGING', label: 'Payments', description: 'Configure M-Pesa and Daraja payment processing.', status: 'Provider credentials are encrypted and used for payment requests.', icon: CreditCard, fields: [] },
-  { id: 'communications', group: 'BILLING & MESSAGING', label: 'Communications', description: 'Configure SMS delivery and review delivery reports.', status: 'Africa’s Talking credentials are encrypted and used by the SMS queue.', icon: MessageCircle, fields: [] },
+  { id: 'communications', group: 'BILLING & MESSAGING', label: 'Communications', description: 'Configure the SMS gateway for your workspace.', status: 'Africa’s Talking credentials are encrypted and used by the SMS delivery queue.', icon: MessageCircle, fields: [] },
   { id: 'profile', group: 'ACCOUNT', label: 'Profile', description: 'Update your account name and view your account details.', status: 'Your name is used across your workspace.', icon: UserRound, fields: [] },
   { id: 'security', group: 'ACCOUNT', label: 'Password & passkeys', description: 'Change your password and manage passwordless passkey sign-in.', status: 'Passkeys use your device or security key for secure sign-in.', icon: ShieldCheck, fields: [] },
 ]
@@ -28,7 +29,7 @@ const icons: Record<string, LucideIcon> = {
   whatsapp: Smartphone, templates: FileText, loyalty: CreditCard, alerts: Bell,
   ai: Activity, accounting: CreditCard, developer: Cable,
 }
-const allSections: SettingsItem[] = [...tenantSettingSections.map((section) => ({ ...section, icon: icons[section.id] || Settings2 })), ...extraSections]
+const allSections: SettingsItem[] = [...tenantSettingSections.filter((section) => section.id !== 'email' && section.id !== 'whatsapp').map((section) => ({ ...section, icon: icons[section.id] || Settings2 })), ...extraSections]
 
 function defaultSection(sectionId: string) {
   return tenantSettingSections.find((section) => section.id === sectionId)
@@ -254,7 +255,7 @@ export function SettingsCenter({ onNavigate, onProfileNameChange }: { onNavigate
       </aside>
       <main className="settings-main">
         <div className="settings-heading"><span>SETTINGS</span><h1>{selectedSection.label === 'Branding' ? <>Your <em>brand.</em></> : selectedSection.label}</h1><p>{selectedSection.description}</p></div>
-        {loading ? <div className="settings-card"><p>Loading workspace settings…</p></div> : selected === 'payments' ? <><PaymentSettings /><AdditionalPaymentGateways /></> : selected === 'communications' ? <SmsSettings /> : selected === 'profile' ? <section className="settings-card"><h2>Account profile</h2><p>Your personal account identity and workspace membership.</p><form className="settings-form" onSubmit={saveProfile}><label className="settings-field"><span>Full name</span><input required minLength={2} maxLength={120} value={profile?.name || ''} onChange={(event) => setProfile((current) => current ? { ...current, name: event.target.value } : current)} /></label><label className="settings-field"><span>Email address</span><input readOnly value={profile?.email || ''} /><small>Contact support if you need to change the account email address.</small></label><label className="settings-field"><span>Workspace</span><input readOnly value={`${profile?.tenant.name || ''} · ${profile?.tenant.role || ''}`} /></label><button type="submit" className="settings-save-button" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button></form></section> : selected === 'security' ? <><PasskeySettings /><section className="settings-card"><h2>Change password</h2><p>Choose a unique password that you do not use on other sites.</p><form className="settings-form" onSubmit={changePassword}><label className="settings-field"><span>Current password</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label><label className="settings-field"><span>New password</span><input type="password" autoComplete="new-password" minLength={12} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /><small>At least 12 characters and must satisfy the account password policy.</small></label><label className="settings-field"><span>Confirm new password</span><input type="password" autoComplete="new-password" minLength={12} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label><button type="submit" className="settings-save-button" disabled={saving}>{saving ? 'Updating…' : 'Change password'}</button></form></section></> : selected === 'domain' && settingsSection ? <><SettingsFields section={settingsSection} values={settings[selected] || { workspaceSlug: profile?.tenant.slug || '' }} configured={configuredSecrets[selected] || []} updateField={updateField} /><section className="settings-info-card"><Globe2 size={17} /><div><strong>Custom domain setup</strong><p>Point your DNS record to the hosting target provided by your deployment platform, then configure the custom hostname and TLS certificate there. This app does not automatically change DNS or issue certificates.</p>{settings[selected]?.customDomain && <span>Saved hostname status: Awaiting DNS and TLS setup.</span>}</div></section><button type="button" className="settings-save-button" disabled={saving} onClick={() => void saveGenericSettings()}>{saving ? 'Saving…' : 'Save domain settings'}</button></> : settingsSection ? <><SettingsFields section={settingsSection} values={settings[selected] || {}} configured={configuredSecrets[selected] || []} updateField={updateField} /><div className="settings-status-note"><Activity size={15} /><span>{selectedSection.status}</span></div><button type="button" className="settings-save-button" disabled={saving} onClick={() => void saveGenericSettings()}>{saving ? 'Saving…' : `Save ${selectedSection.label.toLowerCase()} settings`}</button></> : null}
+        {loading ? <div className="settings-card"><p>Loading workspace settings…</p></div> : selected === 'payments' ? <><PaymentSettings /><AdditionalPaymentGateways /></> : selected === 'communications' ? <SmsSettings configurationOnly /> : selected === 'profile' ? <section className="settings-card"><h2>Account profile</h2><p>Your personal account identity and workspace membership.</p><form className="settings-form" onSubmit={saveProfile}><label className="settings-field"><span>Full name</span><input required minLength={2} maxLength={120} value={profile?.name || ''} onChange={(event) => setProfile((current) => current ? { ...current, name: event.target.value } : current)} /></label><label className="settings-field"><span>Email address</span><input readOnly value={profile?.email || ''} /><small>Contact support if you need to change the account email address.</small></label><label className="settings-field"><span>Workspace</span><input readOnly value={`${profile?.tenant.name || ''} · ${profile?.tenant.role || ''}`} /></label><button type="submit" className="settings-save-button" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button></form></section> : selected === 'security' ? <><PasskeySettings /><section className="settings-card"><h2>Change password</h2><p>Choose a unique password that you do not use on other sites.</p><form className="settings-form" onSubmit={changePassword}><label className="settings-field"><span>Current password</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label><label className="settings-field"><span>New password</span><input type="password" autoComplete="new-password" minLength={12} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /><small>At least 12 characters and must satisfy the account password policy.</small></label><label className="settings-field"><span>Confirm new password</span><input type="password" autoComplete="new-password" minLength={12} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label><button type="submit" className="settings-save-button" disabled={saving}>{saving ? 'Updating…' : 'Change password'}</button></form></section></> : selected === 'domain' && settingsSection ? <><SettingsFields section={settingsSection} values={settings[selected] || { workspaceSlug: profile?.tenant.slug || '' }} configured={configuredSecrets[selected] || []} updateField={updateField} /><section className="settings-info-card"><Globe2 size={17} /><div><strong>Custom domain setup</strong><p>Point your DNS record to the hosting target provided by your deployment platform, then configure the custom hostname and TLS certificate there. This app does not automatically change DNS or issue certificates.</p>{settings[selected]?.customDomain && <span>Saved hostname status: Awaiting DNS and TLS setup.</span>}</div></section><button type="button" className="settings-save-button" disabled={saving} onClick={() => void saveGenericSettings()}>{saving ? 'Saving…' : 'Save domain settings'}</button></> : settingsSection ? <><SettingsFields section={settingsSection} values={settings[selected] || {}} configured={configuredSecrets[selected] || []} updateField={updateField} /><div className="settings-status-note"><Activity size={15} /><span>{selectedSection.status}</span></div><button type="button" className="settings-save-button" disabled={saving} onClick={() => void saveGenericSettings()}>{saving ? 'Saving…' : `Save ${selectedSection.label.toLowerCase()} settings`}</button></> : null}
         {error && <p className="settings-feedback is-error" role="alert">{error}</p>}
         {notice && <p className="settings-feedback" role="status"><Check size={14} />{notice}</p>}
       </main>
@@ -268,6 +269,9 @@ function SettingsFields({ section, values, configured, updateField }: {
   configured: string[]
   updateField: (section: string, key: string, value: string | number | boolean) => void
 }) {
+  if (section.id === 'templates') {
+    return <MessageTemplateEditor values={values} updateField={updateField} />
+  }
   const fields = section.fields
   const termsField = section.id === 'hotspot' ? fields.find((field) => field.key === 'termsRequired') : undefined
   const regularFields = termsField ? fields.filter((field) => field !== termsField && field.key !== 'termsText') : fields
@@ -275,4 +279,83 @@ function SettingsFields({ section, values, configured, updateField }: {
     <section className="settings-card"><h2>{section.label === 'Branding' ? 'Identity' : section.label === 'Hotspot' ? 'Portal experience' : 'Configuration'}</h2><p>{section.status}</p><div className="settings-form">{regularFields.map((field) => <SettingInput key={field.key} field={field} value={values[field.key]} configured={configured.includes(field.key)} onChange={(value) => updateField(section.id, field.key, value)} />)}</div></section>
     {termsField && <section className="settings-card"><h2>Terms &amp; conditions</h2><p>The portal links to LKTECH&apos;s <a href="/terms#hotspot-service-terms" target="_blank" rel="noreferrer">general hotspot terms</a>. This preference and saved custom text are not currently displayed or enforced by the portal; provide and enforce any provider-specific terms separately.</p><SettingInput field={termsField} value={values[termsField.key]} configured={false} onChange={(value) => updateField(section.id, termsField.key, value)} />{fields.filter((field) => field.key === 'termsText').map((field) => <SettingInput key={field.key} field={field} value={values[field.key]} configured={configured.includes(field.key)} onChange={(value) => updateField(section.id, field.key, value)} />)}</section>}
   </>
+}
+
+function MessageTemplateEditor({ values, updateField }: {
+  values: Record<string, string | number | boolean>
+  updateField: (section: string, key: string, value: string | number | boolean) => void
+}) {
+  const textareas = useMemo(() => new Map<string, HTMLTextAreaElement>(), [])
+
+  function insertToken(templateId: string, token: string) {
+    const textarea = textareas.get(templateId)
+    const current = String(values[templateId] ?? messageTemplateDefaults[templateId])
+    const start = textarea?.selectionStart ?? current.length
+    const end = textarea?.selectionEnd ?? current.length
+    const next = `${current.slice(0, start)}{{${token}}}${current.slice(end)}`
+    updateField('templates', templateId, next)
+    requestAnimationFrame(() => {
+      const target = textareas.get(templateId)
+      if (!target) return
+      const cursor = start + token.length + 4
+      target.focus()
+      target.setSelectionRange(cursor, cursor)
+    })
+  }
+
+  return <section className="settings-template-list" aria-label="SMS message templates">
+    <div className="settings-template-intro">
+      <strong>SMS templates</strong>
+      <p>Set one customer help contact for every SMS, then turn each notification on or off, edit its message, or insert a supported placeholder. Changes apply to new messages after saving.</p>
+    </div>
+    <label className="settings-field settings-template-contact">
+      <span>Customer help contact</span>
+      <input
+        type="text"
+        maxLength={120}
+        placeholder="Phone, WhatsApp, or helpdesk email"
+        value={String(values.supportContact ?? '')}
+        onChange={(event) => updateField('templates', 'supportContact', event.target.value)}
+      />
+      <small>Used by the {'{{supportContact}}'} placeholder in every template. Existing {'{{supportPhone}}'} placeholders use this contact too. If blank, the Branding support phone is used.</small>
+    </label>
+    {messageTemplateDefinitions.map((template) => {
+      const enabled = values[template.enabledKey] ?? messageTemplateDefaults[template.enabledKey]
+      const message = values[template.id] ?? messageTemplateDefaults[template.id]
+      return <article className="settings-template-card" key={template.id}>
+        <header>
+          <div><h3>{template.title}</h3><p>{template.description}</p></div>
+          <label className="settings-template-switch" aria-label={`Enable ${template.title}`}>
+            <input type="checkbox" checked={Boolean(enabled)} onChange={(event) => updateField('templates', template.enabledKey, event.target.checked)} />
+            <span>{enabled ? 'On' : 'Off'}</span>
+          </label>
+        </header>
+        <div className="settings-template-editor">
+          <label htmlFor={`template-${template.id}`}>Message text</label>
+          <button type="button" className="settings-template-reset" onClick={() => updateField('templates', template.id, template.defaultMessage)}><RotateCcw size={13} /> Reset to default</button>
+          <textarea
+            id={`template-${template.id}`}
+            ref={(element) => { if (element) textareas.set(template.id, element); else textareas.delete(template.id) }}
+            value={String(message)}
+            maxLength={1000}
+            rows={3}
+            onChange={(event) => updateField('templates', template.id, event.target.value)}
+          />
+          <small>{String(message).length}/1000 characters</small>
+        </div>
+        <div className="settings-template-tokens" aria-label={`Insert a placeholder into ${template.title}`}>
+          <span>Insert:</span>
+          {template.tokens.map((token) => <button type="button" key={token} onClick={() => insertToken(template.id, token)}>{`{{${token}}}`}</button>)}
+        </div>
+        {template.id === 'hotspotPaymentReceipt' && <label className="settings-toggle-row settings-template-option">
+          <span><strong>Only send on first purchase</strong><small>When enabled, repeat Hotspot purchases will not send this receipt.</small></span>
+          <input type="checkbox" checked={Boolean(values.hotspotFirstPurchaseOnly ?? messageTemplateDefaults.hotspotFirstPurchaseOnly)} onChange={(event) => updateField('templates', 'hotspotFirstPurchaseOnly', event.target.checked)} />
+        </label>}
+      </article>
+    })}
+    <div className="settings-template-rules">
+      <label className="settings-field"><span>Pre-expiry reminder lead time (days)</span><input type="number" min="1" max="30" step="1" value={String(values.preExpiryDays ?? messageTemplateDefaults.preExpiryDays)} onChange={(event) => updateField('templates', 'preExpiryDays', event.target.value === '' ? '' : Number(event.target.value))} /><small>Reminder templates are queued once per service period within the selected day-before-expiry window.</small></label>
+      <label className="settings-field"><span>Bundle warning threshold (%)</span><input type="number" min="1" max="99" step="1" value={String(values.bundleWarningThreshold ?? messageTemplateDefaults.bundleWarningThreshold)} onChange={(event) => updateField('templates', 'bundleWarningThreshold', event.target.value === '' ? '' : Number(event.target.value))} /><small>Usage is checked against configured bundle data limits.</small></label>
+    </div>
+  </section>
 }

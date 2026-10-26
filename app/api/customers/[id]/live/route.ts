@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { customers, routerMonitors, routerRemoteSessions } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { serializeDatabaseTimestamp } from '@/lib/database-timestamp'
+import { radiusAccountingFreshnessPredicate } from '@/lib/radius-accounting'
 
 const customerIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -172,6 +173,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       where username = ${customer.radiusUsername}
         and acctstoptime is null
         and acctstarttime is not null
+        and ${radiusAccountingFreshnessPredicate(sql`acctupdatetime`, sql`acctstarttime`)}
       order by acctstarttime desc
       limit 100
     `)

@@ -99,6 +99,8 @@ export async function PATCH(request: NextRequest, context: RouteContext<'/api/cu
         `customer-status:${updated.row.id}:${updated.row.status}:${updated.row.expiresAt?.toISOString() || 'no-expiry'}`,
         updated.row.phone,
         `Hello ${updated.row.name}, ${statusText}`,
+        true,
+        updated.row.id,
       )
     }
     return NextResponse.json(updated.row)

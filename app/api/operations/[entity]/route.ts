@@ -5,6 +5,8 @@ import { db } from '@/lib/db'
 import { customers, equipment, expenses, invoices, leads, packages, radcheck, radreply, sites, subscriberCredits, supportTickets, tr069Devices, vouchers } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
+import { enqueueTenantTemplateSms, getTenantTemplateSettings } from '@/lib/message-template-delivery'
+import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 
 const entities = ['leads', 'tickets', 'expenses', 'vouchers', 'equipment', 'tr069', 'invoices'] as const
 type Entity = typeof entities[number]
@@ -184,14 +186,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
     if (access.entity === 'leads') {
       const name = text(input.name, 120)
       const email = text(input.email, 254).toLowerCase()
-      const phone = text(input.phone, 40)
+      const phoneInput = text(input.phone, 40)
+      const phone = phoneInput ? normalizeKenyanPhoneInput(phoneInput) : null
+      if (phoneInput && !phone) return invalid('Enter a phone number starting with 07 followed by 8 digits or +254 followed by 9 digits.')
       if (!name || (!email && !phone)) return invalid('Enter a name and at least an email address or phone number.')
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return invalid('Enter a valid email address.')
       const [created] = await db.insert(leads).values({
         tenantId: access.tenantId,
         name,
         email: email || null,
-        phone: phone || null,
+        phone,
         source: text(input.source, 80) || null,
         notes: text(input.notes, 2000) || null,
       }).returning()
@@ -366,8 +370,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
 
     const packageId = text(input.packageId, 50)
     const quantity = Number(input.quantity)
+    const sendSms = input.sendSms === true
+    const phoneInput = text(input.phone, 32)
+    const recipient = sendSms ? normalizeKenyanPhoneInput(phoneInput) : null
     if (!uuidPattern.test(packageId)) return invalid('Select a valid plan.')
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) return invalid('Generate between 1 and 100 vouchers at a time.')
+    if (sendSms && !recipient) return invalid('Enter a valid Kenyan mobile number to send the voucher by SMS.')
+    if (sendSms && quantity !== 1) return invalid('Generate one voucher at a time when sending credentials by SMS.')
+    if (sendSms) {
+      const templateSettings = await getTenantTemplateSettings(access.tenantId)
+      if (templateSettings.hotspotVoucherDeliveryEnabled !== true) {
+        return invalid('Enable the Hotspot voucher delivery template before requesting an SMS.')
+      }
+    }
     const [plan] = await db.select().from(packages).where(and(eq(packages.id, packageId), eq(packages.tenantId, access.tenantId), eq(packages.active, true))).limit(1)
     if (!plan) return invalid('Selected plan is unavailable in this workspace.')
 
@@ -404,7 +419,31 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
       }))))
       return voucherRows
     })
+    let smsQueued = false
+    if (sendSms && recipient) {
+      const voucher = created[0]
+      const generatedVoucher = generated[0]
+      const durationValue = plan.durationSeconds % 86400 === 0
+        ? plan.durationSeconds / 86400
+        : plan.durationSeconds % 3600 === 0
+          ? plan.durationSeconds / 3600
+          : Math.ceil(plan.durationSeconds / 60)
+      const durationUnit = plan.durationSeconds % 86400 === 0
+        ? 'day'
+        : plan.durationSeconds % 3600 === 0
+          ? 'hour'
+          : 'minute'
+      const duration = `${durationValue} ${durationUnit}${durationValue === 1 ? '' : 's'}`
+      smsQueued = await enqueueTenantTemplateSms(
+        access.tenantId,
+        `hotspot-voucher:${voucher.id}`,
+        recipient,
+        'hotspotVoucherDelivery',
+        { plan: plan.name, username: generatedVoucher.username, password: generatedVoucher.password, duration },
+      )
+    }
     return NextResponse.json({
+      smsQueued,
       vouchers: created.map((voucher, index) => ({
         id: voucher.id,
         username: generated[index].username,

@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { getTenantSession } from '@/lib/db/tenant'
 import { tenantSessionUserFilter } from '@/lib/hotspot-session-tenant-filter'
 import { parseRouterTimestamp } from '@/lib/router-monitoring'
+import { radiusAccountingFreshnessPredicate } from '@/lib/radius-accounting'
 
 function parseRadiusExpiration(value: string | null) {
   const match = value?.match(/^(\d{1,2}) ([A-Za-z]{3}) (\d{4}) (\d{2}):(\d{2})$/)
@@ -43,6 +44,7 @@ export async function GET(request: NextRequest) {
           coalesce(sum(coalesce(accounting.acctinputoctets, 0) + coalesce(accounting.acctoutputoctets, 0)), 0)::text as "totalBytes"
         from public.radacct as accounting
         where accounting.acctstoptime is null
+          and ${radiusAccountingFreshnessPredicate(sql`accounting.acctupdatetime`, sql`accounting.acctstarttime`)}
           and ${tenantUserFilter}
       `),
       db.execute<{
@@ -202,6 +204,7 @@ export async function GET(request: NextRequest) {
           limit 1
         ) as router_session on true
         where accounting.acctstoptime is null
+          and ${radiusAccountingFreshnessPredicate(sql`accounting.acctupdatetime`, sql`accounting.acctstarttime`)}
           and ${tenantUserFilter}
         order by accounting.acctstarttime desc nulls last
         limit 100

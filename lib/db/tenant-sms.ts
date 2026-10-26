@@ -2,8 +2,9 @@ import { and, asc, count, desc, eq, lt, lte, or, type SQL } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import { db } from '@/lib/db'
 import { customers, smsMessages, tenantSmsSettings } from '@/lib/db/schema'
-import { decryptTenantSecret, encryptTenantSecret } from '@/lib/db/tenant-secrets'
+import { decryptTenantSecret, encryptTenantSecret, tryDecryptTenantSecret } from '@/lib/db/tenant-secrets'
 import { normalizeKenyanPhone } from '@/lib/daraja'
+import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 import { sendAfricaTalkingSms, type AfricaTalkingConfiguration } from '@/lib/sms'
 
 type TenantSmsInput = {
@@ -60,8 +61,8 @@ export async function getTenantSmsConfiguration(tenantId: string): Promise<Afric
 }
 
 export async function sendTestTenantSms(tenantId: string, phoneInput: string) {
-  const phone = normalizeKenyanPhone(phoneInput)
-  if (!phone) throw new Error('Enter a valid Kenyan mobile number.')
+  const phone = normalizeKenyanPhoneInput(phoneInput)
+  if (!phone) throw new Error('Enter a valid Kenyan number: use 07 followed by 8 digits or +254 followed by 9 digits.')
   const configuration = await getTenantSmsConfiguration(tenantId)
   if (!configuration) throw new Error('Configure Africa’s Talking credentials before sending a test message.')
   await sendAfricaTalkingSms(configuration, phone, 'Your SMS settings are working. This is a test message.')
@@ -80,12 +81,13 @@ export async function sendSubscriberSms(tenantId: string, customerId: string, me
     return { error: 'This subscriber does not have a valid Kenyan mobile number.', httpStatus: 409 as const }
   }
   const configuration = await getTenantSmsConfiguration(tenantId)
-  if (!configuration) return { error: 'Configure Africa’s Talking in SMS settings before sending messages.', httpStatus: 409 as const }
+  if (!configuration) return { error: 'Configure Africa’s Talking in Communications before sending messages.', httpStatus: 409 as const }
   const recipient = normalizeKenyanPhone(customer.phone)
   if (!recipient) return { error: 'This subscriber does not have a valid Kenyan mobile number.', httpStatus: 409 as const }
 
   const [queued] = await db.insert(smsMessages).values({
     tenantId,
+    customerId,
     eventKey: `subscriber-manual:${customer.id}:${randomUUID()}`,
     recipient,
     messageEncrypted: encryptTenantSecret(message),
@@ -100,21 +102,57 @@ export async function sendSubscriberSms(tenantId: string, customerId: string, me
   return { status: delivery?.status === 'sent' ? 'sent' as const : 'queued' as const }
 }
 
-export async function enqueueTenantSms(tenantId: string, eventKey: string, recipientInput: string | null, message: string, deliverImmediately = true) {
+export async function sendManualTenantSms(tenantId: string, phoneInput: string, message: string) {
+  const recipient = normalizeKenyanPhoneInput(phoneInput)
+  if (!recipient) return { error: 'Enter a valid Kenyan number: use 07 followed by 8 digits or +254 followed by 9 digits.', httpStatus: 400 as const }
+  const normalizedMessage = message.trim()
+  if (!normalizedMessage || normalizedMessage.length > 1000) {
+    return { error: 'Enter a message between 1 and 1000 characters.', httpStatus: 400 as const }
+  }
+  const configuration = await getTenantSmsConfiguration(tenantId)
+  if (!configuration) return { error: 'Configure Africa’s Talking credentials before sending messages.', httpStatus: 409 as const }
+  const [queued] = await db.insert(smsMessages).values({
+    tenantId,
+    eventKey: `manual:${randomUUID()}`,
+    recipient,
+    messageEncrypted: encryptTenantSecret(normalizedMessage),
+  }).returning({ id: smsMessages.id })
+  await deliverTenantSms(queued.id)
+  const [delivery] = await db.select({
+    status: smsMessages.status,
+  }).from(smsMessages).where(and(
+    eq(smsMessages.id, queued.id),
+    eq(smsMessages.tenantId, tenantId),
+  )).limit(1)
+  return { status: delivery?.status === 'failed' ? 'failed' as const : delivery?.status === 'sent' ? 'sent' as const : 'queued' as const }
+}
+
+export async function enqueueTenantSms(
+  tenantId: string,
+  eventKey: string,
+  recipientInput: string | null,
+  message: string,
+  deliverImmediately = true,
+  customerId: string | null = null,
+): Promise<boolean> {
   const recipient = recipientInput ? normalizeKenyanPhone(recipientInput) : null
-  if (!recipient) return
+  if (!recipient) return false
   try {
     const [queued] = await db.insert(smsMessages).values({
       tenantId,
+      customerId,
       eventKey,
       recipient,
       messageEncrypted: encryptTenantSecret(message),
     }).onConflictDoNothing({
       target: [smsMessages.tenantId, smsMessages.eventKey],
     }).returning({ id: smsMessages.id })
-    if (queued && deliverImmediately) await deliverTenantSms(queued.id)
+    if (!queued) return false
+    if (deliverImmediately) await deliverTenantSms(queued.id)
+    return true
   } catch (error) {
     console.error('Unable to queue customer SMS notification', { tenantId, eventKey, error })
+    return false
   }
 }
 
@@ -238,13 +276,17 @@ export async function getTenantSmsMessages(tenantId: string, status: string, off
     )),
   ])
   return {
-    messages: messages.map(({ messageEncrypted, ...item }) => ({
-      ...item,
-      message: decryptTenantSecret(messageEncrypted),
-      deliveryReport: item.deliveryReport && typeof item.deliveryReport === 'object'
-        ? item.deliveryReport as Record<string, string | null>
-        : null,
-    })),
+    messages: messages.map(({ messageEncrypted, ...item }) => {
+      const decrypted = tryDecryptTenantSecret(messageEncrypted)
+      return {
+        ...item,
+        message: decrypted.value,
+        messageError: decrypted.error,
+        deliveryReport: item.deliveryReport && typeof item.deliveryReport === 'object'
+          ? item.deliveryReport as Record<string, string | null>
+          : null,
+      }
+    }),
     total: totals[0]?.total || 0,
     counts: {
       queued: queued[0]?.total || 0,
@@ -265,7 +307,7 @@ export async function resendTenantSms(tenantId: string, messageId: string) {
     return { error: 'Only failed messages can be resent.', httpStatus: 409 as const }
   }
   const configuration = await getTenantSmsConfiguration(tenantId)
-  if (!configuration) return { error: 'Configure Africa’s Talking in SMS settings before resending messages.', httpStatus: 409 as const }
+  if (!configuration) return { error: 'Configure Africa’s Talking in Communications before resending messages.', httpStatus: 409 as const }
   const [resend] = await db.insert(smsMessages).values({
     tenantId,
     eventKey: `resend:${original.id}:${randomUUID()}`,

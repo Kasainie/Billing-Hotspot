@@ -82,6 +82,7 @@ test('router timestamps accept Date and database string values and reject invali
 
 test('router web console links require reported WebFig and WireGuard details', () => {
   const router = {
+    online: true,
     webEnabled: true,
     webScheme: 'http' as const,
     webPort: 80,
@@ -95,6 +96,7 @@ test('router web console links require reported WebFig and WireGuard details', (
   assert.equal(getRouterWebConsoleUrl({ ...router, wireguardIp: '203.0.113.15' }), null)
   assert.equal(getRouterWebConsoleUrl({ ...router, webEnabled: false }), null)
   assert.equal(getRouterWebConsoleUrl({ ...router, webPort: 65536 }), null)
+  assert.equal(getRouterWebConsoleUrl({ ...router, online: false }), null)
 })
 
 test('router uptime advances from the latest heartbeat and stays fixed when offline', () => {

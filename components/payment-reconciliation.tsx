@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Search } from 'lucide-react'
 
 type ReconciliationTransaction = {
   id: string
@@ -26,6 +27,8 @@ export function PaymentReconciliation() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState('')
+  const [transactionSearch, setTransactionSearch] = useState('')
+  const [ledgerSearch, setLedgerSearch] = useState('')
 
   async function load() {
     setError('')
@@ -83,6 +86,16 @@ export function PaymentReconciliation() {
   }
 
   const unmatchedCount = transactions.filter((transaction) => transaction.status !== 'matched').length
+  const filteredTransactions = transactions.filter((transaction) =>
+    `${transaction.transactionId} ${transaction.billReference} ${transaction.amount} ${transaction.phone || ''} ${transaction.status} ${transaction.matchReason || ''}`
+      .toLowerCase()
+      .includes(transactionSearch.trim().toLowerCase()),
+  )
+  const filteredPaymentLedger = paymentLedger.filter((payment) =>
+    `${payment.customerName || ''} ${payment.amount} ${payment.method || ''} ${payment.reference || ''} ${payment.status} ${payment.paidAt}`
+      .toLowerCase()
+      .includes(ledgerSearch.trim().toLowerCase()),
+  )
 
   return <section className="reconciliation-workspace">
     <div className="package-page-heading">
@@ -93,10 +106,11 @@ export function PaymentReconciliation() {
     {error && <p className="router-discovery-status error" role="alert">{error}</p>}
     {message && <p className="router-discovery-status" role="status">{message}</p>}
     <div className="panel plan-table-wrap">
+      <div className="panel-heading payment-list-heading"><div><h3>Received mobile-money transactions</h3><span>{filteredTransactions.length} of {transactions.length} transactions</span></div><label className="payment-list-search"><Search size={15} /><input type="search" value={transactionSearch} onChange={(event) => setTransactionSearch(event.target.value)} placeholder="Search receipt, reference, phone…" aria-label="Search mobile-money transactions" /></label></div>
       <div className="table-scroll"><table className="plan-table">
         <thead><tr><th>MPESA RECEIPT</th><th>REFERENCE</th><th>AMOUNT</th><th>PHONE</th><th>STATUS</th><th>MATCH</th></tr></thead>
         <tbody>
-          {transactions.map((transaction) => {
+          {filteredTransactions.map((transaction) => {
             const account = accounts.find((item) => String(item.accountNumber) === transaction.billReference)
             const matched = transaction.status === 'matched'
             return <tr key={transaction.id}>
@@ -115,23 +129,23 @@ export function PaymentReconciliation() {
               </div>}</td>
             </tr>
           })}
-          {!transactions.length && <tr><td colSpan={6}>{loading ? 'Loading mobile-money transactions...' : 'No direct PayBill transactions received yet.'}</td></tr>}
+          {!filteredTransactions.length && <tr><td colSpan={6}>{loading ? 'Loading mobile-money transactions...' : transactions.length ? 'No transactions match this search.' : 'No direct PayBill transactions received yet.'}</td></tr>}
         </tbody>
       </table></div>
     </div>
     <section className="panel plan-table-wrap payment-ledger">
-      <div className="panel-heading"><div><h3>Confirmed payment ledger</h3><span>{paymentLedger.length} recent payments</span></div></div>
+      <div className="panel-heading payment-list-heading"><div><h3>Confirmed payment ledger</h3><span>{filteredPaymentLedger.length} of {paymentLedger.length} recent payments</span></div><label className="payment-list-search"><Search size={15} /><input type="search" value={ledgerSearch} onChange={(event) => setLedgerSearch(event.target.value)} placeholder="Search customer, method, reference…" aria-label="Search confirmed payments" /></label></div>
       <div className="table-scroll"><table className="plan-table">
         <thead><tr><th>DATE</th><th>CUSTOMER</th><th>AMOUNT</th><th>METHOD</th><th>REFERENCE</th></tr></thead>
         <tbody>
-          {paymentLedger.map((payment) => <tr key={payment.id}>
+          {filteredPaymentLedger.map((payment) => <tr key={payment.id}>
             <td>{new Date(payment.paidAt).toLocaleString()}</td>
             <td>{payment.customerName || 'Hotspot purchase'}</td>
             <td className="plan-price">KSh {payment.amount.toLocaleString()}</td>
             <td>{payment.method || '—'}</td>
             <td>{payment.reference || '—'}</td>
           </tr>)}
-          {!paymentLedger.length && <tr><td colSpan={5}>No confirmed payments recorded yet.</td></tr>}
+          {!filteredPaymentLedger.length && <tr><td colSpan={5}>{paymentLedger.length ? 'No payments match this search.' : 'No confirmed payments recorded yet.'}</td></tr>}
         </tbody>
       </table></div>
     </section>

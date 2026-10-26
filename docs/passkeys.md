@@ -2,6 +2,8 @@
 
 LKTECH supports discoverable WebAuthn passkeys alongside password and Google sign-in. Signed-in users can register and remove passkeys under **Settings → Account → Password & passkeys**. Passkey registration requires a verified account, a browser with WebAuthn support, and a secure origin.
 
+For local development, open the app at `http://localhost:3000` (not `http://127.0.0.1:3000`) so the browser and Windows passkey provider use the expected relying-party domain. If Windows Security reports that it could not save a passkey, verify that Windows Hello is configured with a PIN or biometrics, then retry from a supported browser. Production registration requires the configured RP ID to match the HTTPS app host.
+
 ## Database
 
 Apply `supabase/migrations/20261020130000_add_passkey_authentication.sql` before deploying the passkey API. It creates the credential table and short-lived, single-use challenge store. Credential public keys and authenticator counters are stored for signature verification; private keys and biometric data remain with the authenticator.

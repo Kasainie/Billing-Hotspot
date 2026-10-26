@@ -4,9 +4,10 @@ import { db } from '@/lib/db'
 import { customers, invoices, mobileMoneyTransactions, packages, payments, pppoeAccounts, radcheck, radreply, routerMonitors, routerRemoteSessions, sites, subscriberCredits } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
-import { enqueueTenantSms } from '@/lib/db/tenant-sms'
-import { normalizeKenyanPhone } from '@/lib/daraja'
+import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
+import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
 import { toHotspotRadiusReplies } from '@/lib/hotspot-products'
+import { radiusAccountingFreshnessPredicate } from '@/lib/radius-accounting'
 
 const tables = { sites, customers, packages, payments } as const
 type Entity = keyof typeof tables
@@ -51,12 +52,15 @@ function validate(entity: Entity, input: Record<string, unknown>) {
   if (entity === 'customers' && (typeof input.password !== 'string' || input.password.trim().length < 12 || input.password.length > 128)) return 'RADIUS password must be 12-128 characters'
   if (entity === 'customers' && (typeof input.packageId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.packageId))) return 'Select a valid service plan'
   if (entity === 'packages') {
+    if (typeof input.name !== 'string' || input.name.trim().length > 80) return 'Package name must be 80 characters or fewer'
     if (!packageTypes.includes(String(input.type))) return 'Select a valid package type'
     if (!packageAvailabilities.includes(String(input.availability))) return 'Select a valid package availability'
     if (!rateLimitPattern.test(String(input.rateLimit)) || !String(input.rateLimit).split('/').every(isPositiveRate)) return 'Rate-limit must use positive upload/download values, for example 2M/10M'
     if (!Number.isInteger(Number(input.monthlyPrice)) || Number(input.monthlyPrice) < 0) return 'Price cannot be negative'
     if (!Number.isInteger(Number(input.durationSeconds)) || Number(input.durationSeconds) < 60 || Number(input.durationSeconds) > 31536000) return 'Duration must be between 1 minute and 365 days'
     if (!Number.isInteger(Number(input.devicesPerAccount)) || Number(input.devicesPerAccount) < 1 || Number(input.devicesPerAccount) > 64) return 'Devices per account must be between 1 and 64'
+    if (input.fupEnabled !== undefined && typeof input.fupEnabled !== 'boolean') return 'FUP enabled must be true or false'
+    if (input.scheduleEnabled !== undefined && typeof input.scheduleEnabled !== 'boolean') return 'Schedule enabled must be true or false'
     const burstValues = [input.burstLimit, input.burstThreshold, input.burstTimeSeconds]
     if (burstValues.some(Boolean) && (!rateLimitPattern.test(String(input.burstLimit || '')) || !rateLimitPattern.test(String(input.burstThreshold || '')) || !Number.isInteger(Number(input.burstTimeSeconds)) || Number(input.burstTimeSeconds) < 1 || Number(input.burstTimeSeconds) > 3600)) return 'Burst limit, threshold, and time must all be valid to enable burst'
     if (input.fupEnabled) {
@@ -110,8 +114,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
                 min(acctstarttime) as "firstOnlineAt",
                 max(coalesce(acctstoptime, acctupdatetime, acctstarttime)) as "lastOnlineAt",
                 bool_or(nullif(btrim(callingstationid), '') is not null)
-                  filter (where acctstoptime is null) as "hasBinding",
-                bool_or(acctstoptime is null) as "isOnline"
+                  filter (where acctstoptime is null
+                    and ${radiusAccountingFreshnessPredicate(sql`acctupdatetime`, sql`acctstarttime`)}) as "hasBinding",
+                bool_or(acctstoptime is null
+                  and ${radiusAccountingFreshnessPredicate(sql`acctupdatetime`, sql`acctstarttime`)}) as "isOnline"
               from public.radacct
               where username in (${sql.join(usernames.map((username) => sql`${username}`), sql`, `)})
               group by username
@@ -230,7 +236,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
     const radiusUsername = (input.radiusUsername as string).trim().toLowerCase()
     const packageId = input.packageId as string
     const phoneInput = typeof input.phone === 'string' ? input.phone.trim() : ''
-    const normalizedPhone = phoneInput ? normalizeKenyanPhone(phoneInput) : null
+    const normalizedPhone = phoneInput ? normalizeKenyanPhoneInput(phoneInput) : null
+    if (phoneInput && !normalizedPhone) {
+      return NextResponse.json({ error: 'Enter a phone number starting with 07 followed by 8 digits or +254 followed by 9 digits.' }, { status: 400 })
+    }
     try {
       const result = await db.transaction(async (tx) => {
         const [plan] = await tx.select().from(packages).where(and(
@@ -275,7 +284,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
           accountNumber,
           name: clean(input.name) as string,
           email: (clean(input.email) as string).toLowerCase(),
-          phone: normalizedPhone || (phoneInput || null),
+          phone: normalizedPhone,
           plan: plan.name,
           monthlyRate: plan.monthlyPrice,
           radiusUsername,
@@ -331,10 +340,26 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
             .where(and(eq(pppoeAccounts.accountNumber, accountNumber), eq(pppoeAccounts.tenantId, tenantId)))
         }
 
-        return { customer: createdCustomer, accountNumber, error: null, status: 201 }
+        return { customer: createdCustomer, accountNumber, planType: plan.type, error: null, status: 201 }
       })
 
       if (!result.customer) return NextResponse.json({ error: result.error }, { status: result.status })
+      if (result.planType === 'PPPoE') {
+        await enqueueTenantTemplateSms(
+          tenantId,
+          `pppoe-welcome:${result.customer.id}`,
+          result.customer.phone,
+          'pppoeWelcome',
+          {
+            name: result.customer.name,
+            username: result.customer.radiusUsername,
+            password: typeof input.password === 'string' ? input.password : '',
+            plan: result.customer.plan,
+            accountNumber: result.accountNumber,
+          },
+          { customerId: result.customer.id },
+        )
+      }
       return NextResponse.json({ ...result.customer, accountNumber: result.accountNumber }, { status: 201 })
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === '23505' &&
@@ -375,16 +400,28 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         const [customer] = await db.select({
           name: customers.name,
           phone: customers.phone,
+          plan: customers.plan,
+          username: customers.radiusUsername,
+          expiresAt: customers.expiresAt,
         }).from(customers).where(and(
           eq(customers.id, payment.customerId),
           eq(customers.tenantId, tenantId),
         )).limit(1)
         if (customer?.phone) {
-          await enqueueTenantSms(
+          await enqueueTenantTemplateSms(
             tenantId,
             `manual-payment:${payment.id}`,
             customer.phone,
-            `Hello ${customer.name}, a payment of KES ${payment.amount} was recorded on your account${payment.reference ? ` (receipt ${payment.reference})` : ''}. Thank you.`,
+            'pppoePaymentReceipt',
+            {
+              name: customer.name,
+              amount: payment.amount,
+              plan: customer.plan,
+              reference: payment.reference,
+              username: customer.username,
+              expiry: customer.expiresAt?.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+            },
+            { customerId: payment.customerId },
           )
         }
       }
@@ -403,13 +440,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
     return NextResponse.json({ error: 'Package id is invalid' }, { status: 400 })
   }
 
-  let input: { availability?: unknown }
+  let input: Record<string, unknown>
   try {
-    input = await request.json() as { availability?: unknown }
+    input = await request.json() as Record<string, unknown>
   } catch {
-    return NextResponse.json({ error: 'Package availability is required' }, { status: 400 })
+    return NextResponse.json({ error: 'Package update must be valid JSON' }, { status: 400 })
   }
-  if (!packageAvailabilities.includes(String(input.availability))) return NextResponse.json({ error: 'Select a valid package availability' }, { status: 400 })
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return NextResponse.json({ error: 'Package update is invalid' }, { status: 400 })
+  }
+  if (!packageAvailabilities.includes(String(input.availability))) {
+    return NextResponse.json({ error: 'Select a valid package availability' }, { status: 400 })
+  }
   if (!process.env.DATABASE_URL?.trim()) return NextResponse.json({ error: 'Package updates require a configured database' }, { status: 503 })
 
   const access = await requireTenantAdmin(request)
@@ -418,15 +460,47 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
   const tenantId = session.tenantId
 
   try {
-    const [row] = await db.update(packages).set({
-      availability: String(input.availability),
-      active: input.availability !== 'off',
-      listed: input.availability === 'live',
-    }).where(and(eq(packages.id, id), eq(packages.tenantId, tenantId))).returning()
+    const availabilityOnly = Object.keys(input).length === 1
+    if (!availabilityOnly) {
+      const validationError = validate('packages', input)
+      if (validationError) return NextResponse.json({ error: validationError }, { status: 400 })
+    }
+    const updateValues = availabilityOnly
+      ? {
+        availability: String(input.availability),
+        active: input.availability !== 'off',
+        listed: input.availability === 'live',
+      }
+      : {
+        name: String(input.name).trim(),
+        type: String(input.type),
+        availability: String(input.availability),
+        active: input.availability !== 'off',
+        listed: input.availability === 'live',
+        uploadMbps: rateInMbps(String(input.rateLimit).split('/')[0]),
+        downloadMbps: rateInMbps(String(input.rateLimit).split('/')[1]),
+        rateLimit: String(input.rateLimit).toUpperCase(),
+        monthlyPrice: Number(input.monthlyPrice),
+        durationSeconds: Number(input.durationSeconds),
+        devicesPerAccount: Number(input.devicesPerAccount),
+        burstLimit: input.burstLimit ? String(input.burstLimit).toUpperCase() : null,
+        burstThreshold: input.burstThreshold ? String(input.burstThreshold).toUpperCase() : null,
+        burstTimeSeconds: input.burstTimeSeconds ? Number(input.burstTimeSeconds) : null,
+        fupEnabled: Boolean(input.fupEnabled),
+        fupLimitBytes: input.fupEnabled ? Number(input.fupLimitBytes) : null,
+        fupUploadRate: input.fupEnabled ? String(input.fupUploadRate).toUpperCase() : null,
+        fupDownloadRate: input.fupEnabled ? String(input.fupDownloadRate).toUpperCase() : null,
+        scheduleEnabled: Boolean(input.scheduleEnabled),
+        scheduleSpec: input.scheduleEnabled ? String(input.scheduleSpec) : null,
+        nasRestrictions: input.nasRestrictions as string[],
+      }
+    const [row] = await db.update(packages).set(updateValues)
+      .where(and(eq(packages.id, id), eq(packages.tenantId, tenantId))).returning()
     if (!row) return NextResponse.json({ error: 'Package not found' }, { status: 404 })
     return NextResponse.json(row)
-  } catch {
-    return NextResponse.json({ error: 'Unable to update package availability' }, { status: 500 })
+  } catch (error) {
+    console.error('Failed to update package', error)
+    return NextResponse.json({ error: 'Unable to update package' }, { status: 500 })
   }
 }
 

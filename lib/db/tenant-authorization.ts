@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantSession, type TenantSession } from '@/lib/db/tenant'
 import { canManageTenant } from '@/lib/db/tenant-role-access'
+import { requirePasswordConfirmation } from '@/lib/db/password-confirmation'
 
 export async function requireTenantAdmin(request: NextRequest): Promise<
   { session: TenantSession; response?: never } |
@@ -13,5 +14,7 @@ export async function requireTenantAdmin(request: NextRequest): Promise<
   if (!canManageTenant(session.role)) {
     return { response: NextResponse.json({ error: 'Workspace owner or admin access is required.' }, { status: 403 }) }
   }
+  const confirmationResponse = await requirePasswordConfirmation(request, session.userId)
+  if (confirmationResponse) return { response: confirmationResponse }
   return { session }
 }

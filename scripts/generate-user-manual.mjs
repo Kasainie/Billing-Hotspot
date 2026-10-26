@@ -18,6 +18,7 @@ const headings = []
 let y = 62
 let inCodeBlock = false
 let coverPage = true
+let skippingSourceContents = false
 
 const colors = {
   navy: [16, 37, 67],
@@ -42,6 +43,12 @@ function ensureSpace(height) {
 
 function cleanInline(value) {
   return value
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\u2192/g, ' to ')
+    .replace(/\u2190/g, ' <- ')
+    .replace(/\u2022/g, '-')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 - $2')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
@@ -89,6 +96,7 @@ function startCover() {
   pdf.text(`Edition 1 | ${editionDate}`, 56, pageHeight - 78)
   pdf.text('https://billing.lktech.life', 56, pageHeight - 59)
   pdf.addPage()
+  pdf.addPage()
   coverPage = false
   y = 62
 }
@@ -123,7 +131,7 @@ function renderContents() {
     if (y > pageHeight - 68) break
     setTextColor(colors.ink)
     const title = cleanInline(item.title)
-    const pageNumber = item.page
+    const pageNumber = item.page - 1
     pdf.text(title, left, y)
     pdf.setDrawColor(...colors.line)
     pdf.setLineDashPattern([1, 2], 0)
@@ -132,6 +140,7 @@ function renderContents() {
     pdf.setLineDashPattern([], 0)
     setTextColor(colors.muted)
     pdf.text(String(pageNumber), right, y, { align: 'right' })
+    pdf.link(left, y - 12, contentWidth, 16, { pageNumber: item.page, top: item.top })
     y += 20
   }
 }
@@ -189,14 +198,27 @@ function renderMarkdown() {
       continue
     }
     const heading = line.match(/^(#{1,6})\s+(.+)$/)
+    if (skippingSourceContents) {
+      if (!heading) continue
+      skippingSourceContents = false
+    }
     if (heading) {
       const level = heading[1].length
       const title = heading[2]
+      if (level === 2 && title === 'Contents') {
+        skippingSourceContents = true
+        continue
+      }
       const fontSize = level === 2 ? 17 : level === 3 ? 12 : 22
       const gap = level === 2 ? 14 : level === 3 ? 11 : 16
       ensureSpace(fontSize + gap + 5)
       if (level === 2 && title !== 'Contents') {
-        headings.push({ title, level, page: pdf.internal.getCurrentPageInfo().pageNumber })
+        headings.push({
+          title,
+          level,
+          page: pdf.internal.getCurrentPageInfo().pageNumber,
+          top: Math.max(0, y - gap - 12),
+        })
       }
       pdf.setFont('helvetica', 'bold')
       pdf.setFontSize(fontSize)
@@ -244,6 +266,9 @@ for (let page = footerStartPage; page <= totalPages; page += 1) {
   pdf.setFontSize(8)
   setTextColor(colors.muted)
   pdf.text('Operations guide | Keep credentials private', left, pageHeight - 26)
+  pdf.setTextColor(...colors.blue)
+  pdf.text('Contents', left + 220, pageHeight - 26)
+  pdf.link(left + 216, pageHeight - 37, 48, 14, { pageNumber: 2, top: 62 })
   pdf.text(`Page ${page - 1} of ${totalPages - 1}`, right, pageHeight - 26, { align: 'right' })
 }
 

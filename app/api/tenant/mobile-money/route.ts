@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { customers, mobileMoneyTransactions, payments, pppoeAccounts } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
-import { enqueueTenantSms } from '@/lib/db/tenant-sms'
+import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
 import { reconcilePppoeMobileMoney } from '@/lib/pppoe-reconciliation'
 
 export async function GET(request: NextRequest) {
@@ -115,11 +115,20 @@ export async function PATCH(request: NextRequest) {
 
     if (result.status !== 200) return NextResponse.json({ error: result.error }, { status: result.status })
     if (result.expiresAt && result.name && result.phone && result.username && result.plan && result.transactionId) {
-      await enqueueTenantSms(
+      await enqueueTenantTemplateSms(
         session.tenantId,
         `paybill-payment:${result.transactionId}`,
         result.phone,
-        `Hello ${result.name}, KES ${result.amount} received for your ${result.plan} plan. Your account ${result.username} is active until ${new Date(result.expiresAt).toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}. M-Pesa receipt: ${result.transactionId}.`,
+        'pppoePaymentReceipt',
+        {
+          name: result.name,
+          amount: result.amount,
+          plan: result.plan,
+          reference: result.transactionId,
+          username: result.username,
+          expiry: new Date(result.expiresAt).toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+        },
+        { customerId: result.customerId },
       )
     }
     return NextResponse.json({ customerId: result.customerId, expiresAt: result.expiresAt })

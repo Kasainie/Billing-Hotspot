@@ -1,6 +1,7 @@
 import { and, count, eq, gt, inArray } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
-import { initiateStkPush, normalizeKenyanPhone } from '@/lib/daraja'
+import { initiateStkPush } from '@/lib/daraja'
+import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 import { db } from '@/lib/db'
 import { hotspotPurchases, packages, tenants } from '@/lib/db/schema'
 import { resolvePublicTenantId } from '@/lib/db/tenant'
@@ -21,13 +22,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Choose a package and enter your payment details.' }, { status: 400 })
   }
 
-  const phone = typeof input.phone === 'string' ? normalizeKenyanPhone(input.phone) : null
+  const phone = typeof input.phone === 'string' ? normalizeKenyanPhoneInput(input.phone) : null
   const packageId = typeof input.packageId === 'string' ? input.packageId : ''
   const requestedProvider = input.provider ?? 'daraja'
   const provider = requestedProvider === 'daraja' || isPaymentGatewayProvider(requestedProvider) ? requestedProvider as PaymentGatewayProvider | 'daraja' : null
   const clientMac = typeof input.mac === 'string' ? input.mac.trim().toUpperCase() : null
   if (!provider || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(packageId) || !phone) {
-    return NextResponse.json({ error: 'Choose an active package, a payment method, and a valid Kenyan phone number.' }, { status: 400 })
+    return NextResponse.json({ error: 'Choose an active package and payment method, and enter 07 followed by 8 digits or +254 followed by 9 digits.' }, { status: 400 })
   }
   if (provider === 'airtel-money') return NextResponse.json({ error: 'Airtel Money checkout is not available yet.' }, { status: 400 })
   if (input.mac !== undefined && (!clientMac || !/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/.test(clientMac))) {

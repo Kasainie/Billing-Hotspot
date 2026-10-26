@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { BrandWordmark } from '@/components/brand-wordmark'
+import { KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
 
 type PppoePackage = {
   id: string
@@ -195,7 +196,7 @@ export function PppoeCheckout() {
           <form className="checkout-form" onSubmit={startPayment}>
             <label>Full name<input autoComplete="name" minLength={2} maxLength={120} value={name} onChange={(event) => setName(event.target.value)} required disabled={status === 'pending'} /></label>
             <label>Email address<input type="email" autoComplete="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} required disabled={status === 'pending'} /></label>
-            <label>Mobile phone number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="07XX XXX XXX" value={phone} onChange={(event) => setPhone(event.target.value)} required disabled={status === 'pending'} /></label>
+            <label>Mobile phone number<input type="tel" inputMode="tel" pattern={KENYAN_MOBILE_PHONE_PATTERN} title="Enter 07 followed by 8 digits or +254 followed by 9 digits." autoComplete="tel" maxLength={13} placeholder="0712345678 or +254712345678" value={phone} onChange={(event) => setPhone(event.target.value)} required disabled={status === 'pending'} /></label>
             {packages.length > 1 && <label>Change package<select value={packageId} onChange={(event) => setPackageId(event.target.value)} required disabled={status === 'pending'}>{packages.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} — KSh {plan.monthlyPrice.toLocaleString('en-KE')}</option>)}</select></label>}
             <label>Payment method
               <select value={paymentProvider} onChange={(event) => setPaymentProvider(event.target.value)} disabled={status === 'pending' || paymentMethods.length === 0} required>

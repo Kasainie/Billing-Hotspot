@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { BrandWordmark } from '@/components/brand-wordmark'
+import { KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
 import {
   ArrowLeft,
   ArrowRight,
@@ -58,13 +59,14 @@ import {
 import { parseServiceSubnet, resolveRouterLanBridgeName, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
 import { defaultHotspotPortalBranding, hotspotPortalTemplates, isHotspotPortalTemplateId, type HotspotPortalTemplateId } from '@/lib/hotspot-templates'
 import { PaymentSettings } from '@/components/payment-settings'
-import { SmsSettings } from '@/components/sms-settings'
+import { CommunicationsCenter } from '@/components/communications-center'
 import { PaymentReconciliation } from '@/components/payment-reconciliation'
 import { OperationsWorkspace } from '@/components/operations-workspace'
 import { LiveHotspotSessions } from '@/components/live-hotspot-sessions'
 import { RouterMonitorDetail, type RouterConnectorEnrollment, type RouterMonitorRecord, type RouterMonitorTab } from '@/components/router-monitor-detail'
 import { getRouterWebConsoleUrl } from '@/lib/router-monitoring'
 import { SubscriberProfile, type SubscriberProfileData } from '@/components/subscriber-profile'
+import { StaffManagement } from '@/components/staff-management'
 import { SettingsCenter } from '@/components/settings-center'
 import { parseCsv } from '@/lib/subscriber-csv'
 import { exportTabularReport, type ReportExportFormat } from '@/lib/report-export'
@@ -83,9 +85,10 @@ const navigationSections: { label?: string; items: { label: string; icon: Lucide
     { label: 'Devices', icon: Router, children: [{ label: 'Routers', view: 'Routers', icon: Network }, { label: 'TR-069', view: 'TR-069' }] },
   ] },
   { label: 'FINANCE', items: [
-    { label: 'Billing', icon: FileText, children: [{ label: 'Payments', view: 'Payments', icon: CreditCard }, { label: 'Payment settings', view: 'Payment settings', icon: Settings2 }, { label: 'SMS settings', view: 'SMS settings', icon: MessageCircle }, { label: 'Invoices', view: 'Invoices' }, { label: 'Expenses', view: 'Expenses' }] },
+    { label: 'Billing', icon: FileText, children: [{ label: 'Payments', view: 'Payments', icon: CreditCard }, { label: 'Payment settings', view: 'Payment settings', icon: Settings2 }, { label: 'Invoices', view: 'Invoices' }, { label: 'Expenses', view: 'Expenses' }] },
     { label: 'Vouchers', icon: Ticket, children: [{ label: 'List', view: 'Voucher list' }, { label: 'Generate', view: 'Generate vouchers' }, { label: 'Analytics', view: 'Voucher analytics' }] },
   ] },
+  { label: 'OUTREACH', items: [{ label: 'Communications', icon: MessageCircle }] },
 ]
 
 const crudEntityByPage: Partial<Record<string, 'customers' | 'packages' | 'payments' | 'sites'>> = {
@@ -488,7 +491,7 @@ export function AdminDashboard() {
       { id: 'routers', label: 'Routers', detail: 'Provision network devices', target: 'Routers', type: 'Page' },
       { id: 'portal-design', label: 'Portal design', detail: 'Customize the hotspot portal', target: 'Portal design', type: 'Page' },
       { id: 'payment-settings', label: 'Payment settings', detail: 'Configure payment providers', target: 'Payment settings', type: 'Page' },
-      { id: 'sms-settings', label: 'SMS settings', detail: 'Configure customer text notifications', target: 'SMS settings', type: 'Page' },
+      { id: 'communications', label: 'Communications', detail: 'SMS outbox, WhatsApp, and email', target: 'Communications', type: 'Page' },
     ]
     const matchingShortcuts = shortcuts.filter((item) => !term || `${item.label} ${item.detail}`.toLowerCase().includes(term))
     if (!term) return matchingShortcuts
@@ -693,7 +696,7 @@ export function AdminDashboard() {
             {memberships.filter((membership) => membership.id !== currentTenantId).map((membership) => <option key={membership.id} value={membership.id}>{membership.name}</option>)}
           </select>
         </div>
-        <nav className="navigation-list" aria-label="Main navigation">{navigationSections.map((section) => <div className="nav-section" key={section.label || 'overview'}>{section.label && <p className="nav-label">{section.label}</p>}{section.items.map(({ label, icon: Icon, count, children }) => { const itemCount = count ?? (label === 'Subscribers' && dataStatus === 'live' ? dashboardData.summary.totalCustomers.toLocaleString('en-KE') : label === 'Live sessions' && onlineClientCount !== null ? onlineClientCount.toLocaleString('en-KE') : null); return <div className="nav-group" key={label}><button className={`nav-item ${activeNav === label ? 'active' : ''}`} aria-expanded={children ? expandedNav.includes(label) : undefined} onClick={() => { if (children) { setExpandedNav((current) => current.includes(label) ? current.filter((group) => group !== label) : [...current, label]); return } setActiveNav(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{itemCount !== null && itemCount !== undefined && <b aria-label={label === 'Live sessions' ? `${itemCount} clients online` : label === 'Subscribers' ? `${itemCount} subscribers total` : undefined}>{itemCount}</b>}{children && (expandedNav.includes(label) ? <ChevronDown className="nav-chevron" size={15} /> : <ChevronRight className="nav-chevron" size={15} />)}</button>{children && expandedNav.includes(label) && <div className="nav-children">{children.map(({ label: childLabel, view, icon: ChildIcon }) => <button key={view} className={`nav-child ${activeNav === view ? 'active' : ''}`} onClick={() => { setActiveNav(view); setMobileOpen(false) }}>{ChildIcon ? <ChildIcon size={15} /> : <span className="nav-child-dot" />}<span>{childLabel}</span></button>)}</div>}</div> })}</div>)}{isPlatformAdmin && <a className="nav-item platform-admin-nav-link" href="/platform-admin"><ShieldCheck size={17} /><span>Platform admin</span></a>}</nav>
+        <nav className="navigation-list" aria-label="Main navigation">{navigationSections.map((section) => <div className="nav-section" key={section.label || 'overview'}>{section.label && <p className="nav-label">{section.label}</p>}{section.items.map(({ label, icon: Icon, count, children }) => { const itemCount = count ?? (label === 'Subscribers' && dataStatus === 'live' ? dashboardData.summary.totalCustomers.toLocaleString('en-KE') : label === 'Live sessions' && onlineClientCount !== null ? onlineClientCount.toLocaleString('en-KE') : null); return <div className="nav-group" key={label}><button className={`nav-item ${activeNav === label ? 'active' : ''}`} aria-label={label} title={sidebarCollapsed ? label : undefined} aria-expanded={children ? expandedNav.includes(label) : undefined} onClick={() => { if (children) { if (sidebarCollapsed) { setSidebarCollapsed(false); setExpandedNav((current) => current.includes(label) ? current : [...current, label]); return } setExpandedNav((current) => current.includes(label) ? current.filter((group) => group !== label) : [...current, label]); return } setActiveNav(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{itemCount !== null && itemCount !== undefined && <b aria-label={label === 'Live sessions' ? `${itemCount} clients online` : label === 'Subscribers' ? `${itemCount} subscribers total` : undefined}>{itemCount}</b>}{children && (expandedNav.includes(label) ? <ChevronDown className="nav-chevron" size={15} /> : <ChevronRight className="nav-chevron" size={15} />)}</button>{children && expandedNav.includes(label) && <div className="nav-children">{children.map(({ label: childLabel, view, icon: ChildIcon }) => <button key={view} className={`nav-child ${activeNav === view ? 'active' : ''}`} onClick={() => { setActiveNav(view); setMobileOpen(false) }}>{ChildIcon ? <ChildIcon size={15} /> : <span className="nav-child-dot" />}<span>{childLabel}</span></button>)}</div>}</div> })}</div>)}{isPlatformAdmin && <a className="nav-item platform-admin-nav-link" href="/platform-admin"><ShieldCheck size={17} /><span>Platform admin</span></a>}</nav>
         <div className="sidebar-footer"><div className="support-card"><div className="support-icon"><Cable size={16} /></div><strong>Need help?</strong><span>Check the integration guide</span><a href="#activity">Open docs <ArrowUpRight size={12} /></a></div><div className="user-row"><div className="avatar">{currentUser.slice(0, 2).toUpperCase() || 'U'}</div><div><strong>{currentUser || 'Workspace user'}</strong><span>{currentTenantName}</span></div><button type="button" className="workspace-logout" onClick={signOut}>Sign out</button></div></div>
       </aside>
 
@@ -745,13 +748,6 @@ export function AdminDashboard() {
                 <span className="profile-menu-label">WORKSPACE</span>
                 <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Settings'); setProfileOpen(false) }}><Settings2 size={16} /> Settings</button>
                 <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Staff'); setProfileOpen(false) }}><Users size={16} /> Staff</button>
-                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Plan & billing'); setProfileOpen(false) }}><CreditCard size={16} /> Plan &amp; billing</button>
-                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Request capacity'); setProfileOpen(false) }}><Activity size={16} /> Request capacity <ArrowUpRight size={13} className="profile-menu-external" /></button>
-                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Refer & Earn'); setProfileOpen(false) }}><Network size={16} /> Refer &amp; Earn</button>
-                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Audit log'); setProfileOpen(false) }}><FileText size={16} /> Audit log</button>
-              </div>
-              <div className="profile-menu-section">
-                <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Feedback'); setProfileOpen(false) }}><MessageCircle size={16} /> Feedback</button>
               </div>
               {profileNotice && <p className="profile-menu-notice" role="status">{profileNotice}<button type="button" onClick={() => setProfileNotice('')} aria-label="Dismiss install instructions"><X size={13} /></button></p>}
               <button type="button" className="profile-menu-item profile-signout" onClick={() => { setProfileOpen(false); void signOut() }}><ArrowRight size={16} /> Sign out</button>
@@ -759,7 +755,7 @@ export function AdminDashboard() {
           </div>
         </div></header>
         <div className="page-wrap" data-dashboard-network={dashboardSections.network} data-dashboard-activity={dashboardSections.activity} data-dashboard-operations={dashboardSections.operations}>
-          {activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions onOnlineCountChange={setOnlineClientCount} onOpenSubscriber={(customerId) => { setCrudSearchTerm(customerId); setSubscriberProfileTargetId(customerId); setActiveNav('Subscribers') }} /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Settings' ? <SettingsCenter onNavigate={setActiveNav} onProfileNameChange={setCurrentUser} /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'SMS settings' ? <SmsSettings /> : activeNav === 'Payments' ? <PaymentReconciliation /> : activeNav === 'Profile' ? <section className="profile-page"><div className="page-heading"><div><div className="live-label"><StatusDot /> ACCOUNT</div><h1>Your profile</h1><p>Your account identity and current workspace access.</p></div></div><div className="profile-page-grid"><article className="panel profile-page-card"><span>ACCOUNT</span><div className="profile-page-identity"><div className="profile-avatar">{userInitials}</div><div><h2>{currentUser || 'Workspace user'}</h2><p>{currentEmail || 'Email unavailable'}</p></div></div><dl><div><dt>Name</dt><dd>{currentUser || 'Not available'}</dd></div><div><dt>Email</dt><dd>{currentEmail || 'Not available'}</dd></div></dl></article><article className="panel profile-page-card"><span>WORKSPACE ACCESS</span><h2>{currentTenantName}</h2><dl><div><dt>Workspace</dt><dd>{currentTenantName}</dd></div><div><dt>Your role</dt><dd>{memberships.find((membership) => membership.id === currentTenantId)?.role || (isPlatformAdmin ? 'Platform administrator' : 'Workspace member')}</dd></div><div><dt>Available workspaces</dt><dd>{memberships.length}</dd></div></dl></article></div></section> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} initialExpandedId={activeNav === 'Subscribers' ? subscriberProfileTargetId : ''} onInitialProfileOpened={() => setSubscriberProfileTargetId('')} /> : <ModulePanel title={activeNav} /> : null}
+          {activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions onOnlineCountChange={setOnlineClientCount} onOpenSubscriber={(customerId) => { setCrudSearchTerm(customerId); setSubscriberProfileTargetId(customerId); setActiveNav('Subscribers') }} /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Settings' ? <SettingsCenter onNavigate={setActiveNav} onProfileNameChange={setCurrentUser} /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'Communications' ? <CommunicationsCenter /> : activeNav === 'Payments' ? <PaymentReconciliation /> : activeNav === 'Staff' ? <StaffManagement currentRole={memberships.find((membership) => membership.id === currentTenantId)?.role || ''} currentEmail={currentEmail} /> : activeNav === 'Profile' ? <section className="profile-page"><div className="page-heading"><div><div className="live-label"><StatusDot /> ACCOUNT</div><h1>Your profile</h1><p>Your account identity and current workspace access.</p></div></div><div className="profile-page-grid"><article className="panel profile-page-card"><span>ACCOUNT</span><div className="profile-page-identity"><div className="profile-avatar">{userInitials}</div><div><h2>{currentUser || 'Workspace user'}</h2><p>{currentEmail || 'Email unavailable'}</p></div></div><dl><div><dt>Name</dt><dd>{currentUser || 'Not available'}</dd></div><div><dt>Email</dt><dd>{currentEmail || 'Not available'}</dd></div></dl></article><article className="panel profile-page-card"><span>WORKSPACE ACCESS</span><h2>{currentTenantName}</h2><dl><div><dt>Workspace</dt><dd>{currentTenantName}</dd></div><div><dt>Your role</dt><dd>{memberships.find((membership) => membership.id === currentTenantId)?.role || (isPlatformAdmin ? 'Platform administrator' : 'Workspace member')}</dd></div><div><dt>Available workspaces</dt><dd>{memberships.length}</dd></div></dl></article></div></section> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} initialExpandedId={activeNav === 'Subscribers' ? subscriberProfileTargetId : ''} onInitialProfileOpened={() => setSubscriberProfileTargetId('')} /> : <ModulePanel title={activeNav} /> : null}
           {activeNav === 'Overview' ? <>
           <div className="page-heading"><div><div className="live-label"><StatusDot tone={networkStatusTone} /> WORKSPACE OVERVIEW</div><h1>{timeGreeting || 'Welcome'}, {currentUser.trim().split(/\s+/)[0] || 'there'}.</h1><p>Workspace records and billing activity for your network.</p></div><div className="heading-actions"><button ref={customizeButtonRef} type="button" className="outline-button" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={openDashboardCustomization}><SlidersHorizontal size={15} /> Customize</button><select className="outline-button report-export-format" aria-label="Workspace report export format" value={dashboardExportFormat} onChange={(event) => setDashboardExportFormat(event.target.value as ReportExportFormat)} disabled={exportingDashboardReport}><option value="csv">CSV</option><option value="excel">Excel (.xlsx)</option><option value="pdf">PDF</option></select><button type="button" className="primary-button" onClick={() => void exportDashboardReport()} disabled={exportingDashboardReport}><ArrowDownRight size={15} /> {exportingDashboardReport ? 'Exporting…' : 'Export report'}</button></div></div>
           {dashboardNotice && <p className="dashboard-notice" role="status">{dashboardNotice}<button type="button" aria-label="Dismiss message" onClick={() => setDashboardNotice('')}><X size={13} /></button></p>}
@@ -1343,6 +1339,8 @@ function RouterManagement() {
   const [provisioningSiteName, setProvisioningSiteName] = useState('Central Hub')
   const [routerDetailTab, setRouterDetailTab] = useState<RouterMonitorTab>('System')
   const [selectedRouterId, setSelectedRouterId] = useState('')
+  const routerDetailDialogRef = useRef<HTMLElement>(null)
+  const routerDetailTriggerRef = useRef<HTMLElement | null>(null)
   const [installScript, setInstallScript] = useState<RouterInstallScript | null>(null)
   const [scriptBusy, setScriptBusy] = useState(false)
   const [scriptCopied, setScriptCopied] = useState(false)
@@ -1441,6 +1439,23 @@ function RouterManagement() {
       (filterStatus === 'all' || router.status === filterStatus))
   }, [filter, filterStatus, routers])
   const selectedRouter = routers.find((router) => router.id === selectedRouterId)
+  useEffect(() => {
+    if (!selectedRouterId) return
+    routerDetailDialogRef.current?.focus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (installScript) {
+        setInstallScript(null)
+        setScriptCopied(false)
+        setCopiedError('')
+      } else {
+        setSelectedRouterId('')
+        routerDetailTriggerRef.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [installScript, selectedRouterId])
   const beginReprovision = (router: RouterMonitorRecord) => {
     setProvisioningRouterName(router.routerName)
     setProvisioningSiteName(router.siteName)
@@ -1464,6 +1479,7 @@ function RouterManagement() {
       ? rect.bottom + 6
       : Math.max(8, rect.top - popupHeight - 6)
     routerMenuAnchorRef.current = anchor
+    routerDetailTriggerRef.current = anchor
     setRouterMenu({ router, webConsoleUrl, top, left })
   }
   const closeRouterMenu = () => setRouterMenu(null)
@@ -1547,46 +1563,6 @@ function RouterManagement() {
     />
   }
 
-  if (selectedRouter) {
-    return <>
-      <RouterMonitorDetail
-        router={selectedRouter}
-        initialTab={routerDetailTab}
-        onBack={() => setSelectedRouterId('')}
-        onReprovision={() => void generateMonitorScript(selectedRouter)}
-        onEnableConnector={async () => {
-          const response = selectedRouter.monitored
-            ? await fetch(`/api/routers/${encodeURIComponent(selectedRouter.id)}/connector`, { method: 'POST' })
-            : await fetch('/api/routers/monitoring', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                siteId: selectedRouter.siteId,
-                routerName: selectedRouter.routerName,
-                mode: 'connector',
-              }),
-            })
-          const result = await response.json() as RouterConnectorEnrollment & { error?: string }
-          if (!response.ok) throw new Error(result.error || 'Unable to enable the router API connector.')
-          setRouters((current) => current.map((router) => router.id === selectedRouter.id
-            ? { ...router, monitored: true, connectorEnabled: true, connectorLastSeenAt: null }
-            : router))
-          return result
-        }}
-        onRemove={() => removeRouterMonitor(selectedRouter)}
-      />
-      {scriptBusy && <p className="router-detail-script-status" role="status">Preparing a new one-time monitor script…</p>}
-      {installScript && <div className="router-script-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setInstallScript(null) }}>
-        <section className="router-script-modal panel" role="dialog" aria-modal="true" aria-labelledby="router-script-title">
-          <div className="router-script-modal-heading"><div><span>SECURE ROUTER MONITORING</span><h2 id="router-script-title">Install on {installScript.routerName}</h2><p>Copy this script into the MikroTik terminal once. It starts automatically after a reboot and reports metrics every 30 seconds; no separate computer or VPS is needed. The script contains a private monitor token, so do not share it.</p></div><button type="button" aria-label="Close" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}><X size={17} /></button></div>
-          <label className="router-script-label">RouterOS install script<textarea readOnly value={installScript.script} rows={10} onFocus={(event) => event.currentTarget.select()} /></label>
-          {copiedError && <p className="router-discovery-status error" role="alert">{copiedError}</p>}
-          <div className="router-script-modal-actions"><button type="button" className="outline-button" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}>Close</button><button type="button" className="router-link-button" onClick={() => void copyMonitorScript()}><Copy size={14} /> {scriptCopied ? 'Copied' : 'Copy script'}</button></div>
-        </section>
-      </div>}
-    </>
-  }
-
   return (
     <>
     <section className="router-management">
@@ -1625,10 +1601,13 @@ function RouterManagement() {
             <thead><tr><th>ROUTER</th><th>STATUS</th><th>SESSIONS</th><th>WINBOX</th><th>WEB</th><th>LAST ONLINE</th><th /></tr></thead>
             <tbody>
               {filteredRouters.map((router) => {
-                const webConsoleUrl = getRouterWebConsoleUrl(router)
+                const webConsoleUrl = getRouterWebConsoleUrl({
+                  ...router,
+                  online: router.status === 'online',
+                })
                 return (
                 <tr key={router.id}>
-                  <td><button type="button" className="router-name-open" onClick={() => { setRouterDetailTab('System'); setSelectedRouterId(router.id) }}>{router.routerName}</button><span>{router.boardName && router.routerOsVersion
+                  <td><button type="button" className="router-name-open" onClick={(event) => { routerDetailTriggerRef.current = event.currentTarget; setRouterDetailTab('System'); setSelectedRouterId(router.id) }}>{router.routerName}</button><span>{router.boardName && router.routerOsVersion
                     ? `${router.boardName} · RouterOS ${router.routerOsVersion}`
                     : router.boardName || (router.routerOsVersion ? `RouterOS ${router.routerOsVersion}` : router.location)}</span></td>
                   <td><span className={`router-monitoring-status ${router.status}`}>{router.status === 'not_configured' ? 'Setup needed' : router.status === 'online' ? 'Online' : 'Offline'}</span></td>
@@ -1643,7 +1622,9 @@ function RouterManagement() {
                       ? <code>:{router.winboxPort}</code>
                       : <span className="router-unknown-value">Not reported</span>}</td>
                   <td>{webConsoleUrl
-                    ? <a className="router-web-console" href={webConsoleUrl} target="_blank" rel="noopener noreferrer"><Globe2 size={11} /> Open <ArrowRight size={11} /></a>
+                    ? <a className="router-web-console" href={webConsoleUrl} target="_blank" rel="noopener noreferrer" title="Opens using the last reported WebFig and WireGuard settings; reachability is not tested."><Globe2 size={11} /> Open <ArrowRight size={11} /></a>
+                    : router.status === 'offline' && router.webEnabled === true
+                      ? <span className="router-unknown-value" title="WebFig settings are from the router’s last heartbeat. The router is currently offline.">Router offline</span>
                     : router.webEnabled === false
                       ? <span className="router-unknown-value">Disabled</span>
                       : <span className="router-unknown-value">{router.webEnabled === true ? 'VPN details not reported' : 'Not reported'}</span>}</td>
@@ -1685,13 +1666,60 @@ function RouterManagement() {
         <button type="button" role="menuitem" disabled={!routerMenu.router.monitored} onClick={() => { closeRouterMenu(); setRouterDetailTab('Diagnosis'); setSelectedRouterId(routerMenu.router.id) }}>Diagnose</button>
         {routerMenu.webConsoleUrl
           ? <a role="menuitem" href={routerMenu.webConsoleUrl} target="_blank" rel="noopener noreferrer" onClick={closeRouterMenu}>Open web console</a>
-          : <button type="button" role="menuitem" disabled>Open web console · {routerMenu.router.webEnabled === false ? 'disabled' : 'VPN details not reported'}</button>}
+          : <button type="button" role="menuitem" disabled>Open web console · {routerMenu.router.status === 'offline' ? 'router offline' : routerMenu.router.webEnabled === false ? 'disabled' : 'VPN details not reported'}</button>}
         <button type="button" role="menuitem" disabled={scriptBusy} onClick={() => { closeRouterMenu(); void generateMonitorScript(routerMenu.router) }}>{routerMenu.router.monitored ? 'Regenerate monitor script' : 'Set up monitoring'}</button>
         <button type="button" role="menuitem" onClick={() => { closeRouterMenu(); beginReprovision(routerMenu.router) }}>Reprovision router</button>
         <button type="button" role="menuitem" className="router-menu-delete" onClick={() => { closeRouterMenu(); void confirmRemoveRouter(routerMenu.router) }}>Delete router…</button>
       </div>,
       document.body,
     )}
+    {selectedRouter && <div className="router-detail-dialog-backdrop" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) {
+        setSelectedRouterId('')
+        routerDetailTriggerRef.current?.focus()
+      }
+    }}>
+      <section ref={routerDetailDialogRef} className="router-detail-dialog" role="dialog" aria-modal="true" aria-label={`${selectedRouter.routerName} details`} tabIndex={-1}>
+        <RouterMonitorDetail
+          router={selectedRouter}
+          initialTab={routerDetailTab}
+          onBack={() => {
+            setSelectedRouterId('')
+            routerDetailTriggerRef.current?.focus()
+          }}
+          onReprovision={() => void generateMonitorScript(selectedRouter)}
+          onEnableConnector={async () => {
+            const response = selectedRouter.monitored
+              ? await fetch(`/api/routers/${encodeURIComponent(selectedRouter.id)}/connector`, { method: 'POST' })
+              : await fetch('/api/routers/monitoring', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  siteId: selectedRouter.siteId,
+                  routerName: selectedRouter.routerName,
+                  mode: 'connector',
+                }),
+              })
+            const result = await response.json() as RouterConnectorEnrollment & { error?: string }
+            if (!response.ok) throw new Error(result.error || 'Unable to enable the router API connector.')
+            setRouters((current) => current.map((router) => router.id === selectedRouter.id
+              ? { ...router, monitored: true, connectorEnabled: true, connectorLastSeenAt: null }
+              : router))
+            return result
+          }}
+          onRemove={() => removeRouterMonitor(selectedRouter)}
+        />
+        {scriptBusy && <p className="router-detail-script-status" role="status">Preparing a new one-time monitor script…</p>}
+        {installScript && <div className="router-script-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setInstallScript(null) }}>
+          <section className="router-script-modal panel" role="dialog" aria-modal="true" aria-labelledby="router-script-title">
+            <div className="router-script-modal-heading"><div><span>SECURE ROUTER MONITORING</span><h2 id="router-script-title">Install on {installScript.routerName}</h2><p>Copy this script into the MikroTik terminal once. It starts automatically after a reboot and reports metrics every 30 seconds; no separate computer or VPS is needed. The script contains a private monitor token, so do not share it.</p></div><button type="button" aria-label="Close" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}><X size={17} /></button></div>
+            <label className="router-script-label">RouterOS install script<textarea readOnly value={installScript.script} rows={10} onFocus={(event) => event.currentTarget.select()} /></label>
+            {copiedError && <p className="router-discovery-status error" role="alert">{copiedError}</p>}
+            <div className="router-script-modal-actions"><button type="button" className="outline-button" onClick={() => { setInstallScript(null); setScriptCopied(false); setCopiedError('') }}>Close</button><button type="button" className="router-link-button" onClick={() => void copyMonitorScript()}><Copy size={14} /> {scriptCopied ? 'Copied' : 'Copy script'}</button></div>
+          </section>
+        </div>}
+      </section>
+    </div>}
     </>
   )
 }
@@ -1869,6 +1897,7 @@ const planDurations = [
 function PackagePanel({ initialFilter = '' }: { initialFilter?: string }) {
   const [rows, setRows] = useState<PlanRow[]>([])
   const [showForm, setShowForm] = useState(false)
+  const [editingPlanId, setEditingPlanId] = useState('')
   const [saving, setSaving] = useState(false)
   const [updatingPlanId, setUpdatingPlanId] = useState('')
   const [message, setMessage] = useState('')
@@ -1893,10 +1922,17 @@ function PackagePanel({ initialFilter = '' }: { initialFilter?: string }) {
   const [nasRestrictions, setNasRestrictions] = useState('')
 
   const load = async () => {
-    const response = await fetch('/api/packages', { cache: 'no-store' })
-    const result = await response.json()
-    if (!response.ok || !Array.isArray(result)) throw new Error('Could not load packages.')
-    setRows(result as PlanRow[])
+    const loadedRows: PlanRow[] = []
+    for (let offset = 0; ; offset += 200) {
+      const response = await fetch(`/api/packages?limit=200&offset=${offset}`, { cache: 'no-store' })
+      const result = await response.json() as PlanRow[] | { error?: string }
+      if (!response.ok || !Array.isArray(result)) {
+        throw new Error(!Array.isArray(result) ? result.error || 'Could not load packages.' : 'Could not load packages.')
+      }
+      loadedRows.push(...result)
+      if (result.length < 200) break
+    }
+    setRows(loadedRows)
   }
 
   useEffect(() => { void load().catch(() => setMessage('Could not load packages.')) }, [])
@@ -1931,14 +1967,43 @@ function PackagePanel({ initialFilter = '' }: { initialFilter?: string }) {
     setNasRestrictions('')
   }
 
-  const createPlan = async (event: React.FormEvent<HTMLFormElement>) => {
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingPlanId('')
+    resetForm()
+  }
+
+  const editPlan = (plan: PlanRow) => {
+    setEditingPlanId(plan.id)
+    setName(plan.name)
+    setType(plan.type as (typeof planTypes)[number])
+    setAvailability(plan.availability)
+    setPrice(String(plan.monthlyPrice))
+    setDurationSeconds(String(plan.durationSeconds))
+    setRateLimit(plan.rateLimit)
+    setDevicesPerAccount(String(plan.devicesPerAccount))
+    setBurstLimit(plan.burstLimit || '')
+    setBurstThreshold(plan.burstThreshold || '')
+    setBurstTimeSeconds(plan.burstTimeSeconds === null ? '' : String(plan.burstTimeSeconds))
+    setFupEnabled(plan.fupEnabled)
+    setFupLimitGb(plan.fupLimitBytes === null ? '' : String(plan.fupLimitBytes / 1024 ** 3))
+    setFupUploadRate(plan.fupUploadRate || '')
+    setFupDownloadRate(plan.fupDownloadRate || '')
+    setScheduleEnabled(plan.scheduleEnabled)
+    setScheduleSpec(plan.scheduleSpec || '')
+    setNasRestrictions(plan.nasRestrictions.join(', '))
+    setShowForm(true)
+    setMessage('')
+  }
+
+  const savePlan = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setSaving(true)
     setMessage('')
     const [uploadRate, downloadRate] = rateLimit.split('/')
     const restrictions = nasRestrictions.split(/[\s,]+/).map((value) => value.trim()).filter(Boolean)
     const body = {
-      name,
+      name: name.trim(),
       type,
       availability,
       monthlyPrice: Number(price),
@@ -1959,15 +2024,20 @@ function PackagePanel({ initialFilter = '' }: { initialFilter?: string }) {
       nasRestrictions: restrictions,
     }
     try {
-      const response = await fetch('/api/packages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || 'Could not create package.')
+      const response = await fetch(editingPlanId ? `/api/packages?id=${encodeURIComponent(editingPlanId)}` : '/api/packages', {
+        method: editingPlanId ? 'PATCH' : 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error || `Could not ${editingPlanId ? 'update' : 'create'} package.`)
       resetForm()
       setShowForm(false)
-      setMessage('Package created.')
+      setEditingPlanId('')
+      setMessage(editingPlanId ? 'Package updated.' : 'Package created.')
       await load()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not create package.')
+      setMessage(error instanceof Error ? error.message : `Could not ${editingPlanId ? 'update' : 'create'} package.`)
     } finally {
       setSaving(false)
     }
@@ -2016,22 +2086,22 @@ function PackagePanel({ initialFilter = '' }: { initialFilter?: string }) {
   ]
 
   return <section className="package-workspace">
-    <div className="package-page-heading"><div><div className="provisioning-breadcrumb"><span>NETWORK</span><span className="breadcrumb-rule" /><span>PLANS</span></div><h1>Your <span>packages.</span></h1><p>Every plan you offer, grouped by connection type. {liveCount} active across the network.</p></div><button className="primary-button" onClick={() => { setShowForm((open) => !open); setMessage('') }}>{showForm ? 'Close form' : '+ New package'}</button></div>
+    <div className="package-page-heading"><div><div className="provisioning-breadcrumb"><span>NETWORK</span><span className="breadcrumb-rule" /><span>PLANS</span></div><h1>Your <span>packages.</span></h1><p>Every plan you offer, grouped by connection type. {liveCount} active across the network.</p></div><button className="primary-button" onClick={() => { if (showForm) closeForm(); else { resetForm(); setEditingPlanId(''); setShowForm(true) } setMessage('') }}>{showForm ? 'Close form' : '+ New package'}</button></div>
     {message && <p className={`router-discovery-status${message.includes('could not') || message.includes('Could not') ? ' error' : ''}`} role="status">{message}</p>}
     <div className="package-stats"><div><span>ALL PLANS</span><strong>{rows.length}</strong><small>{unlistedCount} unlisted</small></div><div><span>ACTIVE</span><strong>{liveCount}</strong><small>currently offering</small></div><div><span>UNLISTED</span><strong>{unlistedCount}</strong><small>not listed publicly</small></div><div><span>HIDDEN</span><strong>{hiddenCount}</strong><small>not open for sign-up</small></div><div><span>SUBSCRIBERS</span><strong>{rows.reduce((sum, row) => sum + (Number(row.subscribersCount) || 0), 0)}</strong><small>assigned to plans</small></div></div>
-    {showForm && <form className="plan-editor" onSubmit={createPlan}>
-      <div className="plan-editor-heading"><div><div className="section-eyebrow">PACKAGES <span>—</span> NEW</div><h2>Create a <span>package.</span></h2><p>Speed limits, scheduling, and NAS restrictions.</p></div></div>
+    {showForm && <form className="plan-editor" onSubmit={savePlan}>
+      <div className="plan-editor-heading"><div><div className="section-eyebrow">PACKAGES <span>—</span> {editingPlanId ? 'EDIT' : 'NEW'}</div><h2>{editingPlanId ? <>Edit <span>{name || 'package'}.</span></> : <>Create a <span>package.</span></>}</h2><p>Speed limits, scheduling, and NAS restrictions.</p></div></div>
       <section className="plan-form-section"><h3>Identity</h3><div className="plan-form-card"><div className="plan-form-grid"><label>Name *<input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Home 10 Mbps" maxLength={80} required /></label><label>Type *<select value={type} onChange={(event) => setType(event.target.value as (typeof planTypes)[number])}>{planTypes.map((option) => <option key={option}>{option}</option>)}</select></label></div><fieldset className="availability-fieldset"><legend>Availability</legend><div className="availability-control">{(['live', 'hidden', 'off'] as const).map((state) => <button type="button" key={state} className={availability === state ? `selected availability-${state}` : ''} aria-pressed={availability === state} onClick={() => setAvailability(state)}>{state === 'live' ? 'Live' : state === 'hidden' ? 'Hidden' : 'Off'}</button>)}</div><small>{availability === 'live' ? 'Visible to customers and accepting signups.' : availability === 'hidden' ? 'Kept for existing subscribers, but hidden from signup.' : 'Disabled and unavailable for new subscribers.'}</small></fieldset></div></section>
-      <section className="plan-form-section"><h3>Pricing</h3><div className="plan-form-card"><div className="plan-form-grid"><label>Price *<span className="price-input"><span>KSh</span><input inputMode="numeric" type="number" min="0" step="1" value={price} onChange={(event) => setPrice(event.target.value)} placeholder="0" required /></span><small>Set KSh 0 for a free offer. Free plans connect directly without M-Pesa.</small></label><label>Duration *<select value={durationSeconds} onChange={(event) => setDurationSeconds(event.target.value)}>{planDurations.map((duration) => <option key={duration.seconds} value={duration.seconds}>{duration.label}</option>)}</select></label></div></div></section>
+      <section className="plan-form-section"><h3>Pricing</h3><div className="plan-form-card"><div className="plan-form-grid"><label>Price *<span className="price-input"><span>KSh</span><input inputMode="numeric" type="number" min="0" step="1" value={price} onChange={(event) => setPrice(event.target.value)} placeholder="0" required /></span><small>Set KSh 0 for a free offer. Free plans connect directly without M-Pesa.</small></label><label>Duration *<select value={durationSeconds} onChange={(event) => setDurationSeconds(event.target.value)}>{!planDurations.some((duration) => String(duration.seconds) === durationSeconds) && <option value={durationSeconds}>{durationSeconds} seconds (custom)</option>}{planDurations.map((duration) => <option key={duration.seconds} value={duration.seconds}>{duration.label}</option>)}</select></label></div></div></section>
       <section className="plan-form-section"><h3>Speed</h3><div className="plan-form-card"><div className="plan-form-grid"><label>Rate-limit *<input value={rateLimit} onChange={(event) => setRateLimit(event.target.value)} placeholder="5M/5M" pattern="(?:[0-9]+(?:\\.[0-9]+)?[KMGkmg]?)/(?:[0-9]+(?:\\.[0-9]+)?[KMGkmg]?)" required/><small>Upload first, then download. Example: 2M/10M is 2M up and 10M down.</small></label><label>Devices per account<input type="number" min="1" max="64" value={devicesPerAccount} onChange={(event) => setDevicesPerAccount(event.target.value)} required /></label></div></div></section>
       <section className="plan-form-section"><div className="plan-section-heading"><h3>Burst <span>optional</span></h3><p>MikroTik burst lets a subscriber briefly exceed their rate-limit. Fill all three to enable, or leave blank to disable.</p></div><div className="plan-form-card"><div className="plan-form-grid burst-grid"><label>Burst limit<input value={burstLimit} onChange={(event) => setBurstLimit(event.target.value)} placeholder="10M/10M" pattern="(?:[0-9]+(?:\\.[0-9]+)?[KMGkmg]?)/(?:[0-9]+(?:\\.[0-9]+)?[KMGkmg]?)" /></label><label>Burst threshold<input value={burstThreshold} onChange={(event) => setBurstThreshold(event.target.value)} placeholder="5M/5M" pattern="(?:[0-9]+(?:\\.[0-9]+)?[KMGkmg]?)/(?:[0-9]+(?:\\.[0-9]+)?[KMGkmg]?)" /></label><label>Burst time<input type="number" min="1" max="3600" value={burstTimeSeconds} onChange={(event) => setBurstTimeSeconds(event.target.value)} placeholder="30"/><small>seconds</small></label></div></div></section>
       <section className="plan-form-section"><h3>Fair Use Policy</h3><div className="plan-form-card"><label className="plan-toggle-row"><span><strong>Enforce FUP</strong><small>Throttle the upload and download rates after this purchase exceeds its data limit. The new rates apply on the next login or reconnect.</small></span><input type="checkbox" checked={fupEnabled} onChange={(event) => setFupEnabled(event.target.checked)} /><span>{fupEnabled ? 'On' : 'Off'}</span></label>{fupEnabled && <><label className="plan-extra-field">Limit per purchase (GB)<input type="number" min="0.1" step="0.1" value={fupLimitGb} onChange={(event) => setFupLimitGb(event.target.value)} placeholder="e.g. 100" required /></label><div className="plan-form-grid"><label>Throttle upload *<input value={fupUploadRate} onChange={(event) => setFupUploadRate(event.target.value)} placeholder="e.g. 1M" pattern="[0-9]+(?:\\.[0-9]+)?[KMGkmg]?" required /><small>Applied as the MikroTik upload rate.</small></label><label>Throttle download *<input value={fupDownloadRate} onChange={(event) => setFupDownloadRate(event.target.value)} placeholder="e.g. 2M" pattern="[0-9]+(?:\\.[0-9]+)?[KMGkmg]?" required /><small>Applied as the MikroTik download rate.</small></label></div><p className="plan-section-heading">Enforcement: <strong>Throttle</strong> · Usage resets with each purchase</p></>}</div></section>
       <section className="plan-form-section"><h3>Schedule</h3><div className="plan-form-card"><label className="plan-toggle-row"><span><strong>Restrict to a schedule</strong><small>Limit when this plan is usable — for example, weekdays 8am–6pm.</small></span><input type="checkbox" checked={scheduleEnabled} onChange={(event) => setScheduleEnabled(event.target.checked)} /><span>{scheduleEnabled ? 'On' : 'Off'}</span></label>{scheduleEnabled && <label className="plan-extra-field">RADIUS Login-Time<input value={scheduleSpec} onChange={(event) => setScheduleSpec(event.target.value)} placeholder="Mo-Fr0800-1800" required /><small>Example: Mo-Fr0800-1800. Use RADIUS Login-Time syntax.</small></label>}</div></section>
       <section className="plan-form-section"><div className="plan-section-heading"><h3>NAS restriction <span>optional</span></h3><p>Limit this plan to specific routers. Leave empty to allow on every NAS.</p></div><div className="plan-form-card"><label className="plan-extra-field">Allowed NAS IPv4 addresses<input value={nasRestrictions} onChange={(event) => setNasRestrictions(event.target.value)} placeholder="10.10.159.198, 10.10.53.29"/><small>Separate router addresses with commas.</small></label></div></section>
-      <div className="plan-editor-footer"><span>All policy values are copied into newly issued subscriber accounts.</span><button className="wizard-next" type="submit" disabled={saving}>{saving ? 'Creating...' : 'Create package'}</button></div>
+      <div className="plan-editor-footer"><span>All policy values are copied into newly issued subscriber accounts.</span><div><button className="outline-button" type="button" onClick={closeForm} disabled={saving}>Cancel</button><button className="wizard-next" type="submit" disabled={saving}>{saving ? (editingPlanId ? 'Saving...' : 'Creating...') : (editingPlanId ? 'Save changes' : 'Create package')}</button></div></div>
     </form>}
     <div className="plan-toolbar"><div className="plan-tabs">{tabs.map((tab) => <button type="button" key={tab.label} className={filter === tab.label ? 'selected' : ''} onClick={() => setFilter(tab.label)}>{tab.label}<span>{tab.count}</span></button>)}</div><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter by name, speed, duration..." aria-label="Filter plans" /></div>
-    <div className="panel plan-table-wrap"><div className="table-scroll"><table className="plan-table"><thead><tr><th>PLAN</th><th>TYPE</th><th>PRICE</th><th>DURATION</th><th>RATE-LIMIT</th><th>DEVICES</th><th>STATUS</th><th /></tr></thead><tbody>{visibleRows.map((row) => <tr key={row.id}><td><strong>{row.name}</strong><small>{row.rateLimit} · {planDurations.find((duration) => duration.seconds === row.durationSeconds)?.label || `${Math.ceil(row.durationSeconds / 86400)}d`}</small></td><td><span className={`plan-type plan-type-${row.type.toLowerCase()}`}>{row.type}</span></td><td className="plan-price">KSh {Number(row.monthlyPrice).toLocaleString('en-KE')}</td><td>{planDurations.find((duration) => duration.seconds === row.durationSeconds)?.label || `${Math.ceil(row.durationSeconds / 86400)} days`}</td><td className="mono">{row.rateLimit}</td><td>{row.devicesPerAccount}</td><td><select className={`plan-availability plan-status-${row.availability}`} aria-label={`${row.name} availability`} value={row.availability} disabled={updatingPlanId === row.id} onChange={(event) => void updateAvailability(row.id, event.target.value as PlanRow['availability'])}><option value="live">Live</option><option value="hidden">Hidden</option><option value="off">Off</option></select></td><td><button type="button" className="text-button danger-text" aria-label={`Delete ${row.name}`} onClick={() => void removePlan(row.id)}>Remove</button></td></tr>)}{visibleRows.length === 0 && <tr><td colSpan={8} className="plan-empty">{rows.length === 0 ? 'No plans yet. Create your first package above.' : 'No packages match this filter.'}</td></tr>}</tbody></table></div></div>
+    <div className="panel plan-table-wrap"><div className="table-scroll"><table className="plan-table"><thead><tr><th>PLAN</th><th>TYPE</th><th>PRICE</th><th>DURATION</th><th>RATE-LIMIT</th><th>DEVICES</th><th>STATUS</th><th>ACTIONS</th></tr></thead><tbody>{visibleRows.map((row) => <tr key={row.id}><td><strong>{row.name}</strong><small>{row.rateLimit} · {planDurations.find((duration) => duration.seconds === row.durationSeconds)?.label || `${Math.ceil(row.durationSeconds / 86400)}d`}</small></td><td><span className={`plan-type plan-type-${row.type.toLowerCase()}`}>{row.type}</span></td><td className="plan-price">KSh {Number(row.monthlyPrice).toLocaleString('en-KE')}</td><td>{planDurations.find((duration) => duration.seconds === row.durationSeconds)?.label || `${Math.ceil(row.durationSeconds / 86400)} days`}</td><td className="mono">{row.rateLimit}</td><td>{row.devicesPerAccount}</td><td><select className={`plan-availability plan-status-${row.availability}`} aria-label={`${row.name} availability`} value={row.availability} disabled={updatingPlanId === row.id} onChange={(event) => void updateAvailability(row.id, event.target.value as PlanRow['availability'])}><option value="live">Live</option><option value="hidden">Hidden</option><option value="off">Off</option></select></td><td><button type="button" className="text-button" onClick={() => editPlan(row)}>Edit</button><button type="button" className="text-button danger-text" aria-label={`Delete ${row.name}`} onClick={() => void removePlan(row.id)}>Remove</button></td></tr>)}{visibleRows.length === 0 && <tr><td colSpan={8} className="plan-empty">{rows.length === 0 ? 'No plans yet. Create your first package above.' : 'No packages match this filter.'}</td></tr>}</tbody></table></div></div>
   </section>
 }
 
@@ -2075,6 +2145,8 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
   const [detailsError, setDetailsError] = useState('')
   const [subscriberToDelete, setSubscriberToDelete] = useState<{ id: string; name: string } | null>(null)
   const [subscriberDeleteError, setSubscriberDeleteError] = useState('')
+  const subscriberDetailsDialogRef = useRef<HTMLElement>(null)
+  const subscriberDetailsTriggerRef = useRef<HTMLButtonElement | null>(null)
   const subscriberDeleteConfirmRef = useRef<HTMLButtonElement>(null)
   const subscriberDeleteTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [smsSubscriberId, setSmsSubscriberId] = useState('')
@@ -2118,6 +2190,13 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
       setDetailsLoadingId('')
     }
   }, [expandedDetailsId, initialExpandedId, onInitialProfileOpened])
+  const closeSubscriberDetails = useCallback(() => {
+    setExpandedDetailsId('')
+    setSubscriberDetails(null)
+    setDetailsError('')
+    setShowSubscriberPassword(false)
+    subscriberDetailsTriggerRef.current?.focus()
+  }, [])
   const refreshSubscriberDetails = useCallback(async (customerId: string) => {
     const response = await fetch(`/api/customers/${encodeURIComponent(customerId)}/details`, { cache: 'no-store' })
     const result = await response.json() as SubscriberProfileData & { error?: string }
@@ -2138,6 +2217,16 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
       window.setTimeout(() => setCopiedCredential(''), 1800)
     } catch {
       setDetailsError(`Could not copy the ${kind === 'accountNumber' ? 'account number' : kind}. Please select and copy it manually.`)
+    }
+  }
+  const copySubscriberContact = async (kind: 'email' | 'phone' | 'accountNumber', value: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedCredential(kind)
+      window.setTimeout(() => setCopiedCredential(''), 1800)
+    } catch {
+      setMessageIsError(true)
+      setMessage(`Could not copy the ${kind === 'accountNumber' ? 'account number' : kind}. Please select and copy it manually.`)
     }
   }
   const sendSubscriberSms = async (subscriberId: string) => {
@@ -2264,6 +2353,15 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [subscriberToDelete, saving])
+  useEffect(() => {
+    if (!expandedDetailsId) return
+    subscriberDetailsDialogRef.current?.focus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeSubscriberDetails()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [closeSubscriberDetails, expandedDetailsId])
   const filteredRows = useMemo(() => {
     const normalizedFilter = recordFilter.trim().toLowerCase()
     const filtered = rows.filter((row) => {
@@ -2628,19 +2726,19 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
     {entity === 'customers' ? (subscriberFormOpen ? <form className="subscriber-create-form panel" onSubmit={(event) => { event.preventDefault(); void create() }}>
       <div className="subscriber-form-heading"><div><span className="eyebrow">NEW SUBSCRIBER</span><h2>Create subscriber account</h2><p>Add the customer details and a unique login for your FreeRADIUS server.</p></div></div>
       <div className="subscriber-form-grid">
-        <label>Full name <span aria-hidden="true">*</span><input required maxLength={120} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Ama Mensah" /></label>
-        <label>Email address <span aria-hidden="true">*</span><input required type="email" maxLength={254} autoComplete="email" value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="name@example.com" /></label>
-        <label>Service plan <span aria-hidden="true">*</span><select required value={subscriberPlanId} onChange={(event) => setSubscriberPlanId(event.target.value)}><option value="">Select a plan</option>{subscriberPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} · {plan.type} · KSh {plan.monthlyPrice.toLocaleString('en-KE')}{plan.availability === 'hidden' ? ' · Hidden' : ''}</option>)}</select><small>{subscriberPlansError || (selectedSubscriberPlan ? `${selectedSubscriberPlan.type} plan · ${Math.ceil(selectedSubscriberPlan.durationSeconds / 86400)} day${Math.ceil(selectedSubscriberPlan.durationSeconds / 86400) === 1 ? '' : 's'}` : 'Choose the service plan this subscriber will use.')}</small></label>
-        <label>Phone number{selectedSubscriberPlan?.type === 'PPPoE' && <> <span aria-hidden="true">*</span></>}<input type="tel" required={selectedSubscriberPlan?.type === 'PPPoE'} autoComplete="tel" maxLength={32} value={subscriberPhone} onChange={(event) => setSubscriberPhone(event.target.value)} placeholder="e.g. 0712 345 678" /><small>Required for PPPoE account setup.</small></label>
+        <label><span className="subscriber-field-label">Full name <span className="subscriber-required-indicator" aria-hidden="true">*</span></span><input required maxLength={120} autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Ama Mensah" /></label>
+        <label><span className="subscriber-field-label">Email address <span className="subscriber-required-indicator" aria-hidden="true">*</span></span><input required type="email" maxLength={254} autoComplete="email" value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="name@example.com" /></label>
+        <label><span className="subscriber-field-label">Service plan <span className="subscriber-required-indicator" aria-hidden="true">*</span></span><select required value={subscriberPlanId} onChange={(event) => setSubscriberPlanId(event.target.value)}><option value="">Select a plan</option>{subscriberPlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} · {plan.type} · KSh {plan.monthlyPrice.toLocaleString('en-KE')}{plan.availability === 'hidden' ? ' · Hidden' : ''}</option>)}</select><small>{subscriberPlansError || (selectedSubscriberPlan ? `${selectedSubscriberPlan.type} plan · ${Math.ceil(selectedSubscriberPlan.durationSeconds / 86400)} day${Math.ceil(selectedSubscriberPlan.durationSeconds / 86400) === 1 ? '' : 's'}` : 'Choose the service plan this subscriber will use.')}</small></label>
+        <label><span className="subscriber-field-label">Phone number{selectedSubscriberPlan?.type === 'PPPoE' && <> <span className="subscriber-required-indicator" aria-hidden="true">*</span></>}</span><input type="tel" inputMode="tel" pattern={KENYAN_MOBILE_PHONE_PATTERN} title="Enter 07 followed by 8 digits or +254 followed by 9 digits." required={selectedSubscriberPlan?.type === 'PPPoE'} autoComplete="tel" maxLength={13} value={subscriberPhone} onChange={(event) => setSubscriberPhone(event.target.value)} placeholder="0712345678 or +254712345678" /><small>Use 07 followed by 8 digits or +254 followed by 9 digits. Required for PPPoE account setup.</small></label>
         <label>Physical location<input maxLength={240} autoComplete="street-address" value={subscriberLocation} onChange={(event) => setSubscriberLocation(event.target.value)} placeholder="e.g. Eastlands, Nairobi" /><small>Customer address or area; separate from the network site.</small></label>
         <label>Network site<select value={subscriberSiteId} onChange={(event) => setSubscriberSiteId(event.target.value)}><option value="">No site assigned</option>{subscriberSites.map((site) => <option key={site.id} value={site.id}>{site.name}{site.location ? ` · ${site.location}` : ''}</option>)}</select><small>{subscriberSitesError || (subscriberSites.length ? 'Select the network site serving this subscriber.' : 'No network sites are configured yet; you can assign one later.')}</small></label>
         <label className="subscriber-account-number-field">Account number<div className="subscriber-account-number-preview">Generated automatically for every subscriber</div><small>A unique account number is assigned when the subscriber is created.</small></label>
-        <label>RADIUS username <span aria-hidden="true">*</span><input required minLength={3} maxLength={64} pattern="[A-Za-z0-9._@-]{3,64}" autoComplete="username" value={radiusUsername} onChange={(event) => setRadiusUsername(event.target.value)} placeholder="3–64 letters, numbers, . _ @ -" /><small>Must be unique across all workspaces on this RADIUS server.</small></label>
-        <label>RADIUS password <span aria-hidden="true">*</span><div className="subscriber-password-field"><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={radiusPassword} onChange={(event) => setRadiusPassword(event.target.value)} placeholder="At least 12 characters" /><button type="button" className="password-visibility-button" onClick={() => setShowRadiusPassword((visible) => !visible)} aria-label={showRadiusPassword ? 'Hide RADIUS password' : 'Show RADIUS password'}>{showRadiusPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>Use 12–128 characters. The password is provisioned to RADIUS.</small></label>
-        <label className="subscriber-confirm-field">Confirm RADIUS password <span aria-hidden="true">*</span><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={confirmRadiusPassword} onChange={(event) => setConfirmRadiusPassword(event.target.value)} placeholder="Re-enter the password" /></label>
+        <label><span className="subscriber-field-label">RADIUS username <span className="subscriber-required-indicator" aria-hidden="true">*</span></span><input required minLength={3} maxLength={64} pattern="[A-Za-z0-9._@-]{3,64}" autoComplete="username" value={radiusUsername} onChange={(event) => setRadiusUsername(event.target.value)} placeholder="3–64 letters, numbers, . _ @ -" /><small>Must be unique across all workspaces on this RADIUS server.</small></label>
+        <label><span className="subscriber-field-label">RADIUS password <span className="subscriber-required-indicator" aria-hidden="true">*</span></span><div className="subscriber-password-field"><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={radiusPassword} onChange={(event) => setRadiusPassword(event.target.value)} placeholder="At least 12 characters" /><button type="button" className="password-visibility-button" onClick={() => setShowRadiusPassword((visible) => !visible)} aria-label={showRadiusPassword ? 'Hide RADIUS password' : 'Show RADIUS password'}>{showRadiusPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>Use 12–128 characters. The password is provisioned to RADIUS.</small></label>
+        <label className="subscriber-confirm-field"><span className="subscriber-field-label">Confirm RADIUS password <span className="subscriber-required-indicator" aria-hidden="true">*</span></span><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={confirmRadiusPassword} onChange={(event) => setConfirmRadiusPassword(event.target.value)} placeholder="Re-enter the password" /></label>
       </div>
       {message && <p className={`subscriber-form-message ${messageIsError ? 'is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}
-      <div className="subscriber-form-footer"><span><strong>*</strong> Required fields</span><button className="primary-button" type="submit" disabled={saving || subscriberPlans.length === 0}>{saving ? 'Creating subscriber…' : 'Create subscriber account'}</button></div>
+      <div className="subscriber-form-footer"><span><strong aria-hidden="true">*</strong> Fields marked * are required</span><button className="primary-button" type="submit" disabled={saving || subscriberPlans.length === 0}>{saving ? 'Creating subscriber…' : 'Create subscriber account'}</button></div>
     </form> : null) : <div className="crud-form"><input value={name} onChange={(event) => setName(event.target.value)} placeholder={entity === 'payments' ? 'Amount or payment label' : `${labels[entity]} name`} aria-label="Record name" /><input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder={entity === 'sites' ? 'Location' : 'Method or detail'} aria-label="Record detail" /><button className="outline-button" onClick={() => void create()} disabled={saving}>Create</button>{message && <span className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</span>}</div>}
     {entity === 'customers' && !subscriberFormOpen && message && <p className={`subscriber-flash-message ${messageIsError ? 'is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}
     <div className="panel crud-table"><div className="panel-heading"><div><h3>{entity === 'customers' ? 'Subscriber accounts' : 'Records'}</h3><span>{recordFilter || subscriberTypeFilter !== 'All' || subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberCreatedFrom || subscriberCreatedTo ? `${filteredRows.length} matching · ${rows.length} total` : `${rows.length} loaded from Supabase`}</span></div><div className="crud-table-tools">{entity === 'customers' && <div className="subscriber-type-filters" role="group" aria-label="Filter subscribers by connection type">{(['All', 'Hotspot', 'PPPoE', 'Bindings'] as const).map((filter) => <button key={filter} type="button" aria-pressed={subscriberTypeFilter === filter} className={subscriberTypeFilter === filter ? 'active' : ''} onClick={() => setSubscriberTypeFilter(filter)}>{filter}<span>{subscriberTypeCounts[filter]}</span></button>)}</div>}{entity === 'customers' && <div className="subscriber-filter-control"><button className={`outline-button subscriber-filter-trigger${subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberCreatedFrom || subscriberCreatedTo ? ' has-filters' : ''}`} type="button" aria-haspopup="dialog" aria-expanded={subscriberFilterMenuOpen} onClick={() => { setSubscriberSortMenuOpen(false); setSubscriberFilterMenuOpen((open) => !open) }}><SlidersHorizontal size={15} />Filters{Boolean(subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberCreatedFrom || subscriberCreatedTo) && <span>{subscriberAdvancedFilters.length + Number(Boolean(subscriberRouterFilter)) + Number(Boolean(subscriberCreatedFrom || subscriberCreatedTo))}</span>}</button>{subscriberFilterMenuOpen && <section className="subscriber-filter-menu" role="dialog" aria-label="Subscriber filters"><div className="subscriber-filter-menu-heading"><h4>Filters</h4><button type="button" onClick={() => { setSubscriberAdvancedFilters([]); setSubscriberRouterFilter(''); setSubscriberCreatedFrom(''); setSubscriberCreatedTo('') }}>Reset</button></div><p>Select one or more — all chosen filters must match.</p><div className="subscriber-filter-chips">{subscriberAdvancedFilterOptions.map((option) => <button key={option.value} type="button" aria-pressed={subscriberAdvancedFilters.includes(option.value)} className={subscriberAdvancedFilters.includes(option.value) ? 'selected' : ''} onClick={() => setSubscriberAdvancedFilters((current) => current.includes(option.value) ? current.filter((filter) => filter !== option.value) : [...current, option.value])}>{option.label}</button>)}</div><label className="subscriber-filter-field">MikroTik / Router<select value={subscriberRouterFilter} onChange={(event) => setSubscriberRouterFilter(event.target.value)}><option value="">All routers</option>{subscriberRouterOptions.map((router) => <option key={router} value={router}>{router}</option>)}</select></label><fieldset className="subscriber-filter-date-range"><legend>Created between</legend><label><span>From</span><input type="date" aria-label="Created from date" value={subscriberCreatedFrom} max={subscriberCreatedTo || undefined} onChange={(event) => setSubscriberCreatedFrom(event.target.value)} /></label><label><span>To</span><input type="date" aria-label="Created to date" value={subscriberCreatedTo} min={subscriberCreatedFrom || undefined} onChange={(event) => setSubscriberCreatedTo(event.target.value)} /></label></fieldset></section>}</div>}{entity === 'customers' && <div className="subscriber-sort-control"><button className="outline-button subscriber-sort-trigger" type="button" aria-haspopup="menu" aria-expanded={subscriberSortMenuOpen} onClick={() => { setSubscriberFilterMenuOpen(false); setSubscriberSortMenuOpen((open) => !open) }}><ArrowUpDown size={15} /> Sort: {subscriberSortOptions.find((option) => option.value === subscriberSort)?.label}</button>{subscriberSortMenuOpen && <div className="subscriber-sort-menu" role="menu" aria-label="Sort subscribers">{subscriberSortOptions.map((option) => <button key={option.value} type="button" role="menuitemradio" aria-checked={subscriberSort === option.value} className={subscriberSort === option.value ? 'selected' : ''} onClick={() => { setSubscriberSort(option.value); setSubscriberSortMenuOpen(false) }}>{subscriberSort === option.value && <Check size={14} />}{option.label}</button>)}</div>}</div>}<input className="record-filter" value={recordFilter} onChange={(event) => setRecordFilter(event.target.value)} placeholder={`Filter ${labels[entity].toLowerCase()}...`} aria-label={`Filter ${labels[entity].toLowerCase()}`} /><button className="text-button" onClick={() => { void load().catch((reason) => setMessage(reason instanceof Error ? reason.message : 'Unable to refresh records.')) }}>Refresh</button></div></div>{message && entity !== 'customers' && <p className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}<div className="table-scroll"><table><thead><tr>{entity === 'customers' ? <><th>Subscriber</th><th>PPPoE / Wi-Fi login</th><th>Plan</th><th>Account status</th><th>Expires</th><th>Actions</th></> : <><th>Name / ID</th><th>Status</th><th>Details</th><th /></>}</tr></thead><tbody>{filteredRows.map((row) => {
@@ -2648,31 +2746,43 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
     const isExpired = Boolean(expiry && expiry.getTime() <= Date.now())
     const status = entity === 'customers' && row.status === 'active' && isExpired ? 'expired' : String(row.status || (row.active ? 'active' : 'inactive'))
     if (entity === 'customers') return <Fragment key={String(row.id)}><tr>
-      <td><strong>{String(row.name || 'Unnamed subscriber')}</strong>{row.isVip === true && <span className="subscriber-vip-badge">VIP</span>}<span>{String(row.email || 'No email address')}</span>{typeof row.phone === 'string' && row.phone.trim() ? <span>{row.phone}</span> : null}<span>Account no. {String(row.accountNumber || 'Unavailable')}</span>{typeof row.location === 'string' && row.location.trim() ? <span>{row.location}</span> : null}{typeof row.siteName === 'string' && row.siteName.trim() ? <span>Site: {row.siteName}</span> : null}<small className="subscriber-created">Added {typeof row.createdAt === 'string' ? new Date(row.createdAt).toLocaleDateString() : 'date unavailable'}</small></td>
-      <td><strong className="subscriber-login">{String(row.radiusUsername || 'No login')}</strong><span>RADIUS username</span></td>
-      <td><strong>{String(row.plan || 'No plan assigned')}</strong>{Number(row.monthlyRate) > 0 && <span>KSh {Number(row.monthlyRate).toLocaleString('en-KE')} / month</span>}</td>
-      <td><span className={`subscriber-status subscriber-status-${status.replace(/[^a-z0-9-]/g, '-')}`}>{status === 'active' ? 'Active' : status === 'suspended' ? 'Suspended' : status === 'expired' ? 'Expired' : status}</span></td>
-      <td>{expiry && Number.isFinite(expiry.getTime()) ? <><strong>{expiry.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span>{expiry.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit' })}</span></> : <span className="subscriber-no-expiry">No expiry set</span>}</td>
-      <td><div className="subscriber-actions">{row.radiusUsername ? <><button className="subscriber-details-toggle" type="button" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={() => void toggleSubscriberDetails(String(row.id))}>{detailsLoadingId === String(row.id) ? 'Loading…' : expandedDetailsId === String(row.id) ? 'Hide details' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={(event) => { subscriberDeleteTriggerRef.current = event.currentTarget; setSubscriberDeleteError(''); setSubscriberToDelete({ id: String(row.id), name: String(row.name || 'this subscriber') }) }}>Delete</button></> : <span>Login unavailable</span>}<button className="text-button subscriber-vip-action" type="button" aria-pressed={row.isVip === true} disabled={saving} onClick={() => void changeSubscriberVip(String(row.id), row.isVip !== true)}>{row.isVip === true ? 'Remove VIP' : 'Mark VIP'}</button><button className="text-button" type="button" disabled={!row.phone || sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(smsSubscriberId === String(row.id) ? '' : String(row.id)); setSmsDraft(''); setMessage(''); setMessageIsError(false) }}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send SMS'}</button></div>{smsSubscriberId === String(row.id) && <div className="subscriber-sms-compose"><label htmlFor={`subscriber-sms-${String(row.id)}`}>Message to {String(row.name || 'subscriber')}</label><textarea id={`subscriber-sms-${String(row.id)}`} value={smsDraft} onChange={(event) => setSmsDraft(event.target.value)} maxLength={500} rows={3} placeholder="Type your message..." /><span>{smsDraft.length}/500 characters</span><div><button className="text-button" type="button" disabled={!smsDraft.trim() || sendingSmsId === String(row.id)} onClick={() => void sendSubscriberSms(String(row.id))}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send message'}</button><button className="text-button" type="button" disabled={sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(''); setSmsDraft('') }}>Cancel</button></div></div>}</td>
-    </tr>{expandedDetailsId === String(row.id) && <tr className="subscriber-detail-row"><td colSpan={6}>{detailsLoadingId === String(row.id) ? <p className="subscriber-detail-loading" role="status">Loading secure subscriber details…</p> : detailsError ? <p className="subscriber-form-message is-error" role="alert">{detailsError}</p> : subscriberDetails && String(subscriberDetails.id) === String(row.id) ?
-      <SubscriberProfile
-        data={subscriberDetails}
-        onClose={() => { setExpandedDetailsId(''); setSubscriberDetails(null); setDetailsError(''); setShowSubscriberPassword(false) }}
-        onRefresh={() => refreshSubscriberDetails(String(row.id))}
-        onDelete={() => { subscriberDeleteTriggerRef.current = null; setSubscriberDeleteError(''); setSubscriberToDelete({ id: String(row.id), name: String(row.name || 'this subscriber') }) }}
-        onCopy={(kind, value) => void copySubscriberCredential(kind, value)}
-        copiedCredential={copiedCredential}
-        showPassword={showSubscriberPassword}
-        onTogglePassword={() => setShowSubscriberPassword((visible) => !visible)}
-      /> : null}</td></tr>}</Fragment>
+      <td data-label="Subscriber"><div className="subscriber-identity"><span className="subscriber-avatar" aria-hidden="true">{String(row.name || 'U').trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()}</span><div className="subscriber-identity-copy"><div className="subscriber-name-line"><strong>{String(row.name || 'Unnamed subscriber')}</strong>{row.isVip === true && <span className="subscriber-vip-badge">VIP</span>}</div>{typeof row.email === 'string' && row.email.trim() ? <button className="subscriber-contact subscriber-copy-value subscriber-copy-email" type="button" aria-label={copiedCredential === 'email' ? 'Email copied' : 'Copy email'} onClick={() => void copySubscriberContact('email', String(row.email).trim())}><span>{row.email}</span><Copy size={13} aria-hidden="true" />{copiedCredential === 'email' && <span className="subscriber-copy-feedback">Copied</span>}</button> : <span className="subscriber-contact">No email address</span>}{typeof row.phone === 'string' && row.phone.trim() ? <button className="subscriber-contact subscriber-copy-value subscriber-copy-phone" type="button" aria-label={copiedCredential === 'phone' ? 'Phone number copied' : 'Copy phone number'} onClick={() => void copySubscriberContact('phone', String(row.phone).trim())}><span>{row.phone}</span><Copy size={13} aria-hidden="true" />{copiedCredential === 'phone' && <span className="subscriber-copy-feedback">Copied</span>}</button> : null}</div></div><div className="subscriber-record-meta">{row.accountNumber !== null && row.accountNumber !== undefined && String(row.accountNumber).trim() ? <button className="subscriber-copy-meta" type="button" aria-label={copiedCredential === 'accountNumber' ? 'Account number copied' : 'Copy account number'} onClick={() => void copySubscriberContact('accountNumber', String(row.accountNumber))}><span>Account #{String(row.accountNumber)}</span><Copy size={12} aria-hidden="true" />{copiedCredential === 'accountNumber' && <span className="subscriber-copy-feedback">Copied</span>}</button> : <span>Account number unavailable</span>}{typeof row.siteName === 'string' && row.siteName.trim() ? <span>Site · {row.siteName}</span> : null}{typeof row.location === 'string' && row.location.trim() ? <span>Location · {row.location}</span> : null}</div><small className="subscriber-created">Added {typeof row.createdAt === 'string' ? new Date(row.createdAt).toLocaleDateString() : 'date unavailable'}</small></td>
+      <td data-label="PPPoE / Wi-Fi login"><strong className="subscriber-login">{String(row.radiusUsername || 'No login')}</strong><span>RADIUS username</span></td>
+      <td data-label="Plan"><strong className="subscriber-plan-value">{String(row.plan || 'No plan assigned')}</strong>{Number(row.monthlyRate) > 0 && <span>KSh {Number(row.monthlyRate).toLocaleString('en-KE')} / month</span>}</td>
+      <td data-label="Account status"><span className={`subscriber-status subscriber-status-${status.replace(/[^a-z0-9-]/g, '-')}`}>{status === 'active' ? 'Active' : status === 'suspended' ? 'Suspended' : status === 'expired' ? 'Expired' : status}</span></td>
+      <td data-label="Expires">{expiry && Number.isFinite(expiry.getTime()) ? <><strong className="subscriber-expiry-value">{expiry.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span>{expiry.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit' })}</span></> : <span className="subscriber-no-expiry">No expiry set</span>}</td>
+      <td data-label="Actions"><div className="subscriber-actions">{row.radiusUsername ? <><button className="subscriber-details-toggle" type="button" aria-haspopup="dialog" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={(event) => { subscriberDetailsTriggerRef.current = event.currentTarget; void toggleSubscriberDetails(String(row.id)) }}>{detailsLoadingId === String(row.id) ? 'Loading…' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={(event) => { subscriberDeleteTriggerRef.current = event.currentTarget; setSubscriberDeleteError(''); setSubscriberToDelete({ id: String(row.id), name: String(row.name || 'this subscriber') }) }}>Delete</button></> : <span>Login unavailable</span>}<button className="text-button subscriber-vip-action" type="button" aria-pressed={row.isVip === true} disabled={saving} onClick={() => void changeSubscriberVip(String(row.id), row.isVip !== true)}>{row.isVip === true ? 'Remove VIP' : 'Mark VIP'}</button><button className="text-button" type="button" disabled={!row.phone || sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(smsSubscriberId === String(row.id) ? '' : String(row.id)); setSmsDraft(''); setMessage(''); setMessageIsError(false) }}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send SMS'}</button></div>{smsSubscriberId === String(row.id) && <div className="subscriber-sms-compose"><label htmlFor={`subscriber-sms-${String(row.id)}`}>Message to {String(row.name || 'subscriber')}</label><textarea id={`subscriber-sms-${String(row.id)}`} value={smsDraft} onChange={(event) => setSmsDraft(event.target.value)} maxLength={500} rows={3} placeholder="Type your message..." /><span>{smsDraft.length}/500 characters</span><div><button className="text-button" type="button" disabled={!smsDraft.trim() || sendingSmsId === String(row.id)} onClick={() => void sendSubscriberSms(String(row.id))}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send message'}</button><button className="text-button" type="button" disabled={sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(''); setSmsDraft('') }}>Cancel</button></div></div>}</td>
+    </tr></Fragment>
     return <tr key={String(row.id)}><td><strong>{String(row.name || row.reference || row.id).slice(0, 34)}</strong></td><td><span className="table-status">{status}</span></td><td className="mono">{String(row.radiusUsername || row.location || row.email || row.monthlyPrice || row.amount || '')}</td><td><button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></td></tr>
-  })}{filteredRows.length === 0 && <tr><td colSpan={4}>{rows.length === 0 && entity === 'customers' ? 'No subscribers yet. Add your first subscriber to this workspace.' : 'No matching records.'}</td></tr>}</tbody></table></div></div>
+  })}{filteredRows.length === 0 && <tr className={entity === 'customers' ? 'subscriber-empty-row' : undefined}><td colSpan={4}>{rows.length === 0 && entity === 'customers' ? 'No subscribers yet. Add your first subscriber to this workspace.' : 'No matching records.'}</td></tr>}</tbody></table></div></div>
     {entity === 'customers' && subscriberToDelete && <div className="subscriber-delete-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) { setSubscriberToDelete(null); setSubscriberDeleteError(''); subscriberDeleteTriggerRef.current?.focus() } }}>
       <section className="subscriber-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="subscriber-delete-title" aria-describedby="subscriber-delete-description">
         <div className="subscriber-delete-heading"><span className="subscriber-delete-icon"><Trash2 size={18} /></span><div><h2 id="subscriber-delete-title">Delete subscriber?</h2><p id="subscriber-delete-description">Delete <strong>{subscriberToDelete.name}</strong> and remove their RADIUS login? Their active internet access will be revoked. This cannot be undone.</p></div></div>
         <p className="subscriber-delete-history-note">Subscribers with invoices cannot be deleted. Suspend the account instead to preserve billing history.</p>
         {subscriberDeleteError && <p className="subscriber-delete-error" role="alert">{subscriberDeleteError}</p>}
         <div className="subscriber-delete-actions"><button type="button" className="outline-button" disabled={saving} onClick={() => { setSubscriberToDelete(null); setSubscriberDeleteError(''); subscriberDeleteTriggerRef.current?.focus() }}>Cancel</button><button ref={subscriberDeleteConfirmRef} type="button" className="subscriber-delete-confirm" disabled={saving} onClick={() => void confirmDeleteSubscriber()}>{saving ? 'Deleting…' : 'Delete subscriber'}</button></div>
+      </section>
+    </div>}
+    {entity === 'customers' && expandedDetailsId && <div className="subscriber-details-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeSubscriberDetails() }}>
+      <section ref={subscriberDetailsDialogRef} className="subscriber-details-dialog" role="dialog" aria-modal="true" aria-label={`Subscriber details for ${String(rows.find((row) => String(row.id) === expandedDetailsId)?.name || 'subscriber')}`} tabIndex={-1}>
+        {detailsLoadingId === expandedDetailsId ? <p className="subscriber-detail-loading" role="status">Loading secure subscriber details…</p> : detailsError ? <div className="subscriber-details-error"><p className="subscriber-form-message is-error" role="alert">{detailsError}</p><button className="outline-button" type="button" onClick={closeSubscriberDetails}>Close</button></div> : subscriberDetails && String(subscriberDetails.id) === expandedDetailsId ?
+          <SubscriberProfile
+            data={subscriberDetails}
+            onClose={closeSubscriberDetails}
+            onRefresh={() => refreshSubscriberDetails(expandedDetailsId)}
+            onDelete={() => {
+              subscriberDeleteTriggerRef.current = null
+              setSubscriberDeleteError('')
+              setSubscriberToDelete({
+                id: expandedDetailsId,
+                name: String(rows.find((row) => String(row.id) === expandedDetailsId)?.name || 'this subscriber'),
+              })
+            }}
+            onCopy={(kind, value) => void copySubscriberCredential(kind, value)}
+            copiedCredential={copiedCredential}
+            showPassword={showSubscriberPassword}
+            onTogglePassword={() => setShowSubscriberPassword((visible) => !visible)}
+          /> : null}
       </section>
     </div>}
   </section>

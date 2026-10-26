@@ -7,6 +7,17 @@ function encryptionKey() {
   return key
 }
 
+export function getTenantSecretConfigurationError(error: unknown): string | null {
+  if (!(error instanceof Error)) return null
+  if (error.message.includes('TENANT_SECRETS_ENCRYPTION_KEY')) {
+    return 'Set TENANT_SECRETS_ENCRYPTION_KEY to the same stable 32-byte key used to encrypt this workspace data.'
+  }
+  if (error.message.toLowerCase().includes('unable to authenticate data')) {
+    return 'The configured TENANT_SECRETS_ENCRYPTION_KEY does not match the key used to encrypt this workspace data.'
+  }
+  return null
+}
+
 export function encryptTenantSecret(value: string) {
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv)
@@ -20,4 +31,14 @@ export function decryptTenantSecret(value: string) {
   const decipher = createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(ivEncoded, 'base64'))
   decipher.setAuthTag(Buffer.from(tagEncoded, 'base64'))
   return Buffer.concat([decipher.update(Buffer.from(dataEncoded, 'base64')), decipher.final()]).toString('utf8')
+}
+
+export function tryDecryptTenantSecret(value: string): { value: string; error: null } | { value: null; error: string } {
+  try {
+    return { value: decryptTenantSecret(value), error: null }
+  } catch (error) {
+    const configurationError = getTenantSecretConfigurationError(error)
+    if (configurationError) return { value: null, error: configurationError }
+    throw error
+  }
 }

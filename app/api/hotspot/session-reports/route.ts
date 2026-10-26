@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { getTenantSession } from '@/lib/db/tenant'
 import { tenantSessionUserFilter } from '@/lib/hotspot-session-tenant-filter'
 import { parseRouterTimestamp } from '@/lib/router-monitoring'
+import { radiusAccountingFreshnessPredicate } from '@/lib/radius-accounting'
 
 type ReportStatus = 'online' | 'offline' | 'expired'
 
@@ -133,7 +134,9 @@ export async function GET(request: NextRequest) {
         select
           session_records.*,
           case
-            when ended_at is null then 'online'
+            when ended_at is null
+              and ${radiusAccountingFreshnessPredicate(sql`last_activity_at`, sql`started_at`)} then 'online'
+            when ended_at is null then 'offline'
             when lower(coalesce(terminate_cause, '')) in ('session-timeout', 'idle-timeout')
               or (expires_at is not null and expires_at <= ended_at) then 'expired'
             else 'offline'
@@ -141,7 +144,15 @@ export async function GET(request: NextRequest) {
           coalesce(
             session_seconds,
             case when started_at is not null
-              then greatest(0, extract(epoch from (coalesce(ended_at, now()) - started_at))::bigint)
+              then greatest(0, extract(epoch from (
+                coalesce(
+                  ended_at,
+                  case when ${radiusAccountingFreshnessPredicate(sql`last_activity_at`, sql`started_at`)}
+                    then now()
+                    else coalesce(last_activity_at, started_at)
+                  end
+                ) - started_at
+              ))::bigint)
               else null
             end
           ) as duration_seconds

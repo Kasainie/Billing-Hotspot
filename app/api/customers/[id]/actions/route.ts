@@ -5,7 +5,9 @@ import { db } from '@/lib/db'
 import { customers, invoices, radcheck, subscriberCredits, subscriberEvents, supportTickets } from '@/lib/db/schema'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { sendSubscriberSms } from '@/lib/db/tenant-sms'
+import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
 import { toFreeRadiusExpiration } from '@/lib/hotspot-products'
+import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -38,20 +40,21 @@ export async function POST(request: NextRequest, context: RouteContext<'/api/cus
     if (action === 'profile') {
       const name = typeof input.name === 'string' ? input.name.trim() : ''
       const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : ''
-      const phone = typeof input.phone === 'string' ? input.phone.trim() : ''
+      const phoneInput = typeof input.phone === 'string' ? input.phone.trim() : ''
+      const phone = phoneInput ? normalizeKenyanPhoneInput(phoneInput) : null
       if (!name || name.length > 120) return responseError('Enter a name up to 120 characters.')
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return responseError('Enter a valid email address.')
-      if (phone.length > 32 || (phone && !/^\+?[0-9 ()-]{7,31}$/.test(phone))) return responseError('Enter a valid phone number.')
+      if (phoneInput && !phone) return responseError('Enter a phone number starting with 07 followed by 8 digits or +254 followed by 9 digits.')
       const [updated] = await db.transaction(async (tx) => {
         const [customer] = await tx.select({ id: customers.id }).from(customers)
           .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId))).for('update').limit(1)
         if (!customer) return [null]
-        const [row] = await tx.update(customers).set({ name, email, phone: phone || null })
+        const [row] = await tx.update(customers).set({ name, email, phone })
           .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId))).returning()
         await tx.insert(subscriberEvents).values({
           tenantId, customerId: id, eventType: 'profile_updated',
           description: 'Subscriber contact information updated.',
-          metadata: { name, email, phone: phone || null }, createdBy: actorId,
+          metadata: { name, email, phone }, createdBy: actorId,
         })
         return [row]
       })
@@ -211,7 +214,7 @@ export async function POST(request: NextRequest, context: RouteContext<'/api/cus
       const amount = Number(input.amount)
       if (!Number.isSafeInteger(amount) || amount < 1 || amount > 10_000_000) return responseError('Enter a credit amount from 1 to 10,000,000.')
       const result = await db.transaction(async (tx) => {
-        const [customer] = await tx.select({ id: customers.id }).from(customers).where(and(
+        const [customer] = await tx.select({ id: customers.id, name: customers.name, phone: customers.phone }).from(customers).where(and(
           eq(customers.id, id), eq(customers.tenantId, tenantId),
         )).for('update').limit(1)
         if (!customer) return { error: 'Subscriber not found.', status: 404 }
@@ -229,9 +232,25 @@ export async function POST(request: NextRequest, context: RouteContext<'/api/cus
           description: `Account credit of KSh ${amount.toLocaleString('en-KE')} added: ${reason}`,
           metadata: { amount, reason, creditId: entry.id }, createdBy: actorId,
         })
-        return { creditId: entry.id }
+        const [balance] = await tx.select({
+          amount: sql<number>`coalesce(sum(case when ${subscriberCredits.type} = 'credit' then ${subscriberCredits.amount} else -${subscriberCredits.amount} end), 0)::int`,
+        }).from(subscriberCredits).where(and(
+          eq(subscriberCredits.tenantId, tenantId),
+          eq(subscriberCredits.customerId, id),
+        ))
+        return { creditId: entry.id, name: customer.name, phone: customer.phone, balance: Number(balance?.amount || 0) }
       })
       if ('error' in result) return responseError(result.error || 'Unable to add account credit.', result.status || 400)
+      if (!('duplicate' in result) && result.phone) {
+        await enqueueTenantTemplateSms(
+          tenantId,
+          `pppoe-credit:${result.creditId}`,
+          result.phone,
+          'pppoeCreditApplied',
+          { name: result.name, amount, balance: result.balance },
+          { customerId: id },
+        )
+      }
       return NextResponse.json(result, { status: 'duplicate' in result ? 200 : 201 })
     }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantSession, type TenantSession } from '@/lib/db/tenant'
 import { getPlatformAdminEmails, isPlatformAdminEmail } from '@/lib/platform-admin-access'
+import { requirePasswordConfirmation } from '@/lib/db/password-confirmation'
 
 export { getPlatformAdminEmails, isPlatformAdminEmail } from '@/lib/platform-admin-access'
 
@@ -20,5 +21,7 @@ export async function requirePlatformAdmin(request: NextRequest): Promise<
     return { response: NextResponse.json({ error: 'Platform administrator access is required.' }, { status: 403 }) }
   }
 
+  const confirmationResponse = await requirePasswordConfirmation(request, session.userId)
+  if (confirmationResponse) return { response: confirmationResponse }
   return { session }
 }

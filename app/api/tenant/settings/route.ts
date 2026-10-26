@@ -38,6 +38,11 @@ export async function GET(request: NextRequest) {
       : {}
     for (const section of tenantSettingSectionById.values()) {
       const values = { ...(settings[section.id] || {}) }
+      if (section.id === 'templates') {
+        for (const legacyKey of ['welcome', 'paymentReceipt', 'expiryReminder', 'suspensionNotice']) {
+          delete values[legacyKey]
+        }
+      }
       for (const field of section.fields) {
         if (field.secret) values[field.key] = ''
       }
@@ -103,8 +108,17 @@ export async function PUT(request: NextRequest) {
       if (!Number.isFinite(number) || number < 0 || !Number.isSafeInteger(number)) {
         return NextResponse.json({ error: `${field.label} must be a non-negative whole number.` }, { status: 400 })
       }
+      if (section.id === 'templates' && field.key === 'preExpiryDays' && (number < 1 || number > 30)) {
+        return NextResponse.json({ error: 'Pre-expiry reminder lead time must be between 1 and 30 days.' }, { status: 400 })
+      }
+      if (section.id === 'templates' && field.key === 'bundleWarningThreshold' && (number < 1 || number > 99)) {
+        return NextResponse.json({ error: 'Bundle warning threshold must be between 1 and 99 percent.' }, { status: 400 })
+      }
       updates[field.key] = number
       continue
+    }
+    if (section.id === 'templates' && (field.key === 'preExpiryDays' || field.key === 'bundleWarningThreshold')) {
+      return NextResponse.json({ error: `${field.label} is required.` }, { status: 400 })
     }
     if (field.type === 'select' && field.options && !field.options.some((option) => option.value === normalized)) {
       return NextResponse.json({ error: `Choose a valid ${field.label.toLowerCase()}.` }, { status: 400 })

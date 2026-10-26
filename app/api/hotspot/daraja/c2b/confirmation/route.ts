@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { mobileMoneyTransactions } from '@/lib/db/schema'
-import { enqueueTenantSms } from '@/lib/db/tenant-sms'
+import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
 import { resolvePublicTenantId } from '@/lib/db/tenant'
 import { authorizeC2bCallback, parseC2bTransaction } from '@/lib/mobile-money-callback'
 import { reconcilePppoeMobileMoney } from '@/lib/pppoe-reconciliation'
@@ -61,11 +61,20 @@ export async function POST(request: NextRequest) {
       return result.matched ? result : null
     })
     if (notification?.matched && notification.phone && notification.expiresAt) {
-      await enqueueTenantSms(
+      await enqueueTenantTemplateSms(
         tenantId,
         `paybill-payment:${notification.transactionId}`,
         notification.phone,
-        `Hello ${notification.name}, KES ${notification.amount} received for your ${notification.plan} plan. Your account ${notification.username} is active until ${notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}. M-Pesa receipt: ${notification.transactionId}.`,
+        'pppoePaymentReceipt',
+        {
+          name: notification.name,
+          amount: notification.amount,
+          plan: notification.plan,
+          reference: notification.transactionId,
+          username: notification.username,
+          expiry: notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+        },
+        { customerId: notification.customerId },
       )
     }
     return NextResponse.json({ ResultCode: '0', ResultDesc: 'Payment received.' })

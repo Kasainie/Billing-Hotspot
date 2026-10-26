@@ -28,7 +28,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     if ('error' in result) return NextResponse.json({ error: result.error }, { status: result.httpStatus })
     return NextResponse.json({
       status: result.status,
-      message: result.status === 'sent' ? 'SMS sent successfully.' : 'SMS queued for delivery. Check SMS settings for delivery status.',
+      message: result.status === 'sent' ? 'SMS sent successfully.' : 'SMS queued for delivery. Check Communications for delivery status.',
     }, { status: result.status === 'sent' ? 200 : 202 })
   } catch (error) {
     console.error('Failed to send subscriber SMS', { tenantId: session.tenantId, customerId: id, error })

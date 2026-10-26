@@ -1,12 +1,12 @@
 import { randomBytes } from 'node:crypto'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, ne, sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { normalizeKenyanPhone, verifyStkTransaction } from '@/lib/daraja'
 import { db } from '@/lib/db'
 import { customers, hotspotPurchases, payments, pppoeAccounts, pppoePayments, radcheck, radreply } from '@/lib/db/schema'
 import { toFreeRadiusExpiration, toHotspotRadiusReplies } from '@/lib/hotspot-products'
 import { getTenantDarajaConfiguration } from '@/lib/db/tenant-payments'
-import { enqueueTenantSms } from '@/lib/db/tenant-sms'
+import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
 
 type DarajaCallback = {
   Body?: { stkCallback?: {
@@ -196,6 +196,7 @@ async function processPppoePayment(callback: DarajaCallback, checkoutRequestId: 
     return {
       tenantId: lockedPayment.tenantId,
       paymentId: lockedPayment.id,
+      customerId,
       name: customer?.name || lockedAccount.name,
       phone: customer?.phone || lockedAccount.phone,
       amount: lockedPayment.amount,
@@ -208,12 +209,21 @@ async function processPppoePayment(callback: DarajaCallback, checkoutRequestId: 
   })
 
   if (notification) {
-    const passwordText = notification.password ? ` Password: ${notification.password}.` : ''
-    await enqueueTenantSms(
+    await enqueueTenantTemplateSms(
       notification.tenantId,
       `pppoe-payment:${notification.paymentId}`,
       notification.phone,
-      `Hello ${notification.name}, KES ${notification.amount} received for ${notification.plan}. Receipt ${notification.receipt}. Your account ${notification.username}${passwordText} is active until ${notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}.`,
+      'pppoePaymentReceipt',
+      {
+        name: notification.name,
+        amount: notification.amount,
+        plan: notification.plan,
+        reference: notification.receipt,
+        username: notification.username,
+        password: notification.password,
+        expiry: notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+      },
+      { customerId: notification.customerId },
     )
   }
   return NextResponse.json({ ResultCode: 0, ResultDesc: 'Accepted' })
@@ -281,6 +291,13 @@ export async function POST(request: NextRequest) {
         .limit(1)
       if (!lockedPurchase) return null
 
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockedPurchase.tenantId + ':' + (lockedPurchase.phone || '')}, 0))`)
+      const [previousPurchase] = await tx.select({ id: hotspotPurchases.id }).from(hotspotPurchases).where(and(
+        eq(hotspotPurchases.tenantId, lockedPurchase.tenantId),
+        eq(hotspotPurchases.phone, lockedPurchase.phone || ''),
+        eq(hotspotPurchases.status, 'completed'),
+        ne(hotspotPurchases.id, lockedPurchase.id),
+      )).limit(1)
       const packagePolicy = lockedPurchase.packageSnapshot
       const paidAt = new Date()
       const expiresAt = new Date(paidAt.getTime() + lockedPurchase.durationSeconds * 1000)
@@ -328,15 +345,25 @@ export async function POST(request: NextRequest) {
         username: radiusUsername,
         password: radiusPassword,
         expiresAt,
+        firstPurchase: !previousPurchase,
       }
     })
 
     if (notification) {
-      await enqueueTenantSms(
+      await enqueueTenantTemplateSms(
         notification.tenantId,
         `hotspot-payment:${notification.purchaseId}`,
         notification.phone,
-        `Your payment of KES ${notification.amount} for ${notification.productName} was received. Receipt ${notification.receipt}. Wi-Fi username: ${notification.username}; password: ${notification.password}. Access expires ${notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}.`,
+        'hotspotPaymentReceipt',
+        {
+          amount: notification.amount,
+          plan: notification.productName,
+          reference: notification.receipt,
+          username: notification.username,
+          password: notification.password,
+          expiry: notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+        },
+        { firstPurchase: notification.firstPurchase },
       )
     }
     return NextResponse.json({ ResultCode: 0, ResultDesc: 'Accepted' })

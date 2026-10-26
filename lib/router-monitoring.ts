@@ -7,17 +7,19 @@ export function hashRouterMonitorToken(token: string) {
 }
 
 export function getRouterWebConsoleUrl({
+  online,
   webEnabled,
   webScheme,
   webPort,
   wireguardIp,
 }: {
+  online: boolean
   webEnabled: boolean | null
   webScheme: 'http' | 'https' | null
   webPort: number | null
   wireguardIp: string | null
 }) {
-  if (webEnabled !== true || !webScheme || !wireguardIp) return null
+  if (!online || webEnabled !== true || !webScheme || !wireguardIp) return null
   const octets = wireguardIp.split('.')
   if (octets.length !== 4 ||
       octets.some((octet) => !/^\d{1,3}$/.test(octet) || Number(octet) > 255 || String(Number(octet)) !== octet)) return null

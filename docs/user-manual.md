@@ -131,13 +131,18 @@ Shows workspace activity and summary information. Use the report-format selector
 
 - **Billing → Payments:** Review payment records.
 - **Billing → Payment settings:** Configure Daraja credentials for this workspace.
-- **Billing → SMS settings:** Configure Africa's Talking and view message delivery.
+- **Communications:** Configure SMS, WhatsApp, and Email channels and review the SMS outbox.
+- **Settings → Message templates:** Edit and enable customer SMS for PPPoE and Hotspot events.
 - **Billing → Invoices / Expenses:** Review invoice and expense records.
 - **Vouchers → List / Generate / Analytics:** Manage prepaid access vouchers.
 
 ### Settings, search, and account menu
 
-The profile menu provides account, settings, audit-log, and sign-out actions as available to your role. Settings include branding, workspace domain/slug, Hotspot and PPPoE defaults, provider setup, and account/security controls. Use dashboard search to locate pages and workspace records.
+The profile menu provides account, settings, Staff, and sign-out actions as available to your role. Settings include branding, workspace domain/slug, Hotspot and PPPoE defaults, provider setup, and account/security controls. Use dashboard search to locate pages and workspace records.
+
+### Staff
+
+Open **Staff** from the profile menu to manage current-workspace access. Workspace owners and admins can view members and add or remove eligible staff. New staff must first create an LKTECH account and verify its email; the owner or admin can then add that account by email. Admins can manage member-role accounts, while only owners can grant, change, or remove Admin and Owner roles. Sensitive changes require the acting user's account password. The current user cannot remove their own access, and the workspace must always retain an owner.
 
 Changing a workspace slug affects customer-facing portal links. Update links or router configuration that rely on the old slug and test the portal after saving.
 
@@ -278,15 +283,23 @@ Where expiry tracking is enabled, a voucher's duration starts at its first recor
 
 Treat voucher usernames/passwords like cash: limit access, avoid public posting, and use the correct tenant/workspace when generating batches.
 
-## 10. Configure SMS and review delivery
+## 10. Communicate with customers
 
-Open **Billing → SMS settings** and configure the workspace's Africa's Talking environment, application username, API key, and optional approved sender ID. Credentials and queued message contents are encrypted server-side. Use the test-message control with a number you control before enabling customer messaging.
+Configure the Africa's Talking environment, application username, API key, and optional approved sender ID under **Settings → Communications**. Credentials and queued message contents are encrypted server-side. Open **Communications → SMS** to operate the outbox, review delivery reports, and send a test message to a number you control before enabling customer messaging. The standalone Communications workspace also contains WhatsApp and Email status tabs.
 
-The SMS panel shows queued, provider-accepted, delivered, and failed statuses when the required delivery-report setup is in place. A provider accepting a message is not the same as the handset confirming delivery. Review the delivery report and any failure detail before resending.
+The SMS outbox supports a manual message to one Kenyan mobile number, status filtering, recipient/message search, and resending failed messages. It also shows queued, provider-accepted, delivered, and failed statuses when the required delivery-report setup is in place. A provider accepting a message is not the same as the handset confirming delivery. Review the delivery report and any failure detail before resending. Provider charges are set by Africa's Talking; the dashboard does not estimate account balance or spend.
 
-Automatic queue processing and delivery callbacks depend on deployment configuration, required database migrations, cron scheduling, and server secrets. If the message queue does not progress, ask the platform administrator to verify these services. Use the resend control for an individual failed message only after checking the recipient number and provider status; a resend may result in a second message.
+The WhatsApp and Email tabs are informational only. Their delivery integrations are not enabled, and the tabs do not collect or save provider credentials.
+
+Automatic SMS queue processing and delivery callbacks depend on deployment configuration, required database migrations, cron scheduling, and server secrets. If the message queue does not progress, ask the platform administrator to verify these services. Use the resend control for an individual failed message only after checking the recipient number and provider status; a resend may result in a second message.
 
 SMS can incur provider charges. Obtain the necessary customer consent and follow local messaging requirements.
+
+### Customize automated messages
+
+Open **Settings → Message templates** to set the customer help contact once for all messages, then enable or disable each PPPoE/Hotspot welcome, payment, voucher, credit, expiry, reminder, and bundle-warning message. Default templates include `{{supportContact}}`; the legacy `{{supportPhone}}` placeholder also uses this contact. When the field is blank, the Branding support phone is used. Edit message text, insert supported placeholders, or reset a message to its default. Save the section to apply changes to new notifications.
+
+The default pre-expiry reminder lead time is three days and the default bundle warning threshold is 50% of the configured data limit; both can be changed in this section. These checks run with the scheduled customer-expiry job. Bundle warnings require RADIUS accounting data and a plan with data/FUP limits. Hotspot voucher delivery can be requested during voucher generation by selecting SMS and entering one recipient phone number; only one voucher can be sent per request.
 
 ## 11. Manage routers and live sessions
 
@@ -332,6 +345,8 @@ Some desktop installers are unsigned and may trigger a Windows SmartScreen warni
 The deployment encrypts workspace provider credentials when `TENANT_SECRETS_ENCRYPTION_KEY` is configured. This is a server-side deployment secret; workspace owners should not change it. Replacing it without migrating encrypted data can make existing credentials unreadable.
 
 ## 14. Troubleshooting guide
+
+For a short, symptom-based checklist, see the [Quick Troubleshooting Guide](./troubleshooting.md). The checks below provide more detail for network and service administrators.
 
 ### Customer sees "Signing you in now..." repeatedly
 
@@ -449,7 +464,7 @@ This section is for the person hosting and maintaining LKTECH, not everyday ISP 
 - Signup verification and password-reset mail depend on the configured email provider.
 - Daraja, SMS, gateway, router-monitoring, router-connector, voucher-expiry, and advanced settings each have specific prerequisites. Consult the detailed documentation before enabling them.
 - The optional SMS queue requires a scheduled job and callback configuration. Router monitoring and the router API connector are separate systems.
-- Settings for SMTP, WhatsApp, AI, accounting, loyalty, operator alerts, developer webhooks, and message templates may be saved as preferences without an active external integration. Do not promise that saved preference fields send messages or trigger automation unless the integration is implemented and verified.
+- Message-template settings are connected to the listed SMS events and require configured Africa's Talking credentials and scheduled queue processing. Settings for SMTP, WhatsApp, AI, accounting, loyalty, operator alerts, and developer webhooks may still be saved as preferences without an active external integration.
 - Custom workspace domains require DNS and TLS configuration at the hosting provider; changing a workspace slug alone does not create a custom domain.
 - Backups, retention, monitoring, incident response, and production deployment are responsibilities of the platform operator. ISP workspace users should contact their platform administrator rather than applying production migrations themselves.
 
@@ -474,6 +489,7 @@ This section is for the person hosting and maintaining LKTECH, not everyday ISP 
 - [Hotspot M-Pesa Checkout](./hotspot-mpesa-setup.md)
 - [PPPoE M-Pesa Signup](./pppoe-mpesa-setup.md)
 - [Workspace payment gateways](./payment-gateways.md)
+- [Quick Troubleshooting Guide](./troubleshooting.md)
 - [LKTECH desktop and Android apps](./standalone-apps.md)
 - [Application README](../README.md)
 

@@ -1,6 +1,7 @@
 import { and, count, eq, gt, inArray } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
-import { initiateStkPush, normalizeKenyanPhone } from '@/lib/daraja'
+import { initiateStkPush } from '@/lib/daraja'
+import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 import { db } from '@/lib/db'
 import { packages, pppoeAccounts, pppoePayments, tenants } from '@/lib/db/schema'
 import { resolvePublicTenantId } from '@/lib/db/tenant'
@@ -22,13 +23,13 @@ export async function POST(request: NextRequest) {
 
   const name = typeof input.name === 'string' ? input.name.trim() : ''
   const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : ''
-  const phone = typeof input.phone === 'string' ? normalizeKenyanPhone(input.phone) : null
+  const phone = typeof input.phone === 'string' ? normalizeKenyanPhoneInput(input.phone) : null
   const packageId = typeof input.packageId === 'string' ? input.packageId : ''
   const requestedProvider = input.provider ?? 'daraja'
   const provider = requestedProvider === 'daraja' || isPaymentGatewayProvider(requestedProvider) ? requestedProvider as PaymentGatewayProvider | 'daraja' : null
   if (name.length < 2 || name.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || !phone ||
       !provider || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(packageId)) {
-    return NextResponse.json({ error: 'Enter valid customer details, a payment method, and a PPPoE package.' }, { status: 400 })
+    return NextResponse.json({ error: 'Enter valid customer details, a phone number starting with 07 followed by 8 digits or +254 followed by 9 digits, a payment method, and a PPPoE package.' }, { status: 400 })
   }
   if (provider === 'airtel-money') return NextResponse.json({ error: 'Airtel Money checkout is not available yet.' }, { status: 400 })
 

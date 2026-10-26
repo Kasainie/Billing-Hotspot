@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { radcheck } from '@/lib/db/schema'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { tenantSessionUserFilter } from '@/lib/hotspot-session-tenant-filter'
+import { radiusAccountingFreshnessPredicate } from '@/lib/radius-accounting'
 
 export async function POST(request: NextRequest) {
   const access = await requireTenantAdmin(request)
@@ -29,6 +30,7 @@ export async function POST(request: NextRequest) {
       from public.radacct as accounting
       where accounting.username = ${username}
         and accounting.acctstoptime is null
+        and ${radiusAccountingFreshnessPredicate(sql`accounting.acctupdatetime`, sql`accounting.acctstarttime`)}
         and ${tenantSessionUserFilter(tenantId)}
       limit 1
     `)

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { BrandWordmark } from '@/components/brand-wordmark'
+import { formatKenyanPhoneInput, KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
 
 type PortalPackage = {
   id: string
@@ -47,7 +48,7 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
     setTenantQuery(params.get('tenant') ? `?${new URLSearchParams({ tenant: params.get('tenant')! })}` : '')
     setProductId(params.get('package') || '')
     setClientMac(params.get('mac') || '')
-    setPhone(params.get('phone') || '')
+    setPhone(formatKenyanPhoneInput(params.get('phone')))
     setReceipt(params.get('receipt') || '')
     const pendingPayment = params.get('payment')
     if (pendingPayment && /^[0-9a-f-]{36}$/i.test(pendingPayment)) {
@@ -204,7 +205,7 @@ export function HotspotCheckout({ mode = 'purchase' }: { mode?: 'purchase' | 're
           {mode === 'purchase' && paymentMethodsLoaded && paymentMethods.length === 0 && !catalogError && <p className="checkout-message" role="status">No online payment methods are enabled for this workspace yet.</p>}
           {mode === 'purchase' && !selectedProduct && !catalogError && <p className="checkout-message" role="status">Return to the hotspot page and choose an available package.</p>}
           <form className="checkout-form" onSubmit={mode === 'purchase' ? startPayment : findByReceipt}>
-            <label>Mobile phone number<input type="tel" inputMode="tel" autoComplete="tel" placeholder="07XX XXX XXX" value={phone} onChange={(event) => setPhone(event.target.value)} required disabled={status === 'pending'} /></label>
+            <label>Mobile phone number<input type="tel" inputMode="tel" pattern={KENYAN_MOBILE_PHONE_PATTERN} title="Enter 07 followed by 8 digits or +254 followed by 9 digits." autoComplete="tel" maxLength={13} placeholder="0712345678 or +254712345678" value={phone} onChange={(event) => setPhone(event.target.value)} required disabled={status === 'pending'} /></label>
             {mode === 'purchase' && <label>Payment method
               <select value={paymentProvider} onChange={(event) => setPaymentProvider(event.target.value)} disabled={status === 'pending' || paymentMethods.length === 0} required>
                 {paymentMethods.map((method) => <option key={method.provider} value={method.provider}>{method.name}</option>)}

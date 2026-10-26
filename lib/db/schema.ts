@@ -136,6 +136,7 @@ export const tenantWorkspaceSettings = pgTable('tenant_workspace_settings', {
 export const smsMessages = pgTable('sms_messages', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id'),
   eventKey: text('event_key').notNull(),
   recipient: text('recipient').notNull(),
   messageEncrypted: text('message_encrypted').notNull(),
@@ -154,6 +155,7 @@ export const smsMessages = pgTable('sms_messages', {
 }, (table) => [
   uniqueIndex('sms_messages_tenant_event_unique_idx').on(table.tenantId, table.eventKey),
   index('sms_messages_queued_next_attempt_idx').on(table.status, table.nextAttemptAt),
+  index('sms_messages_tenant_customer_created_idx').on(table.tenantId, table.customerId, table.createdAt),
 ])
 
 export const mobileMoneyTransactions = pgTable('mobile_money_transactions', {

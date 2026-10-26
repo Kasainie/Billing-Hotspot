@@ -10,6 +10,7 @@ import {
   type SubscriberUsageRate,
 } from '@/lib/subscriber-usage'
 import { exportSubscriberUsagePdf } from '@/lib/report-export'
+import { formatKenyanPhoneInput, KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
 
 export type SubscriberProfileData = {
   id: string
@@ -74,6 +75,18 @@ export type SubscriberProfileData = {
   }>
   activity: Array<{ day: string; sessionCount: number; bytesIn: string; bytesOut: string }>
   events: Array<{ id: string; eventType: string; description: string; metadata: Record<string, unknown>; createdAt: string }>
+  smsMessages: Array<{
+    id: string
+    status: string
+    deliveryStatus: string
+    recipient: string
+    message: string | null
+    messageError: string | null
+    lastError: string | null
+    createdAt: string
+    sentAt: string | null
+    deliveryReportedAt: string | null
+  }>
   tickets: Array<{ id: string; subject: string; description: string; status: string; priority: string; createdAt: string; updatedAt: string }>
   packageHistory: Array<{ id: string; productName: string; amount: number; status: string; receipt: string | null; createdAt: string; paidAt: string | null }>
   analytics: {
@@ -109,6 +122,14 @@ function formatDuration(seconds: number | null) {
   const hours = Math.floor((duration % 86400) / 3600)
   const minutes = Math.floor((duration % 3600) / 60)
   return [days ? `${days}d` : '', hours ? `${hours}h` : '', `${minutes}m`].filter(Boolean).join(' ')
+}
+
+function getSmsStatus(message: SubscriberProfileData['smsMessages'][number]) {
+  if (message.status === 'failed' || message.deliveryStatus === 'failed') return 'Failed'
+  if (message.deliveryStatus === 'delivered') return 'Delivered'
+  if (message.status === 'sent') return 'Sent'
+  if (message.status === 'sending') return 'Sending'
+  return 'Queued'
 }
 
 type SubscriberLiveData = {
@@ -536,7 +557,7 @@ export function SubscriberProfile({
   const [actionError, setActionError] = useState(false)
   const [profileName, setProfileName] = useState(data.name)
   const [profileEmail, setProfileEmail] = useState(data.email)
-  const [profilePhone, setProfilePhone] = useState(data.phone || '')
+  const [profilePhone, setProfilePhone] = useState(() => formatKenyanPhoneInput(data.phone))
   const [expiryInput, setExpiryInput] = useState(() => {
     const date = data.expiresAt ? new Date(data.expiresAt) : new Date()
     if (!Number.isFinite(date.getTime())) return ''
@@ -580,7 +601,7 @@ export function SubscriberProfile({
     total + BigInt(entry.bytesIn || '0') + BigInt(entry.bytesOut || '0'), BigInt(0))
   const yearActivityBytes = data.activity.reduce((total, entry) =>
     total + BigInt(entry.bytesIn || '0') + BigInt(entry.bytesOut || '0'), BigInt(0))
-  const recentCommunications = eventItems.filter((entry) => entry.eventType === 'sms').slice(0, 3)
+  const recentCommunications = data.smsMessages.slice(0, 3)
 
   const handleLiveDataChange = useCallback((value: SubscriberLiveData, rate?: SubscriberUsageRate | null) => {
     setLiveData(value)
@@ -896,7 +917,7 @@ export function SubscriberProfile({
       <nav className="subscriber-profile-tabs" aria-label="Subscriber profile sections">
         {(['Overview', 'Reports', 'Sessions', 'Payments', 'Package history', 'SMS', 'Tickets', 'Notes'] as const).map((item) => (
           <button key={item} type="button" className={tab === item ? 'selected' : ''} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)}>
-            {item}{item === 'Sessions' ? <span>{data.sessionSummary.sessionCount}</span> : item === 'Payments' ? <span>{data.billing.payments.length}</span> : item === 'Package history' ? <span>{data.packageHistory.length}</span> : item === 'SMS' ? <span>{eventItems.filter((entry) => entry.eventType === 'sms').length}</span> : item === 'Tickets' ? <span>{data.tickets.length}</span> : item === 'Notes' ? <span>{eventItems.filter((entry) => entry.eventType === 'note').length}</span> : null}
+            {item}{item === 'Sessions' ? <span>{data.sessionSummary.sessionCount}</span> : item === 'Payments' ? <span>{data.billing.payments.length}</span> : item === 'Package history' ? <span>{data.packageHistory.length}</span> : item === 'SMS' ? <span>{data.smsMessages.length}</span> : item === 'Tickets' ? <span>{data.tickets.length}</span> : item === 'Notes' ? <span>{eventItems.filter((entry) => entry.eventType === 'note').length}</span> : null}
           </button>
         ))}
       </nav>
@@ -973,7 +994,10 @@ export function SubscriberProfile({
             </section>
             <section className="subscriber-profile-panel">
               <div className="subscriber-profile-section-heading"><div><h4><MessageCircle size={16} /> Communications</h4><p>Recent messages sent to this subscriber</p></div><button type="button" className="outline-button" onClick={() => setTab('SMS')}>View all</button></div>
-              {recentCommunications.length ? <div className="subscriber-profile-communications">{recentCommunications.map((entry) => <article key={entry.id}><div><strong>Sent</strong><time>{formatDate(entry.createdAt, { dateStyle: 'medium' })}</time></div><p>{entry.description}</p></article>)}</div> : <p className="subscriber-profile-empty">No communications recorded.</p>}
+              {recentCommunications.length ? <div className="subscriber-profile-communications">{recentCommunications.map((entry) => {
+                const status = getSmsStatus(entry)
+                return <article key={entry.id}><div><strong className={`sms-status-badge ${status === 'Failed' ? 'sms-status-failed' : status === 'Delivered' ? 'sms-status-delivered' : status === 'Sent' ? 'sms-status-sent-to-provider' : 'sms-status-queued'}`}>{status}</strong><time>{formatDate(entry.sentAt || entry.createdAt, { dateStyle: 'medium' })}</time></div><p>{entry.message ?? 'Message text unavailable because the encryption key differs from the key used when this message was stored.'}</p>{entry.messageError && <small className="sms-delivery-error">{entry.messageError}</small>}{entry.lastError && status === 'Failed' && <small className="sms-delivery-error">{entry.lastError}</small>}</article>
+              })}</div> : <p className="subscriber-profile-empty">No SMS messages recorded.</p>}
             </section>
             <section className="subscriber-profile-panel">
               <h4><CreditCard size={16} /> Recent payments</h4>
@@ -1034,10 +1058,13 @@ export function SubscriberProfile({
       </section>}
 
       {tab === 'SMS' && <section className="subscriber-profile-panel subscriber-profile-table-panel">
-        <div className="subscriber-profile-section-heading"><div><h4><MessageCircle size={16} /> SMS history</h4><p>Delivery state is recorded when messages are sent or queued.</p></div><button type="button" className="outline-button" disabled={!data.phone} onClick={() => { setActionMessage(''); setActionDialog('sms') }}><Send size={14} /> Send SMS</button></div>
-        <div className="subscriber-profile-table-scroll"><table><thead><tr><th>DATE</th><th>ACTIVITY</th><th>RECIPIENT</th><th>STATUS</th></tr></thead><tbody>
-          {eventItems.filter((entry) => entry.eventType === 'sms').map((entry) => <tr key={entry.id}><td>{formatDate(entry.createdAt)}</td><td>{entry.description}</td><td>{String(entry.metadata.phone || data.phone || '—')}</td><td>{String(entry.metadata.status || 'Recorded')}</td></tr>)}
-          {!eventItems.some((entry) => entry.eventType === 'sms') && <tr><td colSpan={4} className="subscriber-profile-empty">No SMS messages have been sent from this profile.</td></tr>}
+        <div className="subscriber-profile-section-heading"><div><h4><MessageCircle size={16} /> SMS history</h4><p>Messages sent to this subscriber and their latest delivery status.</p></div><button type="button" className="outline-button" disabled={!data.phone} onClick={() => { setActionMessage(''); setActionDialog('sms') }}><Send size={14} /> Send SMS</button></div>
+        <div className="subscriber-profile-table-scroll"><table><thead><tr><th>DATE</th><th>MESSAGE</th><th>RECIPIENT</th><th>STATUS</th></tr></thead><tbody>
+          {data.smsMessages.map((entry) => {
+            const status = getSmsStatus(entry)
+            return <tr key={entry.id}><td>{formatDate(entry.sentAt || entry.createdAt)}</td><td>{entry.message ?? 'Message text unavailable because the encryption key differs from the key used when this message was stored.'}{entry.messageError && <small className="sms-delivery-error">{entry.messageError}</small>}{entry.lastError && status === 'Failed' && <small className="sms-delivery-error">{entry.lastError}</small>}</td><td>{entry.recipient}</td><td><span className={`sms-status-badge ${status === 'Failed' ? 'sms-status-failed' : status === 'Delivered' ? 'sms-status-delivered' : status === 'Sent' ? 'sms-status-sent-to-provider' : 'sms-status-queued'}`}>{status}</span></td></tr>
+          })}
+          {!data.smsMessages.length && <tr><td colSpan={4} className="subscriber-profile-empty">No SMS messages have been sent to this subscriber.</td></tr>}
         </tbody></table></div>
       </section>}
 
@@ -1077,7 +1104,7 @@ export function SubscriberProfile({
             {actionDialog === 'edit' && <div className="subscriber-action-form-grid">
               <label>Full name<input required maxLength={120} value={profileName} onChange={(event) => setProfileName(event.target.value)} /></label>
               <label>Email<input required type="email" maxLength={254} value={profileEmail} onChange={(event) => setProfileEmail(event.target.value)} /></label>
-              <label>Phone<input type="tel" maxLength={32} value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} /></label>
+              <label>Phone<input type="tel" inputMode="tel" pattern={KENYAN_MOBILE_PHONE_PATTERN} title="Enter 07 followed by 8 digits or +254 followed by 9 digits." maxLength={13} placeholder="0712345678 or +254712345678" value={profilePhone} onChange={(event) => setProfilePhone(event.target.value)} /><small>Use 07 followed by 8 digits or +254 followed by 9 digits.</small></label>
             </div>}
             {actionDialog === 'expiry' && <label className="subscriber-action-form-field">New expiry date and time<input required type="datetime-local" value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label>}
             {actionDialog === 'sms' && <label className="subscriber-action-form-field">Message to {data.name}<textarea required maxLength={500} rows={4} value={smsMessage} onChange={(event) => setSmsMessage(event.target.value)} placeholder="Type a message…" /><small>{smsMessage.length}/500 characters · {data.phone || 'No phone number'}</small></label>}

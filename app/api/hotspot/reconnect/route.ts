@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
-import { normalizeKenyanPhone } from '@/lib/daraja'
+import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 import { db } from '@/lib/db'
 import { hotspotPurchases, radcheck } from '@/lib/db/schema'
 import { resolvePublicTenantId } from '@/lib/db/tenant'
@@ -10,9 +10,9 @@ export async function GET(request: NextRequest) {
   if (!tenantId) return NextResponse.json({ error: 'Workspace not found.' }, { status: 404 })
   const phoneInput = request.nextUrl.searchParams.get('phone') || ''
   const receipt = (request.nextUrl.searchParams.get('receipt') || '').trim().toUpperCase()
-  const phone = normalizeKenyanPhone(phoneInput)
+  const phone = normalizeKenyanPhoneInput(phoneInput)
   if (!phone || !/^[A-Z0-9]{8,20}$/.test(receipt)) {
-    return NextResponse.json({ error: 'Enter the phone number and M-Pesa receipt used for payment.' }, { status: 400 })
+    return NextResponse.json({ error: 'Enter 07 followed by 8 digits or +254 followed by 9 digits, plus the M-Pesa receipt used for payment.' }, { status: 400 })
   }
 
   try {

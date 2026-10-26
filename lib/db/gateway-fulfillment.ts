@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { customers, hotspotPurchases, payments, pppoeAccounts, pppoePayments, radcheck, radreply } from '@/lib/db/schema'
 import { toFreeRadiusExpiration, toHotspotRadiusReplies } from '@/lib/hotspot-products'
-import { enqueueTenantSms } from '@/lib/db/tenant-sms'
+import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
 import type { PaymentGatewayProvider } from '@/lib/payment-gateways'
 
 const providerNames: Record<PaymentGatewayProvider, string> = {
@@ -166,6 +166,7 @@ export async function fulfillGatewayPayment(input: {
       return {
         tenantId: payment.tenantId,
         paymentId: payment.id,
+        customerId,
         name: customer?.name || account.name,
         phone: customer?.phone || account.phone,
         amount: payment.amount,
@@ -177,12 +178,21 @@ export async function fulfillGatewayPayment(input: {
     })
 
     if (notification) {
-      const passwordText = notification.password ? ` Password: ${notification.password}.` : ''
-      await enqueueTenantSms(
+      await enqueueTenantTemplateSms(
         notification.tenantId,
         `pppoe-payment:${notification.paymentId}`,
         notification.phone,
-        `Hello ${notification.name}, KES ${notification.amount} received for ${notification.productName}. Your account ${notification.username}${passwordText} is active until ${notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}.`,
+        'pppoePaymentReceipt',
+        {
+          name: notification.name,
+          amount: notification.amount,
+          plan: notification.productName,
+          reference: input.receipt || notification.paymentId,
+          username: notification.username,
+          password: notification.password,
+          expiry: notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+        },
+        { customerId: notification.customerId },
       )
     }
     return Boolean(notification)
@@ -206,6 +216,13 @@ export async function fulfillGatewayPayment(input: {
     )).for('update').limit(1)
     if (!lockedPurchase) return null
 
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockedPurchase.tenantId + ':' + (lockedPurchase.phone || '')}, 0))`)
+    const [previousPurchase] = await tx.select({ id: hotspotPurchases.id }).from(hotspotPurchases).where(and(
+      eq(hotspotPurchases.tenantId, lockedPurchase.tenantId),
+      eq(hotspotPurchases.phone, lockedPurchase.phone || ''),
+      eq(hotspotPurchases.status, 'completed'),
+      ne(hotspotPurchases.id, lockedPurchase.id),
+    )).limit(1)
     const policy = lockedPurchase.packageSnapshot
     const paidAt = new Date()
     const expiresAt = new Date(paidAt.getTime() + lockedPurchase.durationSeconds * 1000)
@@ -257,15 +274,25 @@ export async function fulfillGatewayPayment(input: {
       username,
       password,
       expiresAt,
+      firstPurchase: !previousPurchase,
     }
   })
 
   if (notification && notification.phone) {
-    await enqueueTenantSms(
+    await enqueueTenantTemplateSms(
       notification.tenantId,
       `hotspot-payment:${notification.purchaseId}`,
       notification.phone,
-      `Your payment of KES ${notification.amount} for ${notification.productName} was received. Wi-Fi username: ${notification.username}; password: ${notification.password}. Access expires ${notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' })}.`,
+      'hotspotPaymentReceipt',
+      {
+        amount: notification.amount,
+        plan: notification.productName,
+        reference: receipt,
+        username: notification.username,
+        password: notification.password,
+        expiry: notification.expiresAt.toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+      },
+      { firstPurchase: notification.firstPurchase },
     )
   }
   return Boolean(notification)
