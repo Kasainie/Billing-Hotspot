@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { customers, invoices, radcheck, subscriberCredits, subscriberEvents, supportTickets } from '@/lib/db/schema'
+import { customers, invoices, packages, pppoeAccounts, radcheck, radreply, subscriberCredits, subscriberEvents, supportTickets } from '@/lib/db/schema'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { sendSubscriberSms } from '@/lib/db/tenant-sms'
 import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
-import { toFreeRadiusExpiration } from '@/lib/hotspot-products'
+import { toFreeRadiusExpiration, toHotspotRadiusReplies } from '@/lib/hotspot-products'
 import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
+import { SUPPORT_TICKET_CATEGORIES } from '@/lib/support-tickets'
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -95,6 +96,88 @@ export async function POST(request: NextRequest, context: RouteContext<'/api/cus
       })
       if (!updated) return responseError('Subscriber not found.', 404)
       return NextResponse.json({ customer: updated })
+    }
+
+    if (action === 'plan') {
+      const packageId = typeof input.packageId === 'string' ? input.packageId.trim() : ''
+      if (!uuidPattern.test(packageId)) return responseError('Choose a valid service package.')
+      const outcome = await db.transaction(async (tx) => {
+        const [customer] = await tx.select().from(customers).where(and(
+          eq(customers.id, id), eq(customers.tenantId, tenantId),
+        )).for('update').limit(1)
+        if (!customer) return { error: 'Subscriber not found.', status: 404 as const }
+        if (!customer.radiusUsername) return { error: 'Subscriber has no RADIUS login to update.', status: 409 as const }
+        const [plan] = await tx.select().from(packages).where(and(
+          eq(packages.id, packageId),
+          eq(packages.tenantId, tenantId),
+          eq(packages.active, true),
+        )).limit(1)
+        if (!plan || plan.availability === 'off') return { error: 'The selected package is unavailable. Refresh and choose an enabled package.', status: 400 as const }
+        const [pppoeAccount] = await tx.select({ accountNumber: pppoeAccounts.accountNumber }).from(pppoeAccounts)
+          .where(and(eq(pppoeAccounts.customerId, customer.id), eq(pppoeAccounts.tenantId, tenantId))).limit(1)
+        if ((plan.type === 'PPPoE') !== Boolean(pppoeAccount)) {
+          return { error: 'Choose a package for the subscriber’s existing connection type.', status: 400 as const }
+        }
+
+        await tx.delete(radcheck).where(and(
+          eq(radcheck.tenantId, tenantId),
+          eq(radcheck.username, customer.radiusUsername),
+          inArray(radcheck.attribute, ['Simultaneous-Use', 'Login-Time', 'NAS-IP-Address']),
+        ))
+        const checkRules: { tenantId: string; username: string; attribute: string; op: ':=' | '==' | '=~'; value: string }[] = [{
+          tenantId, username: customer.radiusUsername, attribute: 'Simultaneous-Use',
+          op: ':=', value: String(plan.devicesPerAccount),
+        }]
+        if (plan.scheduleEnabled && plan.scheduleSpec) {
+          checkRules.push({ tenantId, username: customer.radiusUsername, attribute: 'Login-Time', op: '==', value: plan.scheduleSpec })
+        }
+        if (plan.nasRestrictions.length) {
+          const allowedNas = plan.nasRestrictions.map((address) => address.replace(/\./g, '\\.')).join('|')
+          checkRules.push({ tenantId, username: customer.radiusUsername, attribute: 'NAS-IP-Address', op: '=~', value: `^(${allowedNas})$` })
+        }
+        await tx.insert(radcheck).values(checkRules)
+
+        await tx.delete(radreply).where(and(
+          eq(radreply.tenantId, tenantId),
+          eq(radreply.username, customer.radiusUsername),
+        ))
+        await tx.insert(radreply).values(toHotspotRadiusReplies(customer.radiusUsername, {
+          durationSeconds: plan.durationSeconds,
+          devicesPerAccount: plan.devicesPerAccount,
+          rateLimit: plan.rateLimit,
+          burstLimit: plan.burstLimit,
+          burstThreshold: plan.burstThreshold,
+          burstTimeSeconds: plan.burstTimeSeconds,
+          fupEnabled: plan.fupEnabled,
+          fupLimitBytes: plan.fupLimitBytes,
+        }).map((rule) => ({ ...rule, tenantId })))
+        await tx.update(customers).set({ plan: plan.name, monthlyRate: plan.monthlyPrice })
+          .where(and(eq(customers.id, customer.id), eq(customers.tenantId, tenantId)))
+        await tx.insert(subscriberEvents).values({
+          tenantId,
+          customerId: customer.id,
+          eventType: 'plan_changed',
+          description: `Service package changed from ${customer.plan || 'unassigned'} to ${plan.name}.`,
+          metadata: {
+            previousPlan: customer.plan,
+            previousMonthlyRate: customer.monthlyRate,
+            newPlan: plan.name,
+            newMonthlyRate: plan.monthlyPrice,
+            rateLimit: plan.rateLimit,
+          },
+          createdBy: actorId,
+        })
+        return { oldPlan: customer.plan, oldRate: customer.monthlyRate, plan, error: null }
+      })
+      if ('status' in outcome) return responseError(outcome.error || 'Unable to update service package.', outcome.status)
+      return NextResponse.json({
+        message: `Service package updated. The new speed applies on the subscriber’s next authentication or reconnect. The new price applies to the next invoice; no proration was applied.`,
+        previousPlan: outcome.oldPlan,
+        previousMonthlyRate: outcome.oldRate,
+        plan: outcome.plan.name,
+        monthlyRate: outcome.plan.monthlyPrice,
+        rateLimit: outcome.plan.rateLimit,
+      })
     }
 
     if (action === 'subscription') {
@@ -308,20 +391,22 @@ export async function POST(request: NextRequest, context: RouteContext<'/api/cus
     if (action === 'ticket') {
       const subject = typeof input.subject === 'string' ? input.subject.trim() : ''
       const description = typeof input.description === 'string' ? input.description.trim() : ''
+      const category = typeof input.category === 'string' ? input.category.trim() : ''
       const priority = input.priority
       if (!subject || subject.length > 180) return responseError('Enter a ticket subject up to 180 characters.')
       if (!description || description.length > 4000) return responseError('Enter a description up to 4,000 characters.')
+      if (!SUPPORT_TICKET_CATEGORIES.includes(category as typeof SUPPORT_TICKET_CATEGORIES[number])) return responseError('Choose a valid ticket category.')
       if (!['low', 'normal', 'high', 'urgent'].includes(String(priority))) return responseError('Choose a valid ticket priority.')
       const [customer] = await db.select().from(customers).where(and(eq(customers.id, id), eq(customers.tenantId, tenantId))).limit(1)
       if (!customer) return responseError('Subscriber not found.', 404)
       const [ticket] = await db.insert(supportTickets).values({
         tenantId, customerId: id, requesterName: customer.name, requesterEmail: customer.email,
-        subject, description, priority: String(priority),
+        subject, description, category, priority: String(priority),
       }).returning({ id: supportTickets.id })
       await db.insert(subscriberEvents).values({
         tenantId, customerId: id, eventType: 'ticket',
         description: `Support ticket created: ${subject}`,
-        metadata: { ticketId: ticket.id, priority }, createdBy: actorId,
+        metadata: { ticketId: ticket.id, category, priority }, createdBy: actorId,
       })
       return NextResponse.json({ ticketId: ticket.id }, { status: 201 })
     }

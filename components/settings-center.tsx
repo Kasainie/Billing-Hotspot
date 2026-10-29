@@ -19,7 +19,7 @@ type SettingsItem = (TenantSettingSection & { icon: LucideIcon }) | { id: string
 
 const extraSections: SettingsItem[] = [
   { id: 'payments', group: 'BILLING & MESSAGING', label: 'Payments', description: 'Configure M-Pesa and Daraja payment processing.', status: 'Provider credentials are encrypted and used for payment requests.', icon: CreditCard, fields: [] },
-  { id: 'communications', group: 'BILLING & MESSAGING', label: 'Communications', description: 'Configure the SMS gateway for your workspace.', status: 'Africa’s Talking credentials are encrypted and used by the SMS delivery queue.', icon: MessageCircle, fields: [] },
+  { id: 'communications', group: 'BILLING & MESSAGING', label: 'Communications', description: 'Configure Infobip SMS and optional WhatsApp messaging.', status: 'Infobip credentials are encrypted and used by the workspace message delivery queue.', icon: MessageCircle, fields: [] },
   { id: 'profile', group: 'ACCOUNT', label: 'Profile', description: 'Update your account name and view your account details.', status: 'Your name is used across your workspace.', icon: UserRound, fields: [] },
   { id: 'security', group: 'ACCOUNT', label: 'Password & passkeys', description: 'Change your password and manage passwordless passkey sign-in.', status: 'Passkeys use your device or security key for secure sign-in.', icon: ShieldCheck, fields: [] },
 ]
@@ -273,11 +273,8 @@ function SettingsFields({ section, values, configured, updateField }: {
     return <MessageTemplateEditor values={values} updateField={updateField} />
   }
   const fields = section.fields
-  const termsField = section.id === 'hotspot' ? fields.find((field) => field.key === 'termsRequired') : undefined
-  const regularFields = termsField ? fields.filter((field) => field !== termsField && field.key !== 'termsText') : fields
   return <>
-    <section className="settings-card"><h2>{section.label === 'Branding' ? 'Identity' : section.label === 'Hotspot' ? 'Portal experience' : 'Configuration'}</h2><p>{section.status}</p><div className="settings-form">{regularFields.map((field) => <SettingInput key={field.key} field={field} value={values[field.key]} configured={configured.includes(field.key)} onChange={(value) => updateField(section.id, field.key, value)} />)}</div></section>
-    {termsField && <section className="settings-card"><h2>Terms &amp; conditions</h2><p>The portal links to LKTECH&apos;s <a href="/terms#hotspot-service-terms" target="_blank" rel="noreferrer">general hotspot terms</a>. This preference and saved custom text are not currently displayed or enforced by the portal; provide and enforce any provider-specific terms separately.</p><SettingInput field={termsField} value={values[termsField.key]} configured={false} onChange={(value) => updateField(section.id, termsField.key, value)} />{fields.filter((field) => field.key === 'termsText').map((field) => <SettingInput key={field.key} field={field} value={values[field.key]} configured={configured.includes(field.key)} onChange={(value) => updateField(section.id, field.key, value)} />)}</section>}
+    <section className="settings-card"><h2>{section.label === 'Branding' ? 'Identity' : section.label === 'Hotspot' ? 'Portal experience' : 'Configuration'}</h2><p>{section.status}</p><div className="settings-form">{fields.map((field) => <SettingInput key={field.key} field={field} value={values[field.key]} configured={configured.includes(field.key)} onChange={(value) => updateField(section.id, field.key, value)} />)}</div></section>
   </>
 }
 

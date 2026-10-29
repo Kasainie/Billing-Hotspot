@@ -119,9 +119,10 @@ export const tenantPaymentGateways = pgTable('tenant_payment_gateways', {
 export const tenantSmsSettings = pgTable('tenant_sms_settings', {
   tenantId: text('tenant_id').notNull().primaryKey().references(() => tenants.id, { onDelete: 'cascade' }),
   environment: text('environment').notNull().default('production'),
-  username: text('username').notNull(),
-  apiKeyEncrypted: text('api_key_encrypted').notNull(),
-  senderId: text('sender_id'),
+  infobipBaseUrl: text('infobip_base_url'),
+  infobipApiKeyEncrypted: text('infobip_api_key_encrypted'),
+  infobipSmsSender: text('infobip_sms_sender'),
+  infobipWhatsappSender: text('infobip_whatsapp_sender'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -137,6 +138,7 @@ export const smsMessages = pgTable('sms_messages', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   customerId: uuid('customer_id'),
+  channel: text('channel').notNull().default('sms'),
   eventKey: text('event_key').notNull(),
   recipient: text('recipient').notNull(),
   messageEncrypted: text('message_encrypted').notNull(),
@@ -218,6 +220,9 @@ export const payments = pgTable('payments', {
 export const leads = pgTable('leads', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  location: text('location'),
+  coverageStatus: text('coverage_status').notNull().default('pending'),
+  customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
   name: text('name').notNull(),
   email: text('email'),
   phone: text('phone'),
@@ -236,6 +241,7 @@ export const supportTickets = pgTable('support_tickets', {
   requesterEmail: text('requester_email'),
   subject: text('subject').notNull(),
   description: text('description').notNull(),
+  category: text('category').notNull().default('other'),
   priority: text('priority').notNull().default('normal'),
   status: text('status').notNull().default('open'),
   assignedTo: text('assigned_to'),

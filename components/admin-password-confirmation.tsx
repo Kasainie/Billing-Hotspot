@@ -5,6 +5,7 @@ import { requiresAdminPasswordConfirmation } from '@/lib/admin-password-confirma
 
 type PasswordRequest = {
   resolve: (password: string | null) => void
+  abortHandler?: () => void
 }
 
 function needsPasswordConfirmation(input: RequestInfo | URL, init?: RequestInit) {
@@ -26,15 +27,38 @@ export function AdminPasswordConfirmation() {
   const [password, setPassword] = useState('')
   const [validationError, setValidationError] = useState('')
 
-  const askForPassword = useCallback(() => new Promise<string | null>((resolve) => {
-    const request = { resolve }
+  const cancelRequest = useCallback((request: PasswordRequest) => {
+    const requestIndex = requests.current.indexOf(request)
+    if (requestIndex < 0) return
+    requests.current.splice(requestIndex, 1)
+    request.resolve(null)
+    if (requestIndex === 0) {
+      setPassword('')
+      setValidationError('')
+      setActiveRequest(requests.current[0] ?? null)
+    }
+  }, [])
+
+  const askForPassword = useCallback((signal?: AbortSignal) => new Promise<string | null>((resolve) => {
+    if (signal?.aborted) {
+      resolve(null)
+      return
+    }
+    const request: PasswordRequest = {
+      resolve: (value) => {
+        if (request.abortHandler) signal?.removeEventListener('abort', request.abortHandler)
+        resolve(value)
+      },
+    }
+    request.abortHandler = () => cancelRequest(request)
+    signal?.addEventListener('abort', request.abortHandler, { once: true })
     requests.current.push(request)
     if (requests.current.length === 1) {
       setPassword('')
       setValidationError('')
       setActiveRequest(request)
     }
-  }), [])
+  }), [cancelRequest])
 
   const finishRequest = useCallback((value: string | null) => {
     const request = requests.current.shift()
@@ -49,15 +73,17 @@ export function AdminPasswordConfirmation() {
     const guardedFetch: typeof window.fetch = async (input, init) => {
       if (!needsPasswordConfirmation(input, init)) return originalFetch.call(window, input, init)
 
-      const confirmedPassword = await askForPassword()
+      const request = input instanceof Request ? input : null
+      const signal = init?.signal || request?.signal
+      const confirmedPassword = await askForPassword(signal)
       if (confirmedPassword === null) {
+        if (signal?.aborted) throw new DOMException('The request timed out or was cancelled.', 'AbortError')
         return Response.json({
           error: 'Change cancelled. No changes were made.',
           code: 'password_confirmation_cancelled',
         }, { status: 409 })
       }
 
-      const request = input instanceof Request ? input : null
       const headers = new Headers(request?.headers)
       new Headers(init?.headers).forEach((value, name) => headers.set(name, value))
       headers.set('x-admin-password-confirmation', confirmedPassword)

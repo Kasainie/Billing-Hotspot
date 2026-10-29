@@ -74,8 +74,6 @@ export const tenantSettingSections: TenantSettingSection[] = [
       field('welcomeHeadline', 'Welcome headline', 'text', 'Shown above the available packages.', { maxLength: 80 }),
       field('welcomeMessage', 'Welcome message', 'textarea', 'Short customer-facing description.', { maxLength: 180 }),
       field('supportMessage', 'Support message', 'text', 'Shown to customers who need help.', { maxLength: 120 }),
-      field('termsRequired', 'Require acceptance of terms', 'toggle', 'Preference only; captive portal enforcement is not enabled by this setting.'),
-      field('termsText', 'Terms and conditions', 'textarea', 'Store your terms for reference; the current portal template must support displaying them.', { maxLength: 4000 }),
     ],
   },
   {

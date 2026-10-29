@@ -1063,11 +1063,11 @@ td { color: #5e6469; }
 .voucher-create-form .operations-form-grid label { gap: 7px; color: #344c55; font-size: 12px; }
 .voucher-create-form .operations-form-grid input, .voucher-create-form .operations-form-grid select { min-height: 44px; border-color: #d4e1e2; border-radius: 8px; padding: 10px 12px; color: #233a45; font-size: 13px; }
 .voucher-create-form .operations-form-grid input:focus, .voucher-create-form .operations-form-grid select:focus { border-color: #25a696; outline: 0; box-shadow: 0 0 0 3px #25a6961b; }
-.voucher-send-sms { display: flex; align-items: flex-start; gap: 10px; border: 1px solid #d4e1e2; border-radius: 8px; padding: 11px 12px; color: #233a45; background: #f7faf9; cursor: pointer; }
-.voucher-send-sms > input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: #087f76; }
+.voucher-send-sms { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--theme-border); border-radius: 8px; padding: 11px 12px; color: var(--theme-text); background: var(--theme-surface-raised); cursor: pointer; }
+.voucher-send-sms > input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--theme-accent-bright); }
 .voucher-send-sms > span { display: grid; gap: 4px; }
 .voucher-send-sms strong { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
-.voucher-send-sms small, .voucher-sms-phone small { color: #667982; font-size: 10px; line-height: 1.45; }
+.voucher-send-sms small, .voucher-sms-phone small { color: var(--theme-muted); font-size: 10px; line-height: 1.45; }
 .voucher-sms-phone { max-width: 420px; }
 .voucher-plan-expiry { display: flex; align-items: center; gap: 6px; margin: -5px 0 0 !important; color: #52716f !important; font-size: 12px !important; }
 .voucher-plan-expiry svg { color: #168b7b; }
@@ -1247,6 +1247,9 @@ td { color: #5e6469; }
 .subscriber-filter-trigger { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; white-space: nowrap; }
 .subscriber-filter-trigger.has-filters { border-color: #00ff90; color: #00ff90; }
 .subscriber-filter-trigger > span { display: inline-grid; min-width: 20px; height: 20px; place-items: center; border-radius: 50%; color: #08130d; background: #00ff90; font-size: 11px; font-weight: 700; }
+.subscriber-location-segment { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; }
+.subscriber-location-segment label { color: var(--theme-text); font-size: 13px; font-weight: 600; }
+.subscriber-location-segment select { min-width: min(280px, 100%); min-height: 40px; border: 1px solid var(--theme-border); border-radius: 8px; padding: 8px 10px; color: var(--theme-text); background: var(--theme-surface); font: 13px Arial, Helvetica, sans-serif; }
 .subscriber-filter-menu { position: absolute; z-index: 25; top: calc(100% + 8px); right: 0; display: grid; width: min(390px, calc(100vw - 40px)); max-height: min(560px, calc(100vh - 140px)); gap: 12px; overflow-y: auto; border: 1px solid #263640; border-radius: 14px; padding: 16px; color: #e7f1f4; background: #111e26; box-shadow: 0 16px 42px rgb(0 0 0 / 42%); }
 .subscriber-filter-menu-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .subscriber-filter-menu-heading h4 { margin: 0; color: #e7f1f4; font-size: 16px; }
@@ -5160,7 +5163,15 @@ td strong,
 .ops-shell .subscriber-profile-note-form label { color: var(--theme-text) !important; }
 .ops-shell .subscriber-action-dialog-heading > div > span,
 .ops-shell .subscriber-profile-events article time { color: var(--theme-muted) !important; }
-.ops-shell .subscriber-profile-section-heading > .outline-button,
+.ops-shell .subscriber-profile-section-heading > .outline-button {
+  border-color: var(--theme-border);
+  background-color: var(--theme-surface-raised);
+  color: var(--theme-text) !important;
+}
+.ops-shell .subscriber-profile-section-heading > .outline-button:hover:not(:disabled) {
+  border-color: var(--theme-accent);
+  background-color: var(--theme-surface);
+}
 .ops-shell .subscriber-profile-note-form .primary-button { color: #06110d !important; }
 .ops-shell .subscriber-action-dialog input,
 .ops-shell .subscriber-action-dialog select,

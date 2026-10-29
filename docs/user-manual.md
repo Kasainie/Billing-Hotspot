@@ -66,7 +66,7 @@ Have the following information ready:
 - A list of router interfaces and a clear identification of the WAN/uplink port.
 - Your hotspot or PPPoE plans, prices, durations, and service limits.
 - Merchant credentials from Safaricom Daraja, Pesapal, or IntaSend if you intend to accept payments.
-- Africa's Talking credentials if you intend to send SMS.
+- Infobip credentials if you intend to send SMS or WhatsApp messages.
 
 ### For the network administrator
 
@@ -115,9 +115,9 @@ Shows workspace activity and summary information. Use the report-format selector
 
 ### Customers
 
-- **Subscribers:** Create and maintain customer accounts, assign plans, review status, and open a subscriber profile.
-- **Leads:** Track prospective customers.
-- **Tickets:** Review support tickets and ticket analytics.
+- **Subscribers:** Create and maintain customer accounts, assign plans, review status, and open a subscriber profile. Use **Segment subscribers by location** to show subscribers in a selected area or those without a recorded location. In a subscriber profile, **Change package** updates the RADIUS policy immediately for the next authentication/reconnect and applies the new price to the next invoice without proration.
+- **Leads:** Track prospective customers and their locations. Record coverage as pending, covered, or not covered; only leads marked covered can be converted into suspended subscriber accounts.
+- **Tickets:** Create and manage support tickets. Choose a category such as **No internet**, **Password change**, or **Slow speed**; update categories from the ticket list and review category totals in ticket analytics.
 
 ### Network
 
@@ -285,13 +285,13 @@ Treat voucher usernames/passwords like cash: limit access, avoid public posting,
 
 ## 10. Communicate with customers
 
-Configure the Africa's Talking environment, application username, API key, and optional approved sender ID under **Settings → Communications**. Credentials and queued message contents are encrypted server-side. Open **Communications → SMS** to operate the outbox, review delivery reports, and send a test message to a number you control before enabling customer messaging. The standalone Communications workspace also contains WhatsApp and Email status tabs.
+Configure Infobip under **Settings → Communications** with your account Base URL, API key, and approved SMS sender ID. Credentials and queued message contents are encrypted server-side. Optionally add your registered WhatsApp sender number to activate WhatsApp in the manual message composer. WhatsApp requires an approved template when starting a conversation outside the 24-hour customer-service window.
 
-The SMS outbox supports a manual message to one Kenyan mobile number, status filtering, recipient/message search, and resending failed messages. It also shows queued, provider-accepted, delivered, and failed statuses when the required delivery-report setup is in place. A provider accepting a message is not the same as the handset confirming delivery. Review the delivery report and any failure detail before resending. Provider charges are set by Africa's Talking; the dashboard does not estimate account balance or spend.
+The Communications outbox supports a manual SMS or WhatsApp message to one Kenyan mobile number, status filtering, recipient/message search, and resending failed messages. It shows queued, provider-accepted, delivered, and failed statuses when Infobip delivery callbacks are enabled by setting `APP_URL`. A provider accepting a message is not the same as the handset confirming delivery. Review the delivery report and any failure detail before resending. Provider charges are set by Infobip; the dashboard does not estimate account balance or spend.
 
-The WhatsApp and Email tabs are informational only. Their delivery integrations are not enabled, and the tabs do not collect or save provider credentials.
+WhatsApp is available only as an explicitly selected manual channel; automatic payment, expiry, and service notifications continue to use SMS. Email delivery is not enabled.
 
-Automatic SMS queue processing and delivery callbacks depend on deployment configuration, required database migrations, cron scheduling, and server secrets. If the message queue does not progress, ask the platform administrator to verify these services. Use the resend control for an individual failed message only after checking the recipient number and provider status; a resend may result in a second message.
+Automatic SMS queue processing and Infobip delivery callbacks depend on deployment configuration, required database migrations, cron scheduling, and server secrets. Set `APP_URL` to the public HTTPS application origin. The application supplies the secured callback URL with each outbound message. If the message queue does not progress, ask the platform administrator to verify these services. Use the resend control for an individual failed message only after checking the recipient number and provider status; a resend may result in a second message.
 
 SMS can incur provider charges. Obtain the necessary customer consent and follow local messaging requirements.
 
@@ -417,10 +417,10 @@ Timeouts with no accept/reject usually indicate reachability or firewall/secret 
 
 ### SMS is queued, pending, or failed
 
-- Confirm the workspace's Africa's Talking environment, username, API key, and sender ID.
+- Confirm the workspace's Infobip Base URL, API key, and SMS sender ID.
 - Send a test SMS to a controlled number.
 - Review the message's delivery status and provider error.
-- Ask the platform administrator to verify the SMS cron, callback secret, callback URL, and required migrations.
+- Ask the platform administrator to verify the SMS cron, Infobip callback URL, and required migrations.
 - Check that the recipient number is correctly formatted and permitted by the provider.
 - Before resending, check whether the provider already accepted or delivered the prior attempt.
 
@@ -464,7 +464,7 @@ This section is for the person hosting and maintaining LKTECH, not everyday ISP 
 - Signup verification and password-reset mail depend on the configured email provider.
 - Daraja, SMS, gateway, router-monitoring, router-connector, voucher-expiry, and advanced settings each have specific prerequisites. Consult the detailed documentation before enabling them.
 - The optional SMS queue requires a scheduled job and callback configuration. Router monitoring and the router API connector are separate systems.
-- Message-template settings are connected to the listed SMS events and require configured Africa's Talking credentials and scheduled queue processing. Settings for SMTP, WhatsApp, AI, accounting, loyalty, operator alerts, and developer webhooks may still be saved as preferences without an active external integration.
+- Message-template settings are connected to the listed SMS events and require configured Infobip credentials and scheduled queue processing. WhatsApp is available for explicitly selected manual messages; scheduled customer notifications remain SMS-first. Settings for SMTP, AI, accounting, loyalty, operator alerts, and developer webhooks may still be saved as preferences without an active external integration.
 - Custom workspace domains require DNS and TLS configuration at the hosting provider; changing a workspace slug alone does not create a custom domain.
 - Backups, retention, monitoring, incident response, and production deployment are responsibilities of the platform operator. ISP workspace users should contact their platform administrator rather than applying production migrations themselves.
 

@@ -7,6 +7,7 @@ import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { enqueueTenantTemplateSms, getTenantTemplateSettings } from '@/lib/message-template-delivery'
 import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
+import { SUPPORT_TICKET_CATEGORIES } from '@/lib/support-tickets'
 
 const entities = ['leads', 'tickets', 'expenses', 'vouchers', 'equipment', 'tr069', 'invoices'] as const
 type Entity = typeof entities[number]
@@ -55,18 +56,22 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
 
   try {
     if (access.entity === 'leads') {
-      const [items, totals] = await Promise.all([
+      const [items, totals, plans, sitesList] = await Promise.all([
         db.select().from(leads).where(eq(leads.tenantId, access.tenantId)).orderBy(desc(leads.createdAt)).limit(500),
         db.select({ status: leads.status, count: count() }).from(leads).where(eq(leads.tenantId, access.tenantId)).groupBy(leads.status),
+        db.select({ id: packages.id, name: packages.name, type: packages.type, rateLimit: packages.rateLimit, monthlyPrice: packages.monthlyPrice, durationSeconds: packages.durationSeconds })
+          .from(packages).where(and(eq(packages.tenantId, access.tenantId), eq(packages.active, true), sql`${packages.availability} <> 'off'`)),
+        db.select({ id: sites.id, name: sites.name, location: sites.location }).from(sites).where(eq(sites.tenantId, access.tenantId)),
       ])
-      return NextResponse.json({ items, totals })
+      return NextResponse.json({ items, totals, plans, sites: sitesList })
     }
     if (access.entity === 'tickets') {
-      const [items, totals] = await Promise.all([
+      const [items, totals, byCategory] = await Promise.all([
         db.select().from(supportTickets).where(eq(supportTickets.tenantId, access.tenantId)).orderBy(desc(supportTickets.updatedAt)).limit(500),
         db.select({ status: supportTickets.status, count: count() }).from(supportTickets).where(eq(supportTickets.tenantId, access.tenantId)).groupBy(supportTickets.status),
+        db.select({ category: supportTickets.category, count: count() }).from(supportTickets).where(eq(supportTickets.tenantId, access.tenantId)).groupBy(supportTickets.category),
       ])
-      return NextResponse.json({ items, totals })
+      return NextResponse.json({ items, totals, byTicketCategory: byCategory })
     }
     if (access.entity === 'expenses') {
       const [items, total, byCategory] = await Promise.all([
@@ -188,14 +193,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
       const email = text(input.email, 254).toLowerCase()
       const phoneInput = text(input.phone, 40)
       const phone = phoneInput ? normalizeKenyanPhoneInput(phoneInput) : null
+      const location = text(input.location, 240)
+      const coverageStatus = text(input.coverageStatus, 20) || 'pending'
       if (phoneInput && !phone) return invalid('Enter a phone number starting with 07 followed by 8 digits or +254 followed by 9 digits.')
       if (!name || (!email && !phone)) return invalid('Enter a name and at least an email address or phone number.')
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return invalid('Enter a valid email address.')
+      if (!['pending', 'covered', 'unavailable'].includes(coverageStatus)) return invalid('Select a valid coverage status.')
       const [created] = await db.insert(leads).values({
         tenantId: access.tenantId,
         name,
         email: email || null,
         phone,
+        location: location || null,
+        coverageStatus,
         source: text(input.source, 80) || null,
         notes: text(input.notes, 2000) || null,
       }).returning()
@@ -206,9 +216,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
       const requesterEmail = text(input.requesterEmail, 254).toLowerCase()
       const subject = text(input.subject, 180)
       const description = text(input.description, 5000)
+      const category = text(input.category, 40) || 'other'
       const priority = text(input.priority, 20) || 'normal'
       if (!requesterName || !subject || !description) return invalid('Requester name, subject, and description are required.')
       if (requesterEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requesterEmail)) return invalid('Enter a valid requester email.')
+      if (!SUPPORT_TICKET_CATEGORIES.includes(category as typeof SUPPORT_TICKET_CATEGORIES[number])) return invalid('Select a valid ticket category.')
       if (!priorities.includes(priority as typeof priorities[number])) return invalid('Select a valid ticket priority.')
       const customerId = text(input.customerId, 50)
       if (customerId) {
@@ -223,6 +235,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         requesterEmail: requesterEmail || null,
         subject,
         description,
+        category,
         priority,
       }).returning()
       return NextResponse.json(created, { status: 201 })
@@ -473,13 +486,48 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
 
   try {
     if (access.entity === 'leads') {
-      const status = text(input.status, 20)
-      if (!leadStatuses.includes(status as typeof leadStatuses[number])) return invalid('Select a valid lead status.')
-      const [updated] = await db.update(leads).set({ status, updatedAt: new Date() }).where(and(eq(leads.id, id), eq(leads.tenantId, access.tenantId))).returning()
+      const changes: { status?: string; coverageStatus?: string; customerId?: string; updatedAt: Date } = { updatedAt: new Date() }
+      if (input.status !== undefined) {
+        const status = text(input.status, 20)
+        if (!leadStatuses.includes(status as typeof leadStatuses[number])) return invalid('Select a valid lead status.')
+        changes.status = status
+      }
+      if (input.coverageStatus !== undefined) {
+        const coverageStatus = text(input.coverageStatus, 20)
+        if (!['pending', 'covered', 'unavailable'].includes(coverageStatus)) return invalid('Select a valid coverage status.')
+        changes.coverageStatus = coverageStatus
+      }
+      if (input.customerId !== undefined) {
+        const customerId = text(input.customerId, 50)
+        if (!uuidPattern.test(customerId)) return invalid('Select a valid subscriber.')
+        const [lead] = await db.select({ coverageStatus: leads.coverageStatus, customerId: leads.customerId }).from(leads)
+          .where(and(eq(leads.id, id), eq(leads.tenantId, access.tenantId))).limit(1)
+        if (!lead) return invalid('Lead not found.', 404)
+        if (lead.coverageStatus !== 'covered') return invalid('Mark coverage as covered before converting this lead.')
+        if (lead.customerId && lead.customerId !== customerId) return invalid('This lead is already linked to a different subscriber.', 409)
+        const [customer] = await db.select({ id: customers.id }).from(customers)
+          .where(and(eq(customers.id, customerId), eq(customers.tenantId, access.tenantId))).limit(1)
+        if (!customer) return invalid('Selected subscriber is not in this workspace.')
+        changes.customerId = customerId
+        changes.status = 'converted'
+      }
+      if (changes.status === 'converted' && input.customerId === undefined) {
+        const [lead] = await db.select({ customerId: leads.customerId }).from(leads)
+          .where(and(eq(leads.id, id), eq(leads.tenantId, access.tenantId))).limit(1)
+        if (!lead?.customerId) return invalid('Create a subscriber account before marking this lead converted.')
+      }
+      if (Object.keys(changes).length === 1) return invalid('Provide a lead field to update.')
+      const [updated] = await db.update(leads).set(changes)
+        .where(and(eq(leads.id, id), eq(leads.tenantId, access.tenantId))).returning()
       return updated ? NextResponse.json(updated) : invalid('Lead not found.', 404)
     }
     if (access.entity === 'tickets') {
-      const changes: { status?: string; priority?: string; assignedTo?: string | null; updatedAt: Date } = { updatedAt: new Date() }
+      const changes: { category?: string; status?: string; priority?: string; assignedTo?: string | null; updatedAt: Date } = { updatedAt: new Date() }
+      if (input.category !== undefined) {
+        const category = text(input.category, 40)
+        if (!SUPPORT_TICKET_CATEGORIES.includes(category as typeof SUPPORT_TICKET_CATEGORIES[number])) return invalid('Select a valid ticket category.')
+        changes.category = category
+      }
       if (input.status !== undefined) {
         const status = text(input.status, 20)
         if (!ticketStatuses.includes(status as typeof ticketStatuses[number])) return invalid('Select a valid ticket status.')
@@ -554,7 +602,11 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const id = request.nextUrl.searchParams.get('id') || ''
   if (!uuidPattern.test(id)) return invalid('Record id is invalid.')
   try {
-    if (access.entity === 'invoices') return invalid('Invoices are retained for accounting; use void instead of deleting.')
+    if (access.entity === 'invoices') {
+      const [deleted] = await db.delete(invoices)
+        .where(and(eq(invoices.id, id), eq(invoices.tenantId, access.tenantId))).returning({ id: invoices.id })
+      return deleted ? NextResponse.json({ deleted: true }) : invalid('Invoice not found.', 404)
+    }
     if (access.entity === 'vouchers') {
       const deleted = await db.transaction(async (tx) => {
         const [voucher] = await tx.select({ username: vouchers.username }).from(vouchers).where(and(

@@ -27,19 +27,21 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const access = await requireTenantAdmin(request)
   if (access.response) return access.response
-  let input: { phone?: unknown; message?: unknown }
+  let input: { phone?: unknown; message?: unknown; channel?: unknown }
   try {
     input = await request.json() as typeof input
   } catch {
     return NextResponse.json({ error: 'Enter a recipient and message.' }, { status: 400 })
   }
-  if (typeof input.phone !== 'string' || typeof input.message !== 'string') {
+  if (typeof input.phone !== 'string' || typeof input.message !== 'string' ||
+      (input.channel !== undefined && input.channel !== 'sms' && input.channel !== 'whatsapp')) {
     return NextResponse.json({ error: 'Enter a recipient and message.' }, { status: 400 })
   }
   try {
-    const result = await sendManualTenantSms(access.session.tenantId, input.phone, input.message)
+    const channel = input.channel === 'whatsapp' ? 'whatsapp' : 'sms'
+    const result = await sendManualTenantSms(access.session.tenantId, input.phone, input.message, channel)
     if ('error' in result) return NextResponse.json({ error: result.error }, { status: result.httpStatus })
-    return NextResponse.json({ status: result.status, message: 'SMS message submitted.' }, { status: 201 })
+    return NextResponse.json({ status: result.status, message: `${channel === 'whatsapp' ? 'WhatsApp' : 'SMS'} message submitted.` }, { status: 201 })
   } catch (error) {
     console.error('Failed to send manual tenant SMS', { tenantId: access.session.tenantId, error })
     return NextResponse.json({ error: 'Unable to submit this SMS message.' }, { status: 503 })

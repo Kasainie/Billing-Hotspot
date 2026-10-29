@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
-import { getTenantSmsOverview, saveTenantSmsSettings, sendTestTenantSms, validateTenantSmsInput } from '@/lib/db/tenant-sms'
+import { getTenantSmsOverview, saveTenantInfobipSettings, sendTestTenantSms, validateTenantInfobipInput } from '@/lib/db/tenant-sms'
 
 export async function GET(request: NextRequest) {
   const session = await getTenantSession(request)
   if (!session) return NextResponse.json({ error: 'Sign in to view SMS settings.' }, { status: 401 })
   try {
-    return NextResponse.json(await getTenantSmsOverview(session.tenantId, request.nextUrl.origin), { headers: { 'cache-control': 'no-store' } })
+    return NextResponse.json(await getTenantSmsOverview(session.tenantId), { headers: { 'cache-control': 'no-store' } })
   } catch (error) {
     console.error('Failed to load tenant SMS settings', error)
     return NextResponse.json({ error: 'Unable to load SMS settings.' }, { status: 503 })
@@ -24,19 +24,26 @@ export async function PUT(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: 'SMS settings are invalid.' }, { status: 400 })
   }
-  const settings = validateTenantSmsInput(input)
+  const settings = validateTenantInfobipInput(input)
   if (!settings) {
-    return NextResponse.json({ error: 'Enter a valid environment, Africa’s Talking username, API key, and optional sender ID.' }, { status: 400 })
+    return NextResponse.json({ error: 'Enter a valid Infobip Base URL, API key, and SMS sender. Base URLs must be HTTPS Infobip domains; WhatsApp sender numbers must use E.164 format.' }, { status: 400 })
   }
   try {
-    await saveTenantSmsSettings(session.tenantId, settings)
-    return NextResponse.json({ configured: true, environment: settings.environment, username: settings.username, senderId: settings.senderId || '' })
+    await saveTenantInfobipSettings(session.tenantId, settings)
+    return NextResponse.json(await getTenantSmsOverview(session.tenantId))
   } catch (error) {
     console.error('Failed to save tenant SMS settings', error)
-    const message = error instanceof Error && error.message.includes('TENANT_SECRETS_ENCRYPTION_KEY')
-      ? 'Set TENANT_SECRETS_ENCRYPTION_KEY to a secure 32-byte key before saving SMS credentials.'
-      : 'Unable to save SMS settings.'
-    return NextResponse.json({ error: message }, { status: 503 })
+    if (error instanceof Error && error.message.includes('TENANT_SECRETS_ENCRYPTION_KEY')) {
+      return NextResponse.json({ error: 'Set TENANT_SECRETS_ENCRYPTION_KEY to a secure 32-byte key before saving Infobip credentials.' }, { status: 503 })
+    }
+    if (error instanceof Error && error.message === 'INFOBIP_API_KEY_REQUIRED') {
+      return NextResponse.json({ error: 'Enter the Infobip API key the first time you configure Infobip.' }, { status: 400 })
+    }
+    const databaseCode = error && typeof error === 'object' && 'code' in error ? error.code : null
+    if (databaseCode === '42703' || databaseCode === '42P01') {
+      return NextResponse.json({ error: 'The database is missing Infobip messaging fields. Apply the Infobip messaging migration, then try again.' }, { status: 503 })
+    }
+    return NextResponse.json({ error: 'Unable to save SMS settings. Check the server logs for the database error.' }, { status: 503 })
   }
 }
 
@@ -63,3 +70,4 @@ export async function POST(request: NextRequest) {
 }
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30

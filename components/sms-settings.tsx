@@ -6,6 +6,7 @@ import { KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
 type SmsMessage = {
   id: string
   recipient: string
+  channel: 'sms' | 'whatsapp'
   status: string
   deliveryStatus: string
   lastError: string | null
@@ -27,19 +28,21 @@ type SmsHistory = {
 }
 
 type SmsSettings = {
-  environment: string
-  username: string
-  senderId: string
+  baseUrl: string
+  smsSender: string
+  whatsappSender: string
   configured: boolean
-  deliveryReportUrl: string
+  whatsappConfigured: boolean
+  statusCallbackUrl: string
 }
 
 const emptySettings: SmsSettings = {
-  environment: 'production',
-  username: '',
-  senderId: '',
+  baseUrl: '',
+  smsSender: '',
+  whatsappSender: '',
   configured: false,
-  deliveryReportUrl: '',
+  whatsappConfigured: false,
+  statusCallbackUrl: '',
 }
 
 export function SmsSettings({ configurationOnly = false }: { configurationOnly?: boolean }) {
@@ -56,6 +59,7 @@ export function SmsSettings({ configurationOnly = false }: { configurationOnly?:
   const [composeOpen, setComposeOpen] = useState(false)
   const [recipient, setRecipient] = useState('')
   const [draft, setDraft] = useState('')
+  const [channel, setChannel] = useState<'sms' | 'whatsapp'>('sms')
   const [search, setSearch] = useState('')
   const [sending, setSending] = useState(false)
 
@@ -101,16 +105,18 @@ export function SmsSettings({ configurationOnly = false }: { configurationOnly?:
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(Object.fromEntries(formData.entries())),
+        signal: AbortSignal.timeout(30_000),
       })
       const result = await response.json() as SmsSettings & { error?: string }
       if (!response.ok) throw new Error(result.error || 'Unable to save SMS settings.')
       setSettings((current) => ({ ...current, ...result, configured: true }))
-      setMessage('Africa’s Talking credentials saved securely.')
-      await loadSettings()
-      const form = document.getElementById('tenant-sms-form')
-      if (form instanceof HTMLFormElement) form.reset()
+      setMessage('Infobip credentials saved securely.')
+      const apiKey = document.querySelector<HTMLInputElement>('#tenant-sms-form input[name="apiKey"]')
+      if (apiKey) apiKey.value = ''
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to save SMS settings.')
+      setError(reason instanceof DOMException && (reason.name === 'TimeoutError' || reason.name === 'AbortError')
+        ? 'Saving timed out before the server confirmed the result. Refresh settings before trying again.'
+        : reason instanceof Error ? reason.message : 'Unable to save SMS settings.')
     } finally {
       setSaving(false)
     }
@@ -163,18 +169,19 @@ export function SmsSettings({ configurationOnly = false }: { configurationOnly?:
       const response = await fetch('/api/tenant/sms-messages', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ phone: recipient, message: draft }),
+        body: JSON.stringify({ phone: recipient, message: draft, channel }),
       })
       const result = await response.json() as { message?: string; error?: string }
-      if (!response.ok) throw new Error(result.error || 'Unable to send this SMS.')
-      setMessage(result.message || 'SMS message submitted.')
+      if (!response.ok) throw new Error(result.error || `Unable to send this ${channel === 'whatsapp' ? 'WhatsApp message' : 'SMS'}.`)
+      setMessage(result.message || `${channel === 'whatsapp' ? 'WhatsApp' : 'SMS'} message submitted.`)
       setRecipient('')
       setDraft('')
+      setChannel('sms')
       setComposeOpen(false)
       setFilter('all')
       await loadHistory('all')
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to send this SMS.')
+      setError(reason instanceof Error ? reason.message : `Unable to send this ${channel === 'whatsapp' ? 'WhatsApp message' : 'SMS'}.`)
     } finally {
       setSending(false)
     }
@@ -191,14 +198,18 @@ export function SmsSettings({ configurationOnly = false }: { configurationOnly?:
 
   if (configurationOnly) {
     return <section className="module-panel payment-settings-panel">
-      <div className="module-heading"><div><p className="eyebrow">COMMUNICATIONS</p><h2>SMS gateway</h2></div><span className={`availability-tag ${settings.configured ? 'availability-live' : 'availability-off'}`}>{settings.configured ? 'Configured' : 'Not configured'}</span></div>
-      <p>Configure the Africa’s Talking account used for workspace SMS. API keys are encrypted before storage and never shown again.</p>
-      <form id="tenant-sms-form" action={save} className="tenant-payment-form">
-        <label>Environment<select name="environment" value={settings.environment} onChange={(event) => setSettings((current) => ({ ...current, environment: event.target.value }))}><option value="production">Production</option><option value="sandbox">Sandbox</option></select></label>
-        <label>Africa’s Talking username<input name="username" autoComplete="off" value={settings.username} onChange={(event) => setSettings((current) => ({ ...current, username: event.target.value }))} required maxLength={100} /></label>
-        <label>API key<input name="apiKey" type="password" autoComplete="new-password" required minLength={8} maxLength={2048} /></label>
-        <label>Sender ID (optional)<input name="senderId" autoComplete="off" value={settings.senderId} onChange={(event) => setSettings((current) => ({ ...current, senderId: event.target.value }))} maxLength={11} pattern="[A-Za-z0-9]{1,11}" /></label>
-        <p className="tenant-payment-note">A sender ID must be approved by Africa’s Talking. Include the country code when entering recipient numbers, for example +254712345678.</p>
+      <div className="module-heading"><div><p className="eyebrow">COMMUNICATIONS</p><h2>Infobip messaging</h2></div><span className={`availability-tag ${settings.configured ? 'availability-live' : 'availability-off'}`}>{settings.configured ? 'SMS configured' : 'SMS not configured'}</span></div>
+      <p>Configure Infobip for SMS and optional WhatsApp messaging. The API key is encrypted before storage and never shown again.</p>
+      <form id="tenant-sms-form" className="tenant-payment-form" onSubmit={(event) => {
+        event.preventDefault()
+        void save(new FormData(event.currentTarget))
+      }}>
+        <label>Infobip Base URL<input name="baseUrl" autoComplete="url" value={settings.baseUrl} onChange={(event) => setSettings((current) => ({ ...current, baseUrl: event.target.value }))} required maxLength={253} placeholder="xxxxx.api.infobip.com" /></label>
+        <label>Infobip API key<input name="apiKey" type="password" autoComplete="new-password" minLength={8} maxLength={512} /><small>Required for first-time setup. Leave blank to keep the saved key.</small></label>
+        <label>SMS sender ID<input name="smsSender" autoComplete="off" value={settings.smsSender} onChange={(event) => setSettings((current) => ({ ...current, smsSender: event.target.value }))} required maxLength={30} placeholder="Your approved sender ID" /></label>
+        <label>WhatsApp sender number (optional)<input name="whatsappSender" autoComplete="off" value={settings.whatsappSender} onChange={(event) => setSettings((current) => ({ ...current, whatsappSender: event.target.value }))} maxLength={16} placeholder="+254712345678" pattern="[+][1-9][0-9]{7,14}" /></label>
+        <p className="tenant-payment-note">Use the Base URL and API key from your Infobip account, plus a sender ID enabled for SMS. Add your registered WhatsApp sender number to enable WhatsApp in the message composer. WhatsApp free-form messages require an open 24-hour customer service window; outside it, use an approved WhatsApp template. Set the server-side APP_URL to enable delivery callbacks.</p>
+        {settings.statusCallbackUrl && <p className="tenant-payment-note">Infobip delivery callback: <code>{settings.statusCallbackUrl}</code></p>}
         {error && <p className="auth-error" role="alert">{error}</p>}
         {message && <p className="tenant-payment-success" role="status">{message}</p>}
         <button className="primary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save SMS settings'}</button>
@@ -210,17 +221,19 @@ export function SmsSettings({ configurationOnly = false }: { configurationOnly?:
     <section className="module-panel payment-settings-panel">
       <div className="module-heading"><div><p className="eyebrow">SMS ACTIVITY</p><h2>Outbox</h2></div><div className="communications-sms-heading-actions"><span className={`availability-tag ${settings.configured ? 'availability-live' : 'availability-off'}`}>{settings.configured ? 'Configured' : 'Not configured'}</span><button type="button" className="primary-button" disabled={!settings.configured} onClick={() => setComposeOpen((open) => !open)}>{composeOpen ? 'Close composer' : '+ New message'}</button></div></div>
       {composeOpen && <form className="communications-compose-form" onSubmit={sendMessage}>
-        <div><span>NEW SMS</span><h3>Compose a message</h3><p>Send one SMS to a Kenyan mobile number. Delivery status will appear in the outbox.</p></div>
+        <div><span>NEW MESSAGE</span><h3>Compose a message</h3><p>Send one message to a Kenyan mobile number. Delivery status will appear in the outbox.</p></div>
+        <label>Channel<select value={channel} onChange={(event) => setChannel(event.target.value === 'whatsapp' ? 'whatsapp' : 'sms')}><option value="sms">SMS</option><option value="whatsapp" disabled={!settings.whatsappConfigured}>WhatsApp{settings.whatsappConfigured ? '' : ' (configure sender first)'}</option></select></label>
         <label>Recipient phone number<input required type="tel" inputMode="tel" autoComplete="tel" pattern={KENYAN_MOBILE_PHONE_PATTERN} maxLength={13} placeholder="0712345678 or +254712345678" title="Use 07 followed by 8 digits or +254 followed by 9 digits." value={recipient} onChange={(event) => setRecipient(event.target.value)} /></label>
         <label>Message<textarea required maxLength={1000} rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Type your message…" /></label>
-        <div className="communications-compose-actions"><small>{draft.length}/1000 characters. SMS charges are set by your provider.</small><button type="submit" className="primary-button" disabled={sending || !recipient.trim() || !draft.trim()}>{sending ? 'Sending…' : 'Send SMS'}</button></div>
+        {channel === 'whatsapp' && <p className="tenant-payment-note">WhatsApp free-form messages can be sent only during the 24-hour customer service window after the recipient messages you. Outside that window, an approved WhatsApp template is required.</p>}
+        <div className="communications-compose-actions"><small>{draft.length}/1000 characters. Charges are set by Infobip.</small><button type="submit" className="primary-button" disabled={sending || !recipient.trim() || !draft.trim() || (channel === 'whatsapp' && !settings.whatsappConfigured)}>{sending ? 'Sending…' : `Send ${channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}`}</button></div>
       </form>}
       {settings.configured && <div className="sms-test-panel">
         <h3>Send a test message</h3>
         <div className="sms-test-controls"><label htmlFor="sms-test-phone">Kenyan mobile number</label><input id="sms-test-phone" type="tel" value={testPhone} onChange={(event) => setTestPhone(event.target.value)} placeholder="0712345678 or +254712345678" title="Enter 07 followed by 8 digits or +254 followed by 9 digits." pattern={KENYAN_MOBILE_PHONE_PATTERN} maxLength={13} inputMode="tel" /><button className="text-button" type="button" disabled={testing || !testPhone.trim()} onClick={() => void sendTest()}>{testing ? 'Sending…' : 'Send test SMS'}</button></div>
       </div>}
       <div className="sms-deliveries">
-        <div className="sms-deliveries-heading"><div><h3>SMS delivery reports</h3><p>Automatic notices and messages sent from subscriber accounts.</p></div><button className="text-button" type="button" disabled={loadingHistory} onClick={() => void Promise.all([loadSettings(), loadHistory(filter)])}>{loadingHistory ? 'Refreshing…' : 'Refresh reports'}</button></div>
+        <div className="sms-deliveries-heading"><div><h3>Message delivery reports</h3><p>Automatic notices and messages sent from subscriber accounts.</p></div><button className="text-button" type="button" disabled={loadingHistory} onClick={() => void Promise.all([loadSettings(), loadHistory(filter)])}>{loadingHistory ? 'Refreshing…' : 'Refresh reports'}</button></div>
         <div className="sms-delivery-summary">
           {([
             ['queued', 'Queued'],
@@ -237,17 +250,17 @@ export function SmsSettings({ configurationOnly = false }: { configurationOnly?:
             const report = item.deliveryReport
             const failed = item.status === 'failed' || item.deliveryStatus === 'failed'
             return <tr key={item.id}>
-              <td><strong>{item.recipient}</strong><span className="sms-message-preview">{item.message ?? 'Message text unavailable: encryption key differs from the key used when this message was stored.'}</span>{item.messageError && <span className="sms-delivery-error">{item.messageError}</span>}{item.resendOfId && <small>Resent message</small>}</td>
+              <td><strong>{item.recipient} · {item.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}</strong><span className="sms-message-preview">{item.message ?? 'Message text unavailable: encryption key differs from the key used when this message was stored.'}</span>{item.messageError && <span className="sms-delivery-error">{item.messageError}</span>}{item.resendOfId && <small>Resent message</small>}</td>
               <td><span className={`sms-status-badge sms-status-${messageStatus(item).toLowerCase().replace(/\s+/g, '-')}`}>{messageStatus(item)}</span>{item.lastError && <span className="sms-delivery-error">{item.lastError}</span>}</td>
               <td>{new Date(item.sentAt || item.createdAt).toLocaleString()}</td>
-              <td>{report ? <><strong>{report.status || item.deliveryStatus}</strong>{report.failureReason && <span className="sms-delivery-error">{report.failureReason}</span>}{report.networkCode && <small>Network: {report.networkCode}</small>}{report.cost && <small>Cost: {report.cost}</small>}{item.deliveryReportedAt && <small>Reported {new Date(item.deliveryReportedAt).toLocaleString()}</small>}</> : item.deliveryStatus === 'pending' ? 'Awaiting provider report' : 'No provider report yet'}</td>
-              <td>{item.messageError ? <span className="sms-delivery-error">Cannot send or resend without the original encryption key.</span> : failed ? <button className="text-button" type="button" disabled={resendingId === item.id} onClick={() => void resendSms(item.id)}>{resendingId === item.id ? 'Resending…' : 'Resend SMS'}</button> : '—'}</td>
+              <td>{report ? <><strong>{report.status || item.deliveryStatus}</strong>{report.errorMessage && <span className="sms-delivery-error">{report.errorMessage}</span>}{report.errorCode && <small>Infobip error code: {report.errorCode}</small>}{item.deliveryReportedAt && <small>Reported {new Date(item.deliveryReportedAt).toLocaleString()}</small>}</> : item.deliveryStatus === 'pending' ? 'Awaiting provider report' : 'No provider report yet'}</td>
+              <td>{item.messageError ? <span className="sms-delivery-error">Cannot send or resend without the original encryption key.</span> : failed ? <button className="text-button" type="button" disabled={resendingId === item.id} onClick={() => void resendSms(item.id)}>{resendingId === item.id ? 'Resending…' : `Resend ${item.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}`}</button> : '—'}</td>
             </tr>
           })}</tbody></table></div>
           {!search.trim() && history.messages.length < history.total && <button className="text-button sms-load-more" type="button" disabled={loadingHistory} onClick={() => void loadHistory(filter, true)}>{loadingHistory ? 'Loading…' : `Load more (${history.total - history.messages.length} remaining)`}</button>}
           {search.trim() && !history.messages.some((item) => `${item.recipient} ${item.message || ''}`.toLowerCase().includes(search.trim().toLowerCase())) && <p className="tenant-payment-note">No loaded messages match your search.</p>}
         </> : <p className="tenant-payment-note">{loadingHistory ? 'Loading SMS messages…' : 'No SMS messages match this filter yet.'}</p>}
-        {settings.deliveryReportUrl && <div className="sms-report-setup"><strong>Delivery-report callback URL</strong><p>Set this callback URL in your Africa’s Talking account to receive delivery confirmations.</p><input readOnly value={settings.deliveryReportUrl} onFocus={(event) => event.currentTarget.select()} aria-label="Africa’s Talking delivery-report callback URL" /></div>}
+        {settings.statusCallbackUrl && <div className="sms-report-setup"><strong>Infobip delivery callback URL</strong><p>The app sends this secured callback URL with each outbound message to update delivery status.</p><input readOnly value={settings.statusCallbackUrl} onFocus={(event) => event.currentTarget.select()} aria-label="Infobip delivery callback URL" /></div>}
       </div>
     </section>
   )

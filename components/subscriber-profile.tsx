@@ -11,6 +11,7 @@ import {
 } from '@/lib/subscriber-usage'
 import { exportSubscriberUsagePdf } from '@/lib/report-export'
 import { formatKenyanPhoneInput, KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
+import { SUPPORT_TICKET_CATEGORIES, supportTicketCategoryLabel } from '@/lib/support-tickets'
 
 export type SubscriberProfileData = {
   id: string
@@ -87,7 +88,7 @@ export type SubscriberProfileData = {
     sentAt: string | null
     deliveryReportedAt: string | null
   }>
-  tickets: Array<{ id: string; subject: string; description: string; status: string; priority: string; createdAt: string; updatedAt: string }>
+  tickets: Array<{ id: string; subject: string; description: string; category: string; status: string; priority: string; createdAt: string; updatedAt: string }>
   packageHistory: Array<{ id: string; productName: string; amount: number; status: string; receipt: string | null; createdAt: string; paidAt: string | null }>
   analytics: {
     paymentTrend: Array<{ month: string; amount: string; paymentCount: number }>
@@ -96,6 +97,8 @@ export type SubscriberProfileData = {
     hourlyUsage24h: Array<{ hourAt: string | null; sessionCount: number; bytesIn: string; bytesOut: string }>
   }
 }
+
+type SubscriberPlanOption = { id: string; name: string; type: string; rateLimit: string; monthlyPrice: number; active: boolean; availability: string }
 
 function formatDate(value: string | null, options: Intl.DateTimeFormatOptions = { dateStyle: 'medium', timeStyle: 'short' }) {
   if (!value) return '—'
@@ -550,7 +553,7 @@ export function SubscriberProfile({
   const [liveData, setLiveData] = useState<SubscriberLiveData | null>(null)
   const [liveRate, setLiveRate] = useState<SubscriberUsageRate | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [actionDialog, setActionDialog] = useState<'edit' | 'expiry' | 'sms' | 'credentials' | 'payment_details' | 'invoice' | 'compensate' | 'ticket' | null>(null)
+  const [actionDialog, setActionDialog] = useState<'edit' | 'expiry' | 'sms' | 'credentials' | 'payment_details' | 'invoice' | 'compensate' | 'ticket' | 'plan' | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [exportingReport, setExportingReport] = useState(false)
   const [actionMessage, setActionMessage] = useState('')
@@ -574,7 +577,10 @@ export function SubscriberProfile({
   })
   const [ticketSubject, setTicketSubject] = useState('')
   const [ticketDescription, setTicketDescription] = useState('')
+  const [ticketCategory, setTicketCategory] = useState('no_internet')
   const [ticketPriority, setTicketPriority] = useState('normal')
+  const [planOptions, setPlanOptions] = useState<SubscriberPlanOption[]>([])
+  const [selectedPackageId, setSelectedPackageId] = useState('')
   const [clockNow, setClockNow] = useState(Date.now())
   const [lastLiveCheck, setLastLiveCheck] = useState('')
   const [lastDetailsCheck, setLastDetailsCheck] = useState(() => new Date().toISOString())
@@ -591,6 +597,7 @@ export function SubscriberProfile({
     return { day, count: entry?.sessionCount || 0, bytes: BigInt(entry?.bytesIn || '0') + BigInt(entry?.bytesOut || '0') }
   }), [activityByDay])
   const activeSession = liveData?.activeSessions[0] || data.sessions.find((session) => !session.stoppedAt)
+  const selectedPlanOption = planOptions.find((plan) => plan.id === selectedPackageId)
   const expiry = data.expiresAt ? new Date(data.expiresAt) : null
   const isOnline = liveData ? liveData.activeSessions.length > 0 : data.sessionSummary.activeSessions > 0
   const visibleSession = liveData?.activeSessions[0]
@@ -694,6 +701,33 @@ export function SubscriberProfile({
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [actionBusy, actionDialog])
 
+  useEffect(() => {
+    if (actionDialog !== 'plan') return
+    let active = true
+    const loadPlans = async () => {
+      try {
+        const response = await fetch('/api/packages', { cache: 'no-store' })
+        const result = await response.json() as { error?: string } | SubscriberPlanOption[]
+        if (!response.ok || !Array.isArray(result)) throw new Error(!Array.isArray(result) && result.error ? result.error : 'Unable to load service packages.')
+        const isPppoe = data.planDetails?.type === 'PPPoE' || data.accountSource === 'PPPoE setup'
+        const eligible = result.filter((plan) => plan.active && plan.availability !== 'off' && (plan.type === 'PPPoE') === isPppoe)
+        if (active) {
+          setPlanOptions(eligible)
+          setSelectedPackageId(eligible.find((plan) => plan.name === data.plan)?.id || eligible[0]?.id || '')
+          if (eligible.length === 0) setActionMessage('No enabled packages are available for this subscriber’s connection type.')
+        }
+      } catch (reason) {
+        if (active) {
+          setPlanOptions([])
+          setActionError(true)
+          setActionMessage(reason instanceof Error ? reason.message : 'Unable to load service packages.')
+        }
+      }
+    }
+    void loadPlans()
+    return () => { active = false }
+  }, [actionDialog, data.accountNumber, data.plan])
+
   const performAction = async (action: string, values: Record<string, unknown> = {}) => {
     setActionBusy(true)
     setActionMessage('')
@@ -752,7 +786,9 @@ export function SubscriberProfile({
         idempotencyKey: crypto.randomUUID(),
       })
     } else if (actionDialog === 'ticket') {
-      void performAction('ticket', { subject: ticketSubject, description: ticketDescription, priority: ticketPriority })
+      void performAction('ticket', { subject: ticketSubject, description: ticketDescription, category: ticketCategory, priority: ticketPriority })
+    } else if (actionDialog === 'plan') {
+      void performAction('plan', { packageId: selectedPackageId })
     }
   }
 
@@ -865,6 +901,7 @@ export function SubscriberProfile({
             <button className="outline-button" type="button" onClick={onClose}>Close profile</button>
             <button className="outline-button" type="button" disabled={!data.phone || actionBusy} onClick={() => { setActionMessage(''); setActionDialog('sms') }}><MessageCircle size={14} /> SMS</button>
             <button className="outline-button subscriber-profile-icon-action" type="button" aria-label="Edit subscriber" disabled={actionBusy} onClick={() => { setProfileName(data.name); setProfileEmail(data.email); setProfilePhone(data.phone || ''); setActionMessage(''); setActionDialog('edit') }}><Pencil size={14} /></button>
+            <button className="outline-button" type="button" disabled={actionBusy || !data.radiusUsername} onClick={() => { setActionMessage(''); setActionError(false); setActionDialog('plan') }}><Router size={14} /> Change package</button>
             <button className="primary-button subscriber-profile-expiry-action" type="button" disabled={actionBusy || !data.radiusUsername} onClick={() => { setActionMessage(''); setActionDialog('expiry') }}><CalendarDays size={14} /> Change expiry</button>
             <div className="subscriber-profile-menu-anchor">
               <button className="outline-button subscriber-profile-icon-action" type="button" aria-label="More subscriber actions" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><Ellipsis size={17} /></button>
@@ -1070,9 +1107,9 @@ export function SubscriberProfile({
 
       {tab === 'Tickets' && <section className="subscriber-profile-panel subscriber-profile-table-panel">
         <div className="subscriber-profile-section-heading"><div><h4><Ticket size={16} /> Support tickets</h4><p>Tickets linked to this subscriber account.</p></div><button type="button" className="outline-button" onClick={() => { setActionMessage(''); setActionDialog('ticket') }}><Ticket size={14} /> New ticket</button></div>
-        <div className="subscriber-profile-table-scroll"><table><thead><tr><th>CREATED</th><th>SUBJECT</th><th>PRIORITY</th><th>STATUS</th><th>UPDATED</th></tr></thead><tbody>
-          {data.tickets.map((ticket) => <tr key={ticket.id}><td>{formatDate(ticket.createdAt)}</td><td><strong>{ticket.subject}</strong><small>{ticket.description}</small></td><td>{ticket.priority}</td><td>{ticket.status}</td><td>{formatDate(ticket.updatedAt)}</td></tr>)}
-          {!data.tickets.length && <tr><td colSpan={5} className="subscriber-profile-empty">No support tickets are linked to this subscriber.</td></tr>}
+        <div className="subscriber-profile-table-scroll"><table><thead><tr><th>CREATED</th><th>SUBJECT</th><th>CATEGORY</th><th>PRIORITY</th><th>STATUS</th><th>UPDATED</th></tr></thead><tbody>
+          {data.tickets.map((ticket) => <tr key={ticket.id}><td>{formatDate(ticket.createdAt)}</td><td><strong>{ticket.subject}</strong><small>{ticket.description}</small></td><td>{supportTicketCategoryLabel(ticket.category)}</td><td>{ticket.priority}</td><td>{ticket.status}</td><td>{formatDate(ticket.updatedAt)}</td></tr>)}
+          {!data.tickets.length && <tr><td colSpan={6} className="subscriber-profile-empty">No support tickets are linked to this subscriber.</td></tr>}
         </tbody></table></div>
       </section>}
 
@@ -1098,7 +1135,7 @@ export function SubscriberProfile({
           <div className="subscriber-action-dialog-heading"><div><span>SUBSCRIBER ACTION</span><h3 id={`subscriber-action-title-${data.id}`}>{({
             edit: 'Edit subscriber', expiry: 'Change subscription expiry', sms: 'Send SMS',
             credentials: 'Send login credentials', payment_details: 'Send payment details',
-            invoice: 'Generate invoice', compensate: 'Compensate subscriber', ticket: 'Create support ticket',
+            invoice: 'Generate invoice', compensate: 'Compensate subscriber', ticket: 'Create support ticket', plan: 'Change service package',
           })[actionDialog]}</h3></div><button type="button" aria-label="Close dialog" disabled={actionBusy} onClick={() => setActionDialog(null)}><X size={17} /></button></div>
           <form onSubmit={submitDialogAction}>
             {actionDialog === 'edit' && <div className="subscriber-action-form-grid">
@@ -1119,11 +1156,17 @@ export function SubscriberProfile({
             </div>}
             {actionDialog === 'ticket' && <div className="subscriber-action-form-grid">
               <label className="subscriber-action-wide">Subject<input required maxLength={180} value={ticketSubject} onChange={(event) => setTicketSubject(event.target.value)} /></label>
+              <label>Category<select value={ticketCategory} onChange={(event) => setTicketCategory(event.target.value)}>{SUPPORT_TICKET_CATEGORIES.map((category) => <option key={category} value={category}>{supportTicketCategoryLabel(category)}</option>)}</select></label>
               <label>Priority<select value={ticketPriority} onChange={(event) => setTicketPriority(event.target.value)}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
               <label className="subscriber-action-wide">Description<textarea required maxLength={4000} rows={4} value={ticketDescription} onChange={(event) => setTicketDescription(event.target.value)} /></label>
             </div>}
+            {actionDialog === 'plan' && <div className="subscriber-action-form-grid">
+              <p className="subscriber-action-wide">Current package: <strong>{data.plan || 'Not assigned'}</strong> · {formatMoney(data.monthlyRate)} per month. Choose a package to change service speed and price. The price updates on the next invoice, without proration. The new speed applies at the next authentication or reconnect.</p>
+              <label className="subscriber-action-wide">Service package<select required value={selectedPackageId} onChange={(event) => setSelectedPackageId(event.target.value)} disabled={planOptions.length === 0}>{planOptions.map((plan) => <option key={plan.id} value={plan.id}>{plan.name} · {plan.rateLimit} · {formatMoney(plan.monthlyPrice)} / month{plan.name === data.plan ? ' · Current' : ''}</option>)}</select></label>
+              {selectedPlanOption && <p className="subscriber-action-wide">Selected: <strong>{selectedPlanOption.name}</strong> · {selectedPlanOption.rateLimit}. {selectedPlanOption.monthlyPrice > data.monthlyRate ? `Price increases by ${formatMoney(selectedPlanOption.monthlyPrice - data.monthlyRate)} per month.` : selectedPlanOption.monthlyPrice < data.monthlyRate ? `Price decreases by ${formatMoney(data.monthlyRate - selectedPlanOption.monthlyPrice)} per month.` : 'Monthly price remains unchanged.'}</p>}
+            </div>}
             {actionError && actionMessage && <p className="subscriber-action-error" role="alert">{actionMessage}</p>}
-            <div className="subscriber-action-dialog-actions"><button type="button" className="outline-button" disabled={actionBusy} onClick={() => setActionDialog(null)}>Cancel</button><button className="primary-button" type="submit" disabled={actionBusy}>{actionBusy ? 'Working…' : actionDialog === 'credentials' || actionDialog === 'payment_details' ? 'Confirm and send' : actionDialog === 'invoice' ? 'Generate invoice' : 'Save'}</button></div>
+            <div className="subscriber-action-dialog-actions"><button type="button" className="outline-button" disabled={actionBusy} onClick={() => setActionDialog(null)}>Cancel</button><button className="primary-button" type="submit" disabled={actionBusy || (actionDialog === 'plan' && !selectedPackageId)}>{actionBusy ? 'Working…' : actionDialog === 'credentials' || actionDialog === 'payment_details' ? 'Confirm and send' : actionDialog === 'invoice' ? 'Generate invoice' : actionDialog === 'plan' ? 'Update package' : 'Save'}</button></div>
           </form>
         </div>
       </div>}

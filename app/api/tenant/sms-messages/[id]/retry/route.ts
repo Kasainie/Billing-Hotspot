@@ -13,6 +13,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   try {
     const result = await resendTenantSms(session.tenantId, id)
     if ('error' in result) return NextResponse.json({ error: result.error }, { status: result.httpStatus })
+    if (result.status === 'failed') {
+      return NextResponse.json({ error: result.error || 'Infobip rejected the message.' }, { status: 502 })
+    }
     return NextResponse.json({
       id: result.id,
       status: result.status,

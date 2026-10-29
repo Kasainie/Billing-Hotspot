@@ -11,6 +11,7 @@ test('manual workspace and platform mutations require password confirmation', ()
   assert.equal(requiresAdminPasswordConfirmation('/api/tenant/members', 'POST'), true)
   assert.equal(requiresAdminPasswordConfirmation('/api/tenant/members/123', 'PATCH'), true)
   assert.equal(requiresAdminPasswordConfirmation('/api/tenant/members/123', 'DELETE'), true)
+  assert.equal(requiresAdminPasswordConfirmation('/api/tenant/sms-settings', 'PUT'), true)
 })
 
 test('safe requests and automated integration endpoints do not require confirmation', () => {

@@ -313,6 +313,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
         id: supportTickets.id,
         subject: supportTickets.subject,
         description: supportTickets.description,
+        category: supportTickets.category,
         status: supportTickets.status,
         priority: supportTickets.priority,
         createdAt: supportTickets.createdAt,

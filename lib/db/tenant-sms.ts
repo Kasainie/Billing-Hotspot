@@ -1,71 +1,125 @@
 import { and, asc, count, desc, eq, lt, lte, or, type SQL } from 'drizzle-orm'
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomUUID } from 'node:crypto'
 import { db } from '@/lib/db'
 import { customers, smsMessages, tenantSmsSettings } from '@/lib/db/schema'
 import { decryptTenantSecret, encryptTenantSecret, tryDecryptTenantSecret } from '@/lib/db/tenant-secrets'
 import { normalizeKenyanPhone } from '@/lib/daraja'
 import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
-import { sendAfricaTalkingSms, type AfricaTalkingConfiguration } from '@/lib/sms'
+import { sendInfobipMessage, InfobipApiError, type InfobipConfiguration, type MessageChannel } from '@/lib/sms'
 
-type TenantSmsInput = {
-  environment: 'sandbox' | 'production'
-  username: string
-  apiKey: string
-  senderId: string | null
+type TenantInfobipInput = {
+  baseUrl: string
+  apiKey: string | null
+  smsSender: string
+  whatsappSender: string | null
 }
 
-export function validateTenantSmsInput(input: Record<string, unknown>): TenantSmsInput | null {
-  const environment = input.environment
-  const username = typeof input.username === 'string' ? input.username.trim() : ''
-  const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
-  const senderId = typeof input.senderId === 'string' ? input.senderId.trim() : ''
-  if ((environment !== 'sandbox' && environment !== 'production') ||
-      username.length < 1 || username.length > 100 ||
-      apiKey.length < 8 || apiKey.length > 2048 ||
-      senderId.length > 11 || (senderId && !/^[A-Za-z0-9]{1,11}$/.test(senderId))) return null
-  return { environment, username, apiKey, senderId: senderId || null }
+export function validateTenantInfobipInput(input: Record<string, unknown>): TenantInfobipInput | null {
+  const baseUrlInput = typeof input.baseUrl === 'string' ? input.baseUrl.trim().replace(/\/+$/, '') : ''
+  const baseUrl = /^https:\/\//i.test(baseUrlInput) ? baseUrlInput : `https://${baseUrlInput}`
+  const apiKeyInput = typeof input.apiKey === 'string' ? input.apiKey.trim() : ''
+  const apiKey = apiKeyInput || null
+  const smsSender = typeof input.smsSender === 'string' ? input.smsSender.trim() : ''
+  const whatsappSender = typeof input.whatsappSender === 'string' ? input.whatsappSender.trim() : ''
+  const validPhone = (value: string) => /^\+[1-9]\d{7,14}$/.test(value)
+  let parsedBaseUrl: URL
+  try {
+    parsedBaseUrl = new URL(baseUrl)
+  } catch {
+    return null
+  }
+  if (parsedBaseUrl.protocol !== 'https:' ||
+      !parsedBaseUrl.hostname.toLowerCase().endsWith('.infobip.com') ||
+      parsedBaseUrl.port ||
+      parsedBaseUrl.username ||
+      parsedBaseUrl.password ||
+      parsedBaseUrl.pathname !== '/' ||
+      parsedBaseUrl.search ||
+      parsedBaseUrl.hash ||
+      (apiKey && (apiKey.length < 8 || apiKey.length > 512)) ||
+      !smsSender ||
+      smsSender.length > 30 ||
+      (whatsappSender && !validPhone(whatsappSender))) return null
+  return {
+    baseUrl: parsedBaseUrl.origin,
+    apiKey,
+    smsSender,
+    whatsappSender: whatsappSender || null,
+  }
 }
 
-export async function saveTenantSmsSettings(tenantId: string, input: TenantSmsInput) {
+export async function saveTenantInfobipSettings(tenantId: string, input: TenantInfobipInput) {
+  const [existing] = await db.select({
+    apiKeyEncrypted: tenantSmsSettings.infobipApiKeyEncrypted,
+  }).from(tenantSmsSettings).where(eq(tenantSmsSettings.tenantId, tenantId)).limit(1)
+  const apiKeyEncrypted = input.apiKey
+    ? encryptTenantSecret(input.apiKey)
+    : existing?.apiKeyEncrypted
+  if (!apiKeyEncrypted) throw new Error('INFOBIP_API_KEY_REQUIRED')
+
   const values = {
     tenantId,
-    environment: input.environment,
-    username: input.username,
-    apiKeyEncrypted: encryptTenantSecret(input.apiKey),
-    senderId: input.senderId,
+    infobipBaseUrl: input.baseUrl,
+    infobipApiKeyEncrypted: apiKeyEncrypted,
+    infobipSmsSender: input.smsSender,
+    infobipWhatsappSender: input.whatsappSender,
     updatedAt: new Date(),
   }
   await db.insert(tenantSmsSettings).values(values).onConflictDoUpdate({
     target: tenantSmsSettings.tenantId,
     set: {
-      environment: values.environment,
-      username: values.username,
-      apiKeyEncrypted: values.apiKeyEncrypted,
-      senderId: values.senderId,
+      infobipBaseUrl: values.infobipBaseUrl,
+      infobipSmsSender: values.infobipSmsSender,
+      infobipWhatsappSender: values.infobipWhatsappSender,
       updatedAt: values.updatedAt,
+      ...(input.apiKey ? { infobipApiKeyEncrypted: values.infobipApiKeyEncrypted } : {}),
     },
   })
 }
 
-export async function getTenantSmsConfiguration(tenantId: string): Promise<AfricaTalkingConfiguration | null> {
-  const [settings] = await db.select().from(tenantSmsSettings)
+export async function getTenantInfobipConfiguration(tenantId: string): Promise<InfobipConfiguration | null> {
+  const [settings] = await db.select({
+    baseUrl: tenantSmsSettings.infobipBaseUrl,
+    apiKeyEncrypted: tenantSmsSettings.infobipApiKeyEncrypted,
+    smsSender: tenantSmsSettings.infobipSmsSender,
+    whatsappSender: tenantSmsSettings.infobipWhatsappSender,
+  }).from(tenantSmsSettings)
     .where(eq(tenantSmsSettings.tenantId, tenantId))
     .limit(1)
-  if (!settings) return null
+  if (!settings?.baseUrl || !settings.apiKeyEncrypted || !settings.smsSender) return null
   return {
-    environment: settings.environment === 'sandbox' ? 'sandbox' : 'production',
-    username: settings.username,
+    baseUrl: settings.baseUrl,
     apiKey: decryptTenantSecret(settings.apiKeyEncrypted),
-    senderId: settings.senderId,
+    smsSender: settings.smsSender,
+    whatsappSender: settings.whatsappSender,
   }
+}
+
+export function getInfobipStatusCallbackToken(tenantId: string) {
+  const configuredKey = process.env.TENANT_SECRETS_ENCRYPTION_KEY?.trim()
+  if (!configuredKey) throw new Error('TENANT_SECRETS_ENCRYPTION_KEY is required for Infobip callbacks.')
+  return createHmac('sha256', configuredKey).update(`infobip-status:${tenantId}`).digest('hex')
+}
+
+function getInfobipStatusCallbackUrl(tenantId: string) {
+  const configuredOrigin = process.env.APP_URL?.trim()
+  if (!configuredOrigin) return null
+  const origin = new URL(configuredOrigin)
+  if (origin.protocol !== 'https:' && origin.hostname !== 'localhost' && origin.hostname !== '127.0.0.1') {
+    throw new Error('APP_URL must use HTTPS for Infobip delivery callbacks.')
+  }
+  const callback = new URL('/api/infobip/status', origin)
+  callback.searchParams.set('tenantId', tenantId)
+  callback.searchParams.set('token', getInfobipStatusCallbackToken(tenantId))
+  return callback.toString()
 }
 
 export async function sendTestTenantSms(tenantId: string, phoneInput: string) {
   const phone = normalizeKenyanPhoneInput(phoneInput)
   if (!phone) throw new Error('Enter a valid Kenyan number: use 07 followed by 8 digits or +254 followed by 9 digits.')
-  const configuration = await getTenantSmsConfiguration(tenantId)
-  if (!configuration) throw new Error('Configure Africa’s Talking credentials before sending a test message.')
-  await sendAfricaTalkingSms(configuration, phone, 'Your SMS settings are working. This is a test message.')
+  const configuration = await getTenantInfobipConfiguration(tenantId)
+  if (!configuration) throw new Error('Configure Infobip SMS credentials before sending a test message.')
+  await sendInfobipMessage(configuration, `+${phone}`, 'Your Infobip SMS settings are working. This is a test message.', 'sms', null)
 }
 
 export async function sendSubscriberSms(tenantId: string, customerId: string, message: string) {
@@ -80,8 +134,8 @@ export async function sendSubscriberSms(tenantId: string, customerId: string, me
   if (!customer.phone || !normalizeKenyanPhone(customer.phone)) {
     return { error: 'This subscriber does not have a valid Kenyan mobile number.', httpStatus: 409 as const }
   }
-  const configuration = await getTenantSmsConfiguration(tenantId)
-  if (!configuration) return { error: 'Configure Africa’s Talking in Communications before sending messages.', httpStatus: 409 as const }
+  const configuration = await getTenantInfobipConfiguration(tenantId)
+  if (!configuration) return { error: 'Configure Infobip in Communications before sending messages.', httpStatus: 409 as const }
   const recipient = normalizeKenyanPhone(customer.phone)
   if (!recipient) return { error: 'This subscriber does not have a valid Kenyan mobile number.', httpStatus: 409 as const }
 
@@ -95,36 +149,48 @@ export async function sendSubscriberSms(tenantId: string, customerId: string, me
   await deliverTenantSms(queued.id)
   const [delivery] = await db.select({
     status: smsMessages.status,
+    lastError: smsMessages.lastError,
   }).from(smsMessages).where(and(
     eq(smsMessages.id, queued.id),
     eq(smsMessages.tenantId, tenantId),
   )).limit(1)
+  if (delivery?.status === 'failed') {
+    return { error: delivery.lastError || 'Infobip rejected the SMS.', httpStatus: 502 as const }
+  }
   return { status: delivery?.status === 'sent' ? 'sent' as const : 'queued' as const }
 }
 
-export async function sendManualTenantSms(tenantId: string, phoneInput: string, message: string) {
+export async function sendManualTenantSms(tenantId: string, phoneInput: string, message: string, channel: MessageChannel = 'sms') {
   const recipient = normalizeKenyanPhoneInput(phoneInput)
   if (!recipient) return { error: 'Enter a valid Kenyan number: use 07 followed by 8 digits or +254 followed by 9 digits.', httpStatus: 400 as const }
   const normalizedMessage = message.trim()
   if (!normalizedMessage || normalizedMessage.length > 1000) {
     return { error: 'Enter a message between 1 and 1000 characters.', httpStatus: 400 as const }
   }
-  const configuration = await getTenantSmsConfiguration(tenantId)
-  if (!configuration) return { error: 'Configure Africa’s Talking credentials before sending messages.', httpStatus: 409 as const }
+  const configuration = await getTenantInfobipConfiguration(tenantId)
+  if (!configuration) return { error: 'Configure Infobip credentials before sending messages.', httpStatus: 409 as const }
+  if (channel === 'whatsapp' && !configuration.whatsappSender) {
+    return { error: 'Configure an Infobip WhatsApp sender before sending WhatsApp messages.', httpStatus: 409 as const }
+  }
   const [queued] = await db.insert(smsMessages).values({
     tenantId,
     eventKey: `manual:${randomUUID()}`,
+    channel,
     recipient,
     messageEncrypted: encryptTenantSecret(normalizedMessage),
   }).returning({ id: smsMessages.id })
   await deliverTenantSms(queued.id)
   const [delivery] = await db.select({
     status: smsMessages.status,
+    lastError: smsMessages.lastError,
   }).from(smsMessages).where(and(
     eq(smsMessages.id, queued.id),
     eq(smsMessages.tenantId, tenantId),
   )).limit(1)
-  return { status: delivery?.status === 'failed' ? 'failed' as const : delivery?.status === 'sent' ? 'sent' as const : 'queued' as const }
+  if (delivery?.status === 'failed') {
+    return { error: delivery.lastError || 'Infobip rejected the message.', httpStatus: 502 as const }
+  }
+  return { status: delivery?.status === 'sent' ? 'sent' as const : 'queued' as const }
 }
 
 export async function enqueueTenantSms(
@@ -164,13 +230,26 @@ async function deliverTenantSms(id: string) {
   )).returning()
   if (!claimed) return
 
+  let configurationMissing = false
   try {
-    const configuration = await getTenantSmsConfiguration(claimed.tenantId)
-    if (!configuration) throw new Error('Workspace SMS credentials are not configured.')
-    const providerMessageId = await sendAfricaTalkingSms(
+    const configuration = await getTenantInfobipConfiguration(claimed.tenantId)
+    if (!configuration) {
+      configurationMissing = true
+      throw new Error('Workspace Infobip credentials are not configured.')
+    }
+    if (claimed.channel !== 'sms' && claimed.channel !== 'whatsapp') {
+      throw new Error('The queued message has an unsupported delivery channel.')
+    }
+    if (claimed.channel === 'whatsapp' && !configuration.whatsappSender) {
+      configurationMissing = true
+      throw new Error('Workspace Infobip WhatsApp sender is not configured.')
+    }
+    const providerMessageId = await sendInfobipMessage(
       configuration,
-      claimed.recipient,
+      `+${claimed.recipient.replace(/^\+/, '')}`,
       decryptTenantSecret(claimed.messageEncrypted),
+      claimed.channel,
+      getInfobipStatusCallbackUrl(claimed.tenantId),
     )
     await db.update(smsMessages).set({
       status: 'sent',
@@ -182,10 +261,8 @@ async function deliverTenantSms(id: string) {
     }).where(and(eq(smsMessages.id, id), eq(smsMessages.status, 'sending')))
   } catch (error) {
     const attempts = claimed.attempts + 1
-    const isConfigured = await db.select({ tenantId: tenantSmsSettings.tenantId }).from(tenantSmsSettings)
-      .where(eq(tenantSmsSettings.tenantId, claimed.tenantId)).limit(1)
-    const configurationMissing = isConfigured.length === 0
-    const permanentlyFailed = !configurationMissing && attempts >= 8
+    const permanentlyFailed = (error instanceof InfobipApiError && !error.retryable) ||
+      (!configurationMissing && attempts >= 8)
     const retryDelayMinutes = configurationMissing ? 30 : Math.min(60, 5 * 2 ** (attempts - 1))
     await db.update(smsMessages).set({
       status: permanentlyFailed ? 'failed' : 'queued',
@@ -195,7 +272,7 @@ async function deliverTenantSms(id: string) {
       lastError: error instanceof Error ? error.message.slice(0, 500) : 'SMS delivery failed.',
       updatedAt: new Date(),
     }).where(and(eq(smsMessages.id, id), eq(smsMessages.status, 'sending')))
-    console.error('Africa’s Talking SMS delivery failed', { tenantId: claimed.tenantId, messageId: id, error })
+    console.error('Infobip message delivery failed', { tenantId: claimed.tenantId, messageId: id, error })
   }
 }
 
@@ -211,24 +288,26 @@ export async function processQueuedTenantSms() {
   for (const message of dueMessages) await deliverTenantSms(message.id)
 }
 
-export async function getTenantSmsOverview(tenantId: string, origin: string) {
-  const reportSecret = process.env.SMS_DELIVERY_REPORT_SECRET?.trim() || ''
-  const reportUrl = /^[A-Za-z0-9_-]{32,256}$/.test(reportSecret)
-    ? new URL(`/api/sms/delivery-report?token=${encodeURIComponent(reportSecret)}`, process.env.APP_URL?.trim() || origin).toString()
-    : ''
+export async function getTenantSmsOverview(tenantId: string) {
   const [settings] = await Promise.all([
     db.select({
-      environment: tenantSmsSettings.environment,
-      username: tenantSmsSettings.username,
-      senderId: tenantSmsSettings.senderId,
+      baseUrl: tenantSmsSettings.infobipBaseUrl,
+      smsSender: tenantSmsSettings.infobipSmsSender,
+      whatsappSender: tenantSmsSettings.infobipWhatsappSender,
+      hasApiKey: tenantSmsSettings.infobipApiKeyEncrypted,
     }).from(tenantSmsSettings).where(eq(tenantSmsSettings.tenantId, tenantId)).limit(1),
   ])
+  const callbackOrigin = process.env.APP_URL?.trim()
+  const callback = callbackOrigin ? new URL('/api/infobip/status', callbackOrigin) : null
+  callback?.searchParams.set('tenantId', tenantId)
+  if (callback) callback.searchParams.set('token', getInfobipStatusCallbackToken(tenantId))
   return {
-    configured: settings.length > 0,
-    environment: settings[0]?.environment || 'production',
-    username: settings[0]?.username || '',
-    senderId: settings[0]?.senderId || '',
-    deliveryReportUrl: reportUrl,
+    configured: Boolean(settings[0]?.baseUrl && settings[0]?.hasApiKey && settings[0]?.smsSender),
+    baseUrl: settings[0]?.baseUrl || '',
+    smsSender: settings[0]?.smsSender || '',
+    whatsappSender: settings[0]?.whatsappSender || '',
+    whatsappConfigured: Boolean(settings[0]?.whatsappSender),
+    statusCallbackUrl: callback?.toString() || '',
   }
 }
 
@@ -247,6 +326,7 @@ export async function getTenantSmsMessages(tenantId: string, status: string, off
     db.select({
       id: smsMessages.id,
       recipient: smsMessages.recipient,
+      channel: smsMessages.channel,
       status: smsMessages.status,
       deliveryStatus: smsMessages.deliveryStatus,
       lastError: smsMessages.lastError,
@@ -306,11 +386,15 @@ export async function resendTenantSms(tenantId: string, messageId: string) {
   if (original.status !== 'failed' && original.deliveryStatus !== 'failed') {
     return { error: 'Only failed messages can be resent.', httpStatus: 409 as const }
   }
-  const configuration = await getTenantSmsConfiguration(tenantId)
-  if (!configuration) return { error: 'Configure Africa’s Talking in Communications before resending messages.', httpStatus: 409 as const }
+  const configuration = await getTenantInfobipConfiguration(tenantId)
+  if (!configuration) return { error: 'Configure Infobip in Communications before resending messages.', httpStatus: 409 as const }
+  if (original.channel === 'whatsapp' && !configuration.whatsappSender) {
+    return { error: 'Configure an Infobip WhatsApp sender before resending this message.', httpStatus: 409 as const }
+  }
   const [resend] = await db.insert(smsMessages).values({
     tenantId,
     eventKey: `resend:${original.id}:${randomUUID()}`,
+    channel: original.channel,
     recipient: original.recipient,
     messageEncrypted: original.messageEncrypted,
     resendOfId: original.id,
@@ -319,49 +403,52 @@ export async function resendTenantSms(tenantId: string, messageId: string) {
   const [delivery] = await db.select({
     status: smsMessages.status,
     deliveryStatus: smsMessages.deliveryStatus,
+    lastError: smsMessages.lastError,
   }).from(smsMessages).where(and(
     eq(smsMessages.id, resend.id),
     eq(smsMessages.tenantId, tenantId),
   )).limit(1)
+  if (delivery?.status === 'failed') {
+    return { error: delivery.lastError || 'Infobip rejected the message.', httpStatus: 502 as const }
+  }
   return {
     id: resend.id,
     status: delivery?.status === 'sent' ? delivery.deliveryStatus : delivery?.status || 'queued',
   }
 }
 
-export async function recordSmsDeliveryReport(input: {
+export async function recordInfobipDeliveryReport(input: {
+  tenantId: string
   providerMessageId: string
   status: string
-  networkCode: string | null
-  failureReason: string | null
-  retryCount: string | null
-  cost: string | null
-  requestId: string | null
-  bulkId: string | null
-  linkId: string | null
+  errorCode: string | null
+  errorMessage: string | null
 }) {
-  const [message] = await db.select({ id: smsMessages.id }).from(smsMessages)
-    .where(eq(smsMessages.providerMessageId, input.providerMessageId)).limit(1)
+  const [message] = await db.select({ id: smsMessages.id }).from(smsMessages).where(and(
+    eq(smsMessages.providerMessageId, input.providerMessageId),
+    eq(smsMessages.tenantId, input.tenantId),
+  )).limit(1)
   if (!message) return false
   const normalizedStatus = input.status.toLowerCase()
-  const deliveryStatus = normalizedStatus === 'success' || normalizedStatus === 'delivered'
-    ? 'delivered'
-    : normalizedStatus === 'failed' ? 'failed' : 'pending'
+  const failed = normalizedStatus.includes('fail') || normalizedStatus.includes('undeliver') ||
+    normalizedStatus.includes('reject') || normalizedStatus.includes('expired') ||
+    Boolean(input.errorCode || input.errorMessage)
+  const deliveryStatus = failed
+    ? 'failed'
+    : normalizedStatus.includes('deliver') || normalizedStatus.includes('read') || normalizedStatus.includes('seen')
+      ? 'delivered'
+      : 'pending'
   const report = {
     status: input.status.slice(0, 120),
-    networkCode: input.networkCode?.slice(0, 100) || null,
-    failureReason: input.failureReason?.slice(0, 500) || null,
-    retryCount: input.retryCount?.slice(0, 40) || null,
-    cost: input.cost?.slice(0, 100) || null,
-    requestId: input.requestId?.slice(0, 200) || null,
-    bulkId: input.bulkId?.slice(0, 200) || null,
-    linkId: input.linkId?.slice(0, 200) || null,
+    errorCode: input.errorCode?.slice(0, 100) || null,
+    errorMessage: input.errorMessage?.slice(0, 500) || null,
   }
   await db.update(smsMessages).set({
     deliveryStatus,
     deliveryReport: report,
     deliveryReportedAt: new Date(),
-    lastError: deliveryStatus === 'failed' ? report.failureReason || 'The provider reported that delivery failed.' : null,
+    lastError: deliveryStatus === 'failed' ? report.errorMessage || 'Infobip reported that delivery failed.' : null,
+    status: deliveryStatus === 'failed' ? 'failed' : undefined,
     updatedAt: new Date(),
   }).where(eq(smsMessages.id, message.id))
   return true
