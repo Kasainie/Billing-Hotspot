@@ -1,4 +1,3 @@
-import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import { AdminPasswordConfirmation } from '@/components/admin-password-confirmation'
 import './globals.css'
@@ -72,7 +71,6 @@ export default function RootLayout({
       <body className="antialiased">
         {children}
         <AdminPasswordConfirmation />
-        <Analytics />
       </body>
     </html>
   )

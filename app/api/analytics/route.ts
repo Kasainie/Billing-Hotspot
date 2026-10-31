@@ -169,9 +169,11 @@ export async function GET(request: NextRequest) {
            where p.tenant_id = ${tenantId} and p.status = 'paid' and p.paid_at >= ${start} and p.paid_at < ${end} and c.site_id = r.site_id) as revenue,
           (select count(*)::int from public.radacct accounting
            where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end}
+             and ${tenantSessionUserFilter(tenantId)}
              and exists (select 1 from public.router_remote_sessions remote where remote.router_id = r.id and remote.username = accounting.username)) as sessions,
-          (select coalesce(sum(accounting.acctinputoctets + accounting.acctoutputoctets), 0)::float8 from public.radacct accounting
+          (select coalesce(sum(coalesce(accounting.acctinputoctets, 0) + coalesce(accounting.acctoutputoctets, 0)), 0)::float8 from public.radacct accounting
            where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end}
+             and ${tenantSessionUserFilter(tenantId)}
              and exists (select 1 from public.router_remote_sessions remote where remote.router_id = r.id and remote.username = accounting.username)) as data
         from public.router_monitors r
         where r.tenant_id = ${tenantId} and r.enabled = true
@@ -191,10 +193,20 @@ export async function GET(request: NextRequest) {
              ))) as revenue,
           (select count(*)::int from public.radacct accounting
            where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end}
-             and not exists (select 1 from public.router_remote_sessions remote where remote.username = accounting.username)) as sessions,
-          (select coalesce(sum(accounting.acctinputoctets + accounting.acctoutputoctets), 0)::float8 from public.radacct accounting
+             and ${tenantSessionUserFilter(tenantId)}
+             and not exists (
+               select 1 from public.router_remote_sessions remote
+               inner join public.router_monitors monitor on monitor.id = remote.router_id
+               where monitor.tenant_id = ${tenantId} and monitor.enabled = true and remote.username = accounting.username
+             )) as sessions,
+          (select coalesce(sum(coalesce(accounting.acctinputoctets, 0) + coalesce(accounting.acctoutputoctets, 0)), 0)::float8 from public.radacct accounting
            where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end}
-             and not exists (select 1 from public.router_remote_sessions remote where remote.username = accounting.username)) as data
+             and ${tenantSessionUserFilter(tenantId)}
+             and not exists (
+               select 1 from public.router_remote_sessions remote
+               inner join public.router_monitors monitor on monitor.id = remote.router_id
+               where monitor.tenant_id = ${tenantId} and monitor.enabled = true and remote.username = accounting.username
+             )) as data
       `),
     ])
 

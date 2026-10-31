@@ -257,11 +257,11 @@ export function StandaloneAnalytics() {
 
       <article className="analytics-card analytics-heatmap-card"><div className="analytics-card-heading"><div><h3>Traffic heatmap · {period}</h3><p>Distinct accounting devices by weekday and hour</p></div></div><div className="analytics-heatmap">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => { const postgresDay = (dayIndex + 1) % 7; const maxDevices = Math.max(1, ...(analytics?.heatmap || []).map((cell) => Number(cell.devices))); return <div className="analytics-heatmap-row" key={day}><span>{day}</span>{Array.from({ length: 24 }, (_, hour) => { const cell = (analytics?.heatmap || []).find((item) => Number(item.weekday) === postgresDay && Number(item.hour) === hour); const devices = Number(cell?.devices || 0); return <i key={hour} style={{ opacity: devices ? 0.25 + devices / maxDevices * 0.75 : 0.08 }} title={`${day} ${String(hour).padStart(2, '0')}: ${devices} devices`} /> })}</div> })}</div></article>
       <article className="analytics-card analytics-mikrotik">
-        <div className="analytics-card-heading"><div><h3>MikroTik performance · {period}</h3><p>Revenue, sessions, and data per router · {money(Number(analytics?.unlinkedPerformance?.revenue || 0))} not linked to a router</p></div></div>
+        <div className="analytics-card-heading"><div><h3>MikroTik performance · {period}</h3><p>Revenue, sessions, and data per router · Share is based on data usage</p></div></div>
         {(() => {
           const linked = (analytics?.routerPerformance || []).filter((router) => routerFilter === 'All routers' || router.name === routerFilter)
           const unlinked = analytics?.unlinkedPerformance
-          const totalRevenue = linked.reduce((sum, router) => sum + Number(router.revenue || 0), 0) + (routerFilter === 'All routers' ? Number(unlinked?.revenue || 0) : 0)
+          const totalData = linked.reduce((sum, router) => sum + Number(router.data || 0), 0) + (routerFilter === 'All routers' ? Number(unlinked?.data || 0) : 0)
           const rows = [
             ...linked.map((router) => ({
               name: router.name,
@@ -283,7 +283,7 @@ export function StandaloneAnalytics() {
           return <div className="analytics-router-table">
             <div className="analytics-router-head"><span>ROUTER</span><span>STATUS</span><span>SUBS</span><span>REVENUE</span><span>SESSIONS</span><span>DATA</span><span>SHARE</span></div>
             {rows.map((row) => {
-              const share = totalRevenue ? row.revenue / totalRevenue * 100 : 0
+              const share = totalData ? row.data / totalData * 100 : 0
               return <div className="analytics-router-row" key={row.name}>
                 <strong>{row.name}</strong>
                 <span className={`analytics-router-status ${row.status.toLowerCase()}`}>{row.status}</span>
@@ -291,7 +291,7 @@ export function StandaloneAnalytics() {
                 <span>{money(row.revenue)}</span>
                 <span>{row.sessions}</span>
                 <span>{formatBytes(row.data)}</span>
-                <span className="analytics-share"><i><b style={{ width: `${Math.min(100, share)}%` }} /></i>{Math.round(share)}%</span>
+                <span className="analytics-share" title={`${formatBytes(row.data)} of ${formatBytes(totalData)} total data usage`}><i><b style={{ width: `${Math.min(100, share)}%` }} /></i>{Math.round(share)}%</span>
               </div>
             })}
             {!rows.length && <div className="analytics-router-row"><strong>No router data.</strong></div>}
