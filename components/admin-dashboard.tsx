@@ -1,7 +1,10 @@
 'use client'
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { createPortal } from 'react-dom'
+import { Browser } from '@capacitor/browser'
+import { Capacitor } from '@capacitor/core'
 import { BrandWordmark } from '@/components/brand-wordmark'
 import { KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
 import {
@@ -44,6 +47,7 @@ import {
   Search,
   Settings2,
   ShieldCheck,
+  ShoppingCart,
   Signal,
   SlidersHorizontal,
   Sun,
@@ -59,19 +63,29 @@ import {
 } from 'lucide-react'
 import { parseServiceSubnet, resolveRouterLanBridgeName, resolveRouterSubscriberBridgeName } from '@/lib/router-provisioning'
 import { defaultHotspotPortalBranding, hotspotPortalTemplates, isHotspotPortalTemplateId, type HotspotPortalTemplateId } from '@/lib/hotspot-templates'
-import { PaymentSettings } from '@/components/payment-settings'
-import { CommunicationsCenter } from '@/components/communications-center'
-import { PaymentReconciliation } from '@/components/payment-reconciliation'
-import { OperationsWorkspace } from '@/components/operations-workspace'
-import { LiveHotspotSessions } from '@/components/live-hotspot-sessions'
-import { RouterMonitorDetail, type RouterConnectorEnrollment, type RouterMonitorRecord, type RouterMonitorTab } from '@/components/router-monitor-detail'
+import type { RouterConnectorEnrollment, RouterMonitorRecord, RouterMonitorTab } from '@/components/router-monitor-detail'
 import { getRouterWebConsoleUrl } from '@/lib/router-monitoring'
-import { SubscriberProfile, type SubscriberProfileData } from '@/components/subscriber-profile'
-import { StaffManagement } from '@/components/staff-management'
-import { SettingsCenter } from '@/components/settings-center'
+import type { SubscriberProfileData } from '@/components/subscriber-profile'
 import { parseCsv } from '@/lib/subscriber-csv'
 import { exportTabularReport, type ReportExportFormat } from '@/lib/report-export'
-import { StandaloneAnalytics } from '@/components/standalone-analytics'
+import {
+  checkDeviceNotificationPermission,
+  playNotificationSound,
+  showDeviceNotification,
+  type DeviceNotificationPermission,
+} from '@/lib/app-notifications'
+import { getDailyQuote } from '@/lib/daily-quote'
+
+const PaymentSettings = dynamic(() => import('@/components/payment-settings').then((module) => module.PaymentSettings))
+const CommunicationsCenter = dynamic(() => import('@/components/communications-center').then((module) => module.CommunicationsCenter))
+const PaymentReconciliation = dynamic(() => import('@/components/payment-reconciliation').then((module) => module.PaymentReconciliation))
+const OperationsWorkspace = dynamic(() => import('@/components/operations-workspace').then((module) => module.OperationsWorkspace))
+const LiveHotspotSessions = dynamic(() => import('@/components/live-hotspot-sessions').then((module) => module.LiveHotspotSessions))
+const RouterMonitorDetail = dynamic(() => import('@/components/router-monitor-detail').then((module) => module.RouterMonitorDetail))
+const SubscriberProfile = dynamic(() => import('@/components/subscriber-profile').then((module) => module.SubscriberProfile))
+const StaffManagement = dynamic(() => import('@/components/staff-management').then((module) => module.StaffManagement))
+const SettingsCenter = dynamic(() => import('@/components/settings-center').then((module) => module.SettingsCenter))
+const StandaloneAnalytics = dynamic(() => import('@/components/standalone-analytics').then((module) => module.StandaloneAnalytics))
 
 async function requestOwnerConfirmation(action: string, recordId: string, payload: unknown) {
   const response = await fetch('/api/admin-action-confirmation', {
@@ -102,13 +116,22 @@ const navigationSections: { label?: string; items: { label: string; icon: Lucide
     { label: 'Devices', icon: Router, children: [{ label: 'Routers', view: 'Routers', icon: Network }, { label: 'TR-069', view: 'TR-069' }] },
   ] },
   { label: 'CONFIGURATION', items: [{ label: 'Sites', icon: Globe2 }] },
-  { label: 'OPERATIONS', items: [{ label: 'Inventory', icon: Package }] },
+  { label: 'OPERATIONS', items: [{ label: 'Inventory', icon: Package }, { label: 'Purchases', icon: ShoppingCart }] },
   { label: 'FINANCE', items: [
     { label: 'Billing', icon: FileText, children: [{ label: 'Payments', view: 'Payments', icon: CreditCard }, { label: 'Payment settings', view: 'Payment settings', icon: Settings2 }, { label: 'Invoices', view: 'Invoices' }, { label: 'Expenses', view: 'Expenses' }] },
     { label: 'Vouchers', icon: Ticket, children: [{ label: 'List', view: 'Voucher list' }, { label: 'Generate', view: 'Generate vouchers' }, { label: 'Analytics', view: 'Voucher analytics' }] },
   ] },
   { label: 'OUTREACH', items: [{ label: 'Communications', icon: MessageCircle }] },
 ]
+
+const dashboardViewNames = new Set([
+  'Profile',
+  'Settings',
+  ...navigationSections.flatMap((section) => section.items.flatMap((item) => [
+    item.label,
+    ...(item.children?.map((child) => child.view) ?? []),
+  ])),
+])
 
 const crudEntityByPage: Partial<Record<string, 'customers' | 'packages' | 'payments' | 'sites'>> = {
   Subscribers: 'customers',
@@ -117,7 +140,7 @@ const crudEntityByPage: Partial<Record<string, 'customers' | 'packages' | 'payme
   Sites: 'sites',
 }
 
-const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'Inventory' | 'Equipment' | 'TR-069' | 'Invoices'>> = {
+const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'Equipment' | 'TR-069' | 'Invoices' | 'Purchases'>> = {
   Leads: 'Leads',
   'Ticket list': 'Ticket list',
   'Ticket analytics': 'Ticket analytics',
@@ -126,6 +149,7 @@ const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ti
   'Generate vouchers': 'Generate vouchers',
   'Voucher analytics': 'Voucher analytics',
   Inventory: 'Equipment',
+  Purchases: 'Purchases',
   'TR-069': 'TR-069',
   Invoices: 'Invoices',
 }
@@ -147,6 +171,14 @@ type DashboardSections = { metrics: boolean; network: boolean; activity: boolean
 type SubscriberSort = 'lastOnline' | 'firstOnline' | 'oldest' | 'newest' | 'nameAsc' | 'nameDesc' | 'expirySoonest' | 'expiryLatest'
 type SubscriberTypeFilter = 'All' | 'Hotspot' | 'PPPoE' | 'Bindings'
 type SubscriberAdvancedFilter = 'hasPlan' | 'expired' | 'noEndDate' | 'atRisk' | 'vip' | 'offlineNow'
+
+function sendDeviceNotifications(notifications: HeaderNotification[]) {
+  for (const notification of notifications) {
+    void showDeviceNotification(notification).catch((error) => {
+      console.error('Unable to show dashboard device notification', error)
+    })
+  }
+}
 
 const subscriberSortOptions: { value: SubscriberSort; label: string }[] = [
   { value: 'lastOnline', label: 'Last online' },
@@ -176,16 +208,12 @@ const emptyDashboardData: DashboardData = {
   expiringCustomers: [],
   summary: { activeCustomers: 0, totalCustomers: 0, siteCount: 0, activePackages: 0, paidRevenue: 0, paidPaymentCount: 0 },
 }
-const notificationStorageKey = 'lktech-dashboard-read-notifications'
+const notificationStorageKey = 'lktech-dashboard-read-notifications-v2'
 const defaultDashboardSections: DashboardSections = { metrics: true, network: true, activity: true, operations: true }
 const dashboardSectionsStorageKey = 'lktech-dashboard-sections'
-const dashboardThemeStorageKey = 'lktech-dashboard-theme'
+const dashboardThemeStorageKey = 'lktech-dashboard-theme-v2'
+const legacyDashboardThemeStorageKey = 'lktech-dashboard-theme'
 type DashboardTheme = 'light' | 'dark' | 'system'
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>
-}
-
 function escapeCsvField(value: unknown) {
   const text = String(value ?? '')
   const safeText = /^[\s\u0000-\u001f]*[=+\-@]/.test(text) ? `'${text}` : text
@@ -220,7 +248,7 @@ function MetricCard({ label, value, icon: Icon, tone, detail }: { label: string;
 }
 
 export function AdminDashboard() {
-  const [activeNav, setActiveNav] = useState('Overview')
+  const [activeNav, setActiveNavState] = useState('Overview')
   const [expandedNav, setExpandedNav] = useState<string[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -231,12 +259,12 @@ export function AdminDashboard() {
   const [subscriberProfileTargetId, setSubscriberProfileTargetId] = useState('')
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
-  const [themePreference, setThemePreference] = useState<DashboardTheme>('system')
+  const [themePreference, setThemePreference] = useState<DashboardTheme>('dark')
+  const [themePreferenceLoaded, setThemePreferenceLoaded] = useState(false)
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('dark')
   const [profileNotice, setProfileNotice] = useState('')
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
-  const [appInstalled, setAppInstalled] = useState(false)
   const [readNotificationIds, setReadNotificationIds] = useState<string[]>([])
+  const [notificationPermission, setNotificationPermission] = useState<DeviceNotificationPermission | 'checking' | 'error'>('checking')
   const [dashboardData, setDashboardData] = useState<DashboardData>(emptyDashboardData)
   const [onlineClientCount, setOnlineClientCount] = useState<number | null>(null)
   const [dashboardExportFormat, setDashboardExportFormat] = useState<ReportExportFormat>('csv')
@@ -248,10 +276,6 @@ export function AdminDashboard() {
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [dashboardNotice, setDashboardNotice] = useState('')
   const [showAllSites, setShowAllSites] = useState(false)
-  const [deletingSiteId, setDeletingSiteId] = useState('')
-  const [editingSiteId, setEditingSiteId] = useState('')
-  const [editingSiteName, setEditingSiteName] = useState('')
-  const [editingSiteLocation, setEditingSiteLocation] = useState('')
   const [dataStatus, setDataStatus] = useState<'loading' | 'live' | 'error'>('loading')
   const [currentTenantId, setCurrentTenantId] = useState('')
   const [currentTenantName, setCurrentTenantName] = useState('Loading workspace…')
@@ -267,58 +291,62 @@ export function AdminDashboard() {
   const customizeButtonRef = useRef<HTMLButtonElement>(null)
   const customizeCloseRef = useRef<HTMLButtonElement>(null)
   const wasCustomizeOpenRef = useRef(false)
+  const previousUnreadNotificationIdsRef = useRef<Set<string> | null>(null)
+  const pendingDeviceNotificationsRef = useRef<HeaderNotification[]>([])
+
+  function navigateToDashboardView(view: string) {
+    setActiveNavState(view)
+    const url = new URL(window.location.href)
+    if (view === 'Overview') url.searchParams.delete('view')
+    else url.searchParams.set('view', view)
+    const nextLocation = `${url.pathname}${url.search}${url.hash}`
+    const currentLocation = `${window.location.pathname}${window.location.search}${window.location.hash}`
+    if (nextLocation !== currentLocation) {
+      window.history.pushState({ ...window.history.state, dashboardView: view }, '', nextLocation)
+    }
+
+    const parent = navigationSections
+      .flatMap((section) => section.items)
+      .find((item) => item.children?.some((child) => child.view === view))
+    if (parent) setExpandedNav((current) => current.includes(parent.label) ? current : [...current, parent.label])
+  }
+
+  const setActiveNav = navigateToDashboardView
 
   useEffect(() => {
-    const updateInstalledState = () => {
-      setAppInstalled(
-        window.matchMedia('(display-mode: standalone)').matches ||
-        ('standalone' in navigator && Boolean(navigator.standalone)),
-      )
-    }
-    const captureInstallPrompt = (event: Event) => {
-      event.preventDefault()
-      setInstallPrompt(event as BeforeInstallPromptEvent)
-    }
-    const markAppInstalled = () => {
-      setAppInstalled(true)
-      setInstallPrompt(null)
-      setProfileNotice('LKTECH has been installed on this device.')
-    }
+    const restoreDashboardView = () => {
+      const requestedView = new URLSearchParams(window.location.search).get('view')
+      const view = requestedView && dashboardViewNames.has(requestedView) ? requestedView : 'Overview'
+      setActiveNavState(view)
 
-    updateInstalledState()
-    window.addEventListener('beforeinstallprompt', captureInstallPrompt)
-    window.addEventListener('appinstalled', markAppInstalled)
-    return () => {
-      window.removeEventListener('beforeinstallprompt', captureInstallPrompt)
-      window.removeEventListener('appinstalled', markAppInstalled)
+      const parent = navigationSections
+        .flatMap((section) => section.items)
+        .find((item) => item.children?.some((child) => child.view === view))
+      if (parent) setExpandedNav((current) => current.includes(parent.label) ? current : [...current, parent.label])
     }
+    restoreDashboardView()
+    window.addEventListener('popstate', restoreDashboardView)
+    return () => window.removeEventListener('popstate', restoreDashboardView)
   }, [])
 
-  const installApp = async () => {
-    if (appInstalled) {
-      setProfileNotice('LKTECH is already installed on this device.')
-      return
-    }
-
-    if (!installPrompt) {
-      const isAppleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-      setProfileNotice(isAppleMobile
-        ? 'To install on iPhone or iPad, open LKTECH in Safari, tap Share, then choose Add to Home Screen.'
-        : 'To install LKTECH, open your browser menu and choose Install app or Add to Home screen.')
-      return
-    }
-
+  const downloadInstaller = async (fileName: string, appName: string) => {
+    const downloadUrl = `https://billing.lktech.life/downloads/${fileName}`
     try {
-      await installPrompt.prompt()
-      const choice = await installPrompt.userChoice
-      setInstallPrompt(null)
-      setProfileNotice(choice.outcome === 'accepted'
-        ? 'LKTECH is being installed on this device.'
-        : 'Installation was cancelled. You can install LKTECH later from your browser menu.')
+      if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android' && fileName.endsWith('.apk')) {
+        await Browser.open({ url: downloadUrl })
+        setProfileNotice('The APK is opening in your browser. Finish the download, then open it to install LKTECH.')
+        return
+      }
+
+      if (typeof window.lktechDesktop?.openDownload === 'function') {
+        await window.lktechDesktop.openDownload(downloadUrl)
+      } else {
+        window.location.assign(downloadUrl)
+      }
+      setProfileNotice(`${appName} download started. Open the downloaded file to install LKTECH.`)
     } catch (error) {
-      console.error('Unable to start LKTECH app installation', error)
-      setProfileNotice('The browser could not start installation. Try installing LKTECH from the browser menu.')
+      console.error(`Unable to open the LKTECH ${appName} download`, error)
+      setProfileNotice(`Unable to open the ${appName} download. Please try again or use the Downloads page.`)
     }
   }
 
@@ -332,13 +360,21 @@ export function AdminDashboard() {
   useEffect(() => {
     try {
       const storedTheme = window.localStorage.getItem(dashboardThemeStorageKey)
-      if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') setThemePreference(storedTheme)
+      const legacyTheme = window.localStorage.getItem(legacyDashboardThemeStorageKey)
+      if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') {
+        setThemePreference(storedTheme)
+      } else if (legacyTheme === 'light' || legacyTheme === 'dark') {
+        setThemePreference(legacyTheme)
+      }
     } catch (error) {
       console.error('Unable to load dashboard theme preference', error)
+    } finally {
+      setThemePreferenceLoaded(true)
     }
   }, [])
 
   useEffect(() => {
+    if (!themePreferenceLoaded) return
     const media = window.matchMedia('(prefers-color-scheme: light)')
     const updateTheme = () => setEffectiveTheme(themePreference === 'system' ? (media.matches ? 'light' : 'dark') : themePreference)
     updateTheme()
@@ -349,7 +385,7 @@ export function AdminDashboard() {
       console.error('Unable to save dashboard theme preference', error)
     }
     return () => media.removeEventListener('change', updateTheme)
-  }, [themePreference])
+  }, [themePreference, themePreferenceLoaded])
 
   useEffect(() => {
     document.documentElement.dataset.dashboardTheme = effectiveTheme
@@ -382,6 +418,10 @@ export function AdminDashboard() {
     const refreshDashboardData = async () => {
       try {
         const response = await fetch(`/api/dashboard?range=${encodeURIComponent(range)}`, { cache: 'no-store' })
+        if (response.status === 401) {
+          window.location.assign('/login')
+          return
+        }
         const body = await response.text()
         if (!body.trim()) {
           throw new Error(`Dashboard request failed (HTTP ${response.status}): server returned an empty response.`)
@@ -454,6 +494,43 @@ export function AdminDashboard() {
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+    const refreshNotificationPermission = () => {
+      if (document.visibilityState !== 'visible') return
+      void checkDeviceNotificationPermission()
+        .then((permission) => {
+          if (!cancelled) setNotificationPermission(permission)
+        })
+        .catch((error) => {
+          console.error('Unable to refresh device notification permission', error)
+          if (!cancelled) setNotificationPermission('error')
+        })
+    }
+    window.addEventListener('focus', refreshNotificationPermission)
+    document.addEventListener('visibilitychange', refreshNotificationPermission)
+    return () => {
+      cancelled = true
+      window.removeEventListener('focus', refreshNotificationPermission)
+      document.removeEventListener('visibilitychange', refreshNotificationPermission)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void checkDeviceNotificationPermission()
+      .then((permission) => {
+        if (!cancelled) setNotificationPermission(permission)
+      })
+      .catch((error) => {
+        console.error('Unable to check device notification permission', error)
+        if (!cancelled) setNotificationPermission('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
@@ -514,6 +591,7 @@ export function AdminDashboard() {
       { id: 'live-sessions', label: 'Live sessions', detail: 'See connected hotspot devices', target: 'Live sessions', type: 'Page' },
       { id: 'sites', label: 'Sites', detail: 'Configure network site names and locations', target: 'Sites', type: 'Page' },
       { id: 'routers', label: 'Routers', detail: 'Provision network devices', target: 'Routers', type: 'Page' },
+      { id: 'purchases', label: 'Purchases', detail: 'Track network equipment and supplies to buy', target: 'Purchases', type: 'Page' },
       { id: 'portal-design', label: 'Portal design', detail: 'Customize the hotspot portal', target: 'Portal design', type: 'Page' },
       { id: 'payment-settings', label: 'Payment settings', detail: 'Configure payment providers', target: 'Payment settings', type: 'Page' },
       { id: 'communications', label: 'Communications', detail: 'SMS outbox, WhatsApp, and email', target: 'Communications', type: 'Page' },
@@ -569,6 +647,33 @@ export function AdminDashboard() {
   const unreadNotifications = headerNotifications.filter((notification) => !readNotificationIds.includes(notification.id))
   const userInitials = currentUser.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'U'
 
+  useEffect(() => {
+    if (dataStatus !== 'live') return
+    const previousIds = previousUnreadNotificationIdsRef.current
+    const currentIds = new Set(unreadNotifications.map((notification) => notification.id))
+    previousUnreadNotificationIdsRef.current = currentIds
+    if (!previousIds) return
+
+    const newNotifications = unreadNotifications.filter((notification) => !previousIds.has(notification.id))
+    if (!newNotifications.length) return
+
+    void playNotificationSound().catch((error) => {
+      console.error('Unable to play dashboard notification sound', error)
+    })
+    if (notificationPermission === 'granted') {
+      sendDeviceNotifications(newNotifications)
+    } else if (notificationPermission === 'checking') {
+      pendingDeviceNotificationsRef.current.push(...newNotifications)
+    }
+  }, [dataStatus, notificationPermission, unreadNotifications])
+
+  useEffect(() => {
+    if (notificationPermission === 'checking') return
+    const pendingNotifications = pendingDeviceNotificationsRef.current
+    pendingDeviceNotificationsRef.current = []
+    if (notificationPermission === 'granted') sendDeviceNotifications(pendingNotifications)
+  }, [notificationPermission])
+
   function markNotificationsRead(ids: string[]) {
     const nextIds = [...new Set([...readNotificationIds, ...ids])]
     setReadNotificationIds(nextIds)
@@ -580,7 +685,7 @@ export function AdminDashboard() {
   }
 
   function openSearchResult(result: SearchResult) {
-    setActiveNav(result.target)
+    navigateToDashboardView(result.target)
     setSearchOpen(false)
     if (result.type !== 'Subscriber' && result.type !== 'Plan' && result.type !== 'Payment') {
       setCrudSearchTerm('')
@@ -596,7 +701,7 @@ export function AdminDashboard() {
 
   function openNotification(notification: HeaderNotification) {
     markNotificationsRead([notification.id])
-    setActiveNav(notification.target)
+    navigateToDashboardView(notification.target)
     setQuery('')
     setCrudSearchTerm('')
     setNotificationsOpen(false)
@@ -616,89 +721,6 @@ export function AdminDashboard() {
   const customerNames = useMemo(() => new Map(dashboardData.customers.map((customer) => [customer.id, customer.name])), [dashboardData.customers])
   const activeSiteCount = dashboardData.sites.filter((site) => site.status.toLowerCase() === 'active').length
   const networkStatusTone = dataStatus !== 'live' || !dashboardData.sites.length || activeSiteCount !== dashboardData.sites.length ? 'amber' : 'green'
-
-  async function deleteSite(site: typeof displayedSites[number]) {
-    if (!window.confirm(`Delete site ${site.name}? Customers and equipment will be kept but unlinked from this site. Routers and their monitoring history linked to this site will also be deleted.`)) return
-    setDeletingSiteId(site.id)
-    setDashboardNotice('')
-    try {
-      const code = await requestOwnerConfirmation('delete_site', site.id, {})
-      if (code === null) return
-      if (!code) throw new Error('Enter the six-digit owner confirmation code.')
-      const response = await fetch(`/api/sites?id=${encodeURIComponent(site.id)}`, {
-        method: 'DELETE',
-        headers: { 'x-admin-email-confirmation': code },
-      })
-      const result = await response.json() as { error?: string }
-      if (!response.ok) throw new Error(result.error || 'Unable to delete site.')
-      setDashboardData((current) => ({
-        ...current,
-        sites: current.sites.filter((currentSite) => currentSite.id !== site.id),
-        summary: { ...current.summary, siteCount: Math.max(0, current.summary.siteCount - 1) },
-      }))
-      if (siteFilter === site.name) setSiteFilter('All sites')
-      setDashboardNotice(`Site "${site.name}" deleted. Customers and equipment were kept; linked routers were removed.`)
-      window.dispatchEvent(new Event('workspace-data-changed'))
-    } catch (error) {
-      setDashboardNotice(error instanceof Error ? error.message : 'Unable to delete site.')
-    } finally {
-      setDeletingSiteId('')
-    }
-  }
-  function startRenamingSite(site: typeof displayedSites[number]) {
-    setEditingSiteId(site.id)
-    setEditingSiteName(site.name)
-    setEditingSiteLocation(site.location || '')
-    setDashboardNotice('')
-  }
-  function cancelRenamingSite() {
-    setEditingSiteId('')
-    setEditingSiteName('')
-    setEditingSiteLocation('')
-  }
-  async function saveSiteName() {
-    const name = editingSiteName.trim()
-    const location = editingSiteLocation.trim()
-    if (!name) {
-      setDashboardNotice('Enter a site name.')
-      return
-    }
-    if (!location) {
-      setDashboardNotice('Enter a site location.')
-      return
-    }
-    setDeletingSiteId(editingSiteId)
-    setDashboardNotice('')
-    try {
-      const code = await requestOwnerConfirmation('rename_site', editingSiteId, { name, location })
-      if (code === null) return
-      if (!code) throw new Error('Enter the six-digit owner confirmation code.')
-      const response = await fetch(`/api/sites?id=${encodeURIComponent(editingSiteId)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json', 'x-admin-email-confirmation': code },
-        body: JSON.stringify({ name, location }),
-      })
-      const result = await response.json() as { error?: string }
-      if (!response.ok) throw new Error(result.error || 'Unable to rename site.')
-      await fetch('/api/tenants/current', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-      }).catch(() => undefined)
-      setDashboardData((current) => ({
-        ...current,
-        sites: current.sites.map((site) => site.id === editingSiteId ? { ...site, name, location } : site),
-      }))
-      setCurrentTenantName(name)
-      cancelRenamingSite()
-      setDashboardNotice(`Site renamed to "${name}".`)
-      window.dispatchEvent(new Event('workspace-data-changed'))
-    } catch (error) {
-      setDashboardNotice(error instanceof Error ? error.message : 'Unable to rename site.')
-    } finally {
-      setDeletingSiteId('')
-    }
-  }
 
   function formatDashboardValue(value: number) {
     return new Intl.NumberFormat().format(value)
@@ -802,8 +824,17 @@ export function AdminDashboard() {
           </div>
           <div className="header-menu-anchor" ref={notificationsRef}>
             <button type="button" className="icon-button notification" aria-label={`Notifications${unreadNotifications.length ? `, ${unreadNotifications.length} unread` : ''}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); setProfileOpen(false); setSearchOpen(false) }}><Bell size={17} />{unreadNotifications.length > 0 && <span className="notification-count" aria-hidden="true">{unreadNotifications.length > 99 ? '99+' : unreadNotifications.length}</span>}</button>
-            {notificationsOpen && <div className="header-popover notification-popover"><div className="popover-heading"><div><strong>Notifications</strong><span>{unreadNotifications.length ? `${unreadNotifications.length} unread` : 'You’re all caught up'}</span></div>{unreadNotifications.length > 0 && <button type="button" className="popover-action" onClick={() => markNotificationsRead(unreadNotifications.map((notification) => notification.id))}>Mark all read</button>}</div>
-              {headerNotifications.length ? <div className="notification-list">{headerNotifications.map((notification) => <button key={notification.id} type="button" className={`notification-item ${readNotificationIds.includes(notification.id) ? 'is-read' : ''}`} onClick={() => openNotification(notification)}><span className="notification-status" /><span><strong>{notification.title}</strong><small>{notification.detail}</small></span></button>)}</div> : <p className="header-empty">There are no current account or network alerts.</p>}
+            {notificationsOpen && <div className="header-popover notification-popover"><div className="popover-heading"><div><strong>Notifications</strong><span>{unreadNotifications.length ? `${unreadNotifications.length} unread` : headerNotifications.length ? `${headerNotifications.length} recent alerts` : 'You’re all caught up'}</span></div>{unreadNotifications.length > 0 && <button type="button" className="popover-action" onClick={() => markNotificationsRead(unreadNotifications.map((notification) => notification.id))}>Mark all read</button>}</div>
+              {headerNotifications.length ? <div className="notification-list">{headerNotifications.map((notification) => {
+                const isRead = readNotificationIds.includes(notification.id)
+                return <button key={notification.id} type="button" className={`notification-item ${isRead ? 'is-read' : 'is-unread'}`} onClick={() => openNotification(notification)}>
+                  <span className="notification-status" aria-hidden="true" />
+                  <span className="notification-copy">
+                    <span className="notification-title"><strong>{notification.title}</strong>{!isRead && <span className="notification-new">NEW</span>}</span>
+                    <small>{notification.detail}</small>
+                  </span>
+                </button>
+              })}</div> : <p className="header-empty">There are no current account or network alerts.</p>}
             </div>}
           </div>
           <div className="header-menu-anchor" ref={profileRef}>
@@ -829,7 +860,9 @@ export function AdminDashboard() {
               <div className="profile-menu-section">
                 <span className="profile-menu-label">ACCOUNT</span>
                 <button type="button" className="profile-menu-item" onClick={() => { setActiveNav('Profile'); setProfileOpen(false) }}><UserRound size={16} /> Profile</button>
-                <button type="button" className="profile-menu-item" onClick={() => void installApp()}><Download size={16} /> {appInstalled ? 'App installed' : 'Install app'}</button>
+                <button type="button" className="profile-menu-item" onClick={() => void downloadInstaller('LKTECH-Android-1.0.1.apk', 'Android app')}><Download size={16} /> Download Android APK</button>
+                <button type="button" className="profile-menu-item" onClick={() => void downloadInstaller('LKTECH-Windows-x64-1.0.0.exe', 'Windows 64-bit app')}><Download size={16} /> Download Windows app (64-bit)</button>
+                <button type="button" className="profile-menu-item" onClick={() => void downloadInstaller('LKTECH-Windows-ia32-1.0.0.exe', 'Windows 32-bit app')}><Download size={16} /> Download Windows app (32-bit)</button>
               </div>
               <div className="profile-menu-section">
                 <span className="profile-menu-label">WORKSPACE</span>
@@ -844,7 +877,7 @@ export function AdminDashboard() {
         <div className="page-wrap" data-dashboard-network={dashboardSections.network} data-dashboard-activity={dashboardSections.activity} data-dashboard-operations={dashboardSections.operations}>
           {activeNav === 'Analytics' ? <StandaloneAnalytics /> : activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions onOnlineCountChange={setOnlineClientCount} onOpenSubscriber={(customerId) => { setCrudSearchTerm(customerId); setSubscriberProfileTargetId(customerId); setActiveNav('Subscribers') }} /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Settings' ? <SettingsCenter onNavigate={setActiveNav} onProfileNameChange={setCurrentUser} /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'Communications' ? <CommunicationsCenter /> : activeNav === 'Payments' ? <PaymentReconciliation /> : activeNav === 'Staff' ? <StaffManagement currentRole={memberships.find((membership) => membership.id === currentTenantId)?.role || ''} currentEmail={currentEmail} /> : activeNav === 'Profile' ? <section className="profile-page"><div className="page-heading"><div><div className="live-label"><StatusDot /> ACCOUNT</div><h1>Your profile</h1><p>Your account identity and current workspace access.</p></div></div><div className="profile-page-grid"><article className="panel profile-page-card"><span>ACCOUNT</span><div className="profile-page-identity"><div className="profile-avatar">{userInitials}</div><div><h2>{currentUser || 'Workspace user'}</h2><p>{currentEmail || 'Email unavailable'}</p></div></div><dl><div><dt>Name</dt><dd>{currentUser || 'Not available'}</dd></div><div><dt>Email</dt><dd>{currentEmail || 'Not available'}</dd></div></dl></article><article className="panel profile-page-card"><span>WORKSPACE ACCESS</span><h2>{currentTenantName}</h2><dl><div><dt>Workspace</dt><dd>{currentTenantName}</dd></div><div><dt>Your role</dt><dd>{memberships.find((membership) => membership.id === currentTenantId)?.role || (isPlatformAdmin ? 'Platform administrator' : 'Workspace member')}</dd></div><div><dt>Available workspaces</dt><dd>{memberships.length}</dd></div></dl></article></div></section> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={activeNav === 'Subscribers' || activeNav === 'Payments' || activeNav === 'Plans' ? crudSearchTerm : ''} initialExpandedId={activeNav === 'Subscribers' ? subscriberProfileTargetId : ''} onInitialProfileOpened={() => setSubscriberProfileTargetId('')} /> : <ModulePanel title={activeNav} /> : null}
           {activeNav === 'Overview' ? <>
-          <div className="page-heading"><div><div className="live-label"><StatusDot tone={networkStatusTone} /> WORKSPACE OVERVIEW</div><h1>{timeGreeting || 'Welcome'}, {currentUser.trim().split(/\s+/)[0] || 'there'}.</h1><p>Workspace records and billing activity for your network.</p></div><div className="heading-actions"><button ref={customizeButtonRef} type="button" className="outline-button" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={openDashboardCustomization}><SlidersHorizontal size={15} /> Customize</button><select className="outline-button report-export-format" aria-label="Workspace report export format" value={dashboardExportFormat} onChange={(event) => setDashboardExportFormat(event.target.value as ReportExportFormat)} disabled={exportingDashboardReport}><option value="csv">CSV</option><option value="excel">Excel (.xlsx)</option><option value="pdf">PDF</option></select><button type="button" className="primary-button" onClick={() => void exportDashboardReport()} disabled={exportingDashboardReport}><ArrowDownRight size={15} /> {exportingDashboardReport ? 'Exporting…' : 'Export report'}</button></div></div>
+          <div className="page-heading"><div><div className="live-label"><StatusDot tone={networkStatusTone} /> WORKSPACE OVERVIEW</div><h1>{timeGreeting || 'Welcome'}, {currentUser.trim().split(/\s+/)[0] || 'there'}.</h1><p>Workspace records and billing activity for your network.</p><blockquote className="daily-quote"><span>{getDailyQuote()}</span><cite>Daily quote</cite></blockquote></div><div className="heading-actions"><button ref={customizeButtonRef} type="button" className="outline-button" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={openDashboardCustomization}><SlidersHorizontal size={15} /> Customize</button><select className="outline-button report-export-format" aria-label="Workspace report export format" value={dashboardExportFormat} onChange={(event) => setDashboardExportFormat(event.target.value as ReportExportFormat)} disabled={exportingDashboardReport}><option value="csv">CSV</option><option value="excel">Excel (.xlsx)</option><option value="pdf">PDF</option></select><button type="button" className="primary-button" onClick={() => void exportDashboardReport()} disabled={exportingDashboardReport}><ArrowDownRight size={15} /> {exportingDashboardReport ? 'Exporting…' : 'Export report'}</button></div></div>
           {dashboardNotice && <p className="dashboard-notice" role="status">{dashboardNotice}<button type="button" aria-label="Dismiss message" onClick={() => setDashboardNotice('')}><X size={13} /></button></p>}
           <div className="status-strip">
             <div><span className="status-strip-label">WORKSPACE DATA</span><strong><StatusDot tone={networkStatusTone} />{dataStatus === 'loading' ? 'Loading workspace data' : dataStatus === 'error' ? 'Workspace data unavailable' : dashboardData.sites.length === 0 ? 'No sites configured' : `${activeSiteCount} of ${dashboardData.sites.length} sites marked active`}</strong></div>
@@ -862,16 +895,7 @@ export function AdminDashboard() {
           {dashboardSections.network && <div className="overview-grid">
             <section className="panel site-panel">
               <div className="panel-heading"><div><h3>Configured sites</h3><span>{dataStatus === 'live' ? `${dashboardData.sites.length} sites in this workspace` : 'Workspace site records'}</span></div><button type="button" className="text-button" onClick={() => setActiveNav('Sites')}>View all <ArrowUpRight size={13} /></button></div>
-              {dataStatus === 'loading' ? <p className="header-empty">Loading site records…</p> : dataStatus === 'error' ? <p className="header-empty">Site records are unavailable.</p> : visibleSites.length ? visibleSites.map((site) => editingSiteId === site.id ? <div className="site-row site-edit-row" key={site.id}>
-                <div className={`site-icon site-${site.color}`}><Globe2 size={17} /></div>
-                <div className="site-info site-edit-fields">
-                  <input value={editingSiteName} maxLength={120} onChange={(event) => setEditingSiteName(event.target.value)} aria-label="Site name" />
-                  <input value={editingSiteLocation} maxLength={160} onChange={(event) => setEditingSiteLocation(event.target.value)} aria-label="Site location" />
-                </div>
-                <div className="site-stat"><strong>{formatDashboardValue(site.customers)}</strong><span>subscribers</span></div>
-                <div className="health"><StatusDot tone={site.status.toLowerCase() === 'active' ? 'green' : 'amber'} /><span>{site.status}</span></div>
-                <div className="site-edit-actions"><button type="button" className="text-button" disabled={deletingSiteId !== ''} onClick={() => void saveSiteName()}>{deletingSiteId === site.id ? 'Saving…' : 'Save'}</button><button type="button" className="text-button danger-text" disabled={deletingSiteId !== ''} onClick={cancelRenamingSite}>Cancel</button></div>
-              </div> : <div className="site-row" key={site.id}><div className={`site-icon site-${site.color}`}><Globe2 size={17} /></div><div className="site-info"><strong>{site.name}</strong><span>{site.location || site.code}</span></div><div className="site-stat"><strong>{formatDashboardValue(site.customers)}</strong><span>subscribers</span></div><div className="health"><div><StatusDot tone={site.status.toLowerCase() === 'active' ? 'green' : 'amber'} /></div><span>{site.status}</span></div><div className="site-row-actions"><button type="button" className="text-button" aria-label={`Rename site ${site.name}`} title={`Rename site ${site.name}`} disabled={deletingSiteId !== '' || editingSiteId !== ''} onClick={() => startRenamingSite(site)}>Rename</button><button type="button" className="text-button danger-text" aria-label={`Delete site ${site.name}`} title={`Delete site ${site.name}`} disabled={deletingSiteId !== ''} onClick={() => void deleteSite(site)}><Trash2 size={14} />{deletingSiteId === site.id ? 'Deleting…' : 'Delete'}</button></div></div>) : <p className="header-empty">{siteFilter === 'All sites' ? 'No sites have been added to this workspace.' : 'No sites match this filter.'}</p>}
+              {dataStatus === 'loading' ? <p className="header-empty">Loading site records…</p> : dataStatus === 'error' ? <p className="header-empty">Site records are unavailable.</p> : visibleSites.length ? visibleSites.map((site) => <div className="site-row" key={site.id}><div className={`site-icon site-${site.color}`}><Globe2 size={17} /></div><div className="site-info"><strong>{site.name}</strong><span>{site.location || site.code}</span></div><div className="site-stat"><strong>{formatDashboardValue(site.customers)}</strong><span>subscribers</span></div><div className="health"><div><StatusDot tone={site.status.toLowerCase() === 'active' ? 'green' : 'amber'} /></div><span>{site.status}</span></div></div>) : <p className="header-empty">{siteFilter === 'All sites' ? 'No sites have been added to this workspace.' : 'No sites match this filter.'}</p>}
             </section>
             <section className="panel revenue-panel">
               <div className="panel-heading"><div><h3>Payments received</h3><span>Confirmed payments · {range}</span></div></div>

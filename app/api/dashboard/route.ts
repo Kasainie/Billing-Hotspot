@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { and, count, desc, eq, gte, lte, sum } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { logDatabaseError } from '@/lib/db/log-error'
 import { customers, packages, payments, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { getOfficialRecordsCutoff } from '@/lib/official-records-cutoff'
 
 export async function GET(request: NextRequest) {
-  const session = await getTenantSession(request)
-  if (!session) return NextResponse.json({ error: 'Sign in to view the dashboard.' }, { status: 401 })
-  const tenantId = session.tenantId
   const hasDatabase = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim())
-
   if (!hasDatabase) {
     return NextResponse.json({ error: 'Dashboard data requires a configured database.' }, { status: 503 })
   }
 
   try {
+    const session = await getTenantSession(request)
+    if (!session) return NextResponse.json({ error: 'Sign in to view the dashboard.' }, { status: 401 })
+    const tenantId = session.tenantId
     const range = request.nextUrl.searchParams.get('range')
     const rangeMilliseconds = range === '24 hours' ? 24 * 60 * 60 * 1000 : range === '7 days' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000
     const paymentSinceCandidate = new Date(Date.now() - rangeMilliseconds)
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error) {
-    console.error('Failed to load tenant dashboard data', error)
-    return NextResponse.json({ error: 'Unable to load dashboard data.' }, { status: 503 })
+    logDatabaseError('Failed to authenticate or load tenant dashboard data', error)
+    return NextResponse.json({ error: 'Unable to load dashboard data. Please try again.' }, { status: 503 })
   }
 }

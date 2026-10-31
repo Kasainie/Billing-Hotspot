@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logDatabaseError } from '@/lib/db/log-error'
 import { getTenantSession } from '@/lib/db/tenant'
 import { tenantSessionUserFilter } from '@/lib/hotspot-session-tenant-filter'
 import { radiusAccountingFreshnessPredicate } from '@/lib/radius-accounting'
@@ -67,8 +68,8 @@ export async function GET(request: NextRequest) {
           (select coalesce(sum(p.amount), 0)::float8 from public.payments p where p.tenant_id = ${tenantId} and p.status = 'paid' and p.paid_at >= ${start} and p.paid_at < ${end}) as revenue,
           (select count(*)::int from public.payments p where p.tenant_id = ${tenantId} and p.status = 'paid' and p.paid_at >= ${start} and p.paid_at < ${end}) as "paymentCount",
           (select count(distinct p.customer_id)::int from public.payments p where p.tenant_id = ${tenantId} and p.status = 'paid' and p.customer_id is not null and p.paid_at >= ${start} and p.paid_at < ${end}) as "payingSubscribers",
-          (select coalesce(sum(accounting.acctinputoctets), 0)::float8 from public.radacct accounting where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end} and ${tenantSessionUserFilter(tenantId)}) as "downloadBytes",
-          (select coalesce(sum(accounting.acctoutputoctets), 0)::float8 from public.radacct accounting where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end} and ${tenantSessionUserFilter(tenantId)}) as "uploadBytes"
+          (select coalesce(sum(accounting.acctoutputoctets), 0)::float8 from public.radacct accounting where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end} and ${tenantSessionUserFilter(tenantId)}) as "downloadBytes",
+          (select coalesce(sum(accounting.acctinputoctets), 0)::float8 from public.radacct accounting where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end} and ${tenantSessionUserFilter(tenantId)}) as "uploadBytes"
       `),
       db.execute(sql`
         select date_trunc('day', paid_at) as date, coalesce(sum(amount), 0)::float8 as revenue, count(*)::int as payments
@@ -123,8 +124,8 @@ export async function GET(request: NextRequest) {
         select
           count(*) filter (where acctstoptime is null and ${radiusAccountingFreshnessPredicate(sql`acctupdatetime`, sql`acctstarttime`)})::int as active,
           count(*)::int as sessions,
-          coalesce(sum(acctinputoctets), 0)::float8 as "downloadBytes",
-          coalesce(sum(acctoutputoctets), 0)::float8 as "uploadBytes"
+          coalesce(sum(acctoutputoctets), 0)::float8 as "downloadBytes",
+          coalesce(sum(acctinputoctets), 0)::float8 as "uploadBytes"
         from public.radacct accounting
         where accounting.acctstarttime >= ${start} and accounting.acctstarttime < ${end} and ${tenantSessionUserFilter(tenantId)}
       `),
@@ -231,7 +232,7 @@ export async function GET(request: NextRequest) {
       unlinkedPerformance: unlinkedPerformance.rows[0] || {},
     }, { headers: { 'cache-control': 'no-store, max-age=0' } })
   } catch (error) {
-    console.error('Failed to load analytics', error)
+    logDatabaseError('Failed to load analytics', error)
     return NextResponse.json({ error: 'Unable to load analytics data.' }, { status: 503 })
   }
 }

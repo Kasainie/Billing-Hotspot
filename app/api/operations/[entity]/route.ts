@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { and, count, desc, eq, gte, lt, sql, sum } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { customers, equipment, expenses, inventoryMovements, invoices, leads, packages, radcheck, radreply, sites, subscriberCredits, supportTickets, tr069Devices, vouchers } from '@/lib/db/schema'
+import { customers, equipment, expenses, inventoryMovements, invoices, leads, packages, procurementItems, radcheck, radreply, sites, subscriberCredits, supportTickets, tr069Devices, vouchers } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { enqueueTenantTemplateSms, getTenantTemplateSettings } from '@/lib/message-template-delivery'
@@ -10,7 +10,7 @@ import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 import { SUPPORT_TICKET_CATEGORIES } from '@/lib/support-tickets'
 import { getOfficialRecordsCutoff } from '@/lib/official-records-cutoff'
 
-const entities = ['leads', 'tickets', 'expenses', 'vouchers', 'equipment', 'tr069', 'invoices'] as const
+const entities = ['leads', 'tickets', 'expenses', 'vouchers', 'equipment', 'tr069', 'invoices', 'purchases'] as const
 type Entity = typeof entities[number]
 
 const leadStatuses = ['new', 'contacted', 'qualified', 'converted', 'lost'] as const
@@ -35,11 +35,15 @@ function invalid(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status })
 }
 
+function isMissingProcurementTable(error: unknown) {
+  return error !== null && typeof error === 'object' && 'code' in error && error.code === '42P01'
+}
+
 async function getAuthorizedEntity(request: NextRequest, context: { params: Promise<{ entity: string }> }, requireAdmin = false) {
   const { entity } = await context.params
   if (!entities.includes(entity as Entity)) return { response: invalid('Unknown operations module.', 404) } as const
   let session
-  if (requireAdmin) {
+  if (requireAdmin && entity !== 'purchases') {
     const access = await requireTenantAdmin(request)
     if ('response' in access) return { response: access.response } as const
     session = access.session
@@ -81,6 +85,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
         db.select({ category: expenses.category, amount: sum(expenses.amount), count: count() }).from(expenses).where(and(eq(expenses.tenantId, access.tenantId), gte(expenses.occurredAt, getOfficialRecordsCutoff()))).groupBy(expenses.category),
       ])
       return NextResponse.json({ items, total: { amount: Number(total[0]?.amount ?? 0), count: total[0]?.count ?? 0 }, byCategory })
+    }
+    if (access.entity === 'purchases') {
+      const items = await db.select().from(procurementItems)
+        .where(eq(procurementItems.tenantId, access.tenantId))
+        .orderBy(desc(procurementItems.createdAt)).limit(500)
+      return NextResponse.json({ items })
     }
     if (access.entity === 'equipment') {
       const items = await db.select({
@@ -199,6 +209,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
     return NextResponse.json({ items, totals, packages: availablePackages, byPackage })
   } catch (error) {
     console.error(`Failed to load ${access.entity} operations`, error)
+    if (access.entity === 'purchases' && isMissingProcurementTable(error)) {
+      return invalid('Purchase list is unavailable until its database migration has been applied.', 503)
+    }
     return invalid('Unable to load operations data.', 503)
   }
 }
@@ -215,6 +228,30 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
   }
 
   try {
+    if (access.entity === 'purchases') {
+      const name = text(input.name, 160)
+      const category = text(input.category, 80) || 'Network equipment'
+      const quantity = Number(input.quantity)
+      const unit = text(input.unit, 30) || 'pcs'
+      const estimatedUnitCost = Number(input.estimatedUnitCost)
+      const priority = text(input.priority, 20) || 'normal'
+      if (!name) return invalid('An item name is required.')
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000000) return invalid('Enter a quantity between 1 and 1,000,000.')
+      if (!Number.isSafeInteger(estimatedUnitCost) || estimatedUnitCost < 0 || estimatedUnitCost > 2147483647) return invalid('Estimated unit cost must be a non-negative whole number.')
+      if (!priorities.includes(priority as typeof priorities[number])) return invalid('Select a valid priority.')
+      const [created] = await db.insert(procurementItems).values({
+        tenantId: access.tenantId,
+        name,
+        category,
+        quantity,
+        unit,
+        estimatedUnitCost,
+        priority,
+        supplier: text(input.supplier, 160) || null,
+        notes: text(input.notes, 2000) || null,
+      }).returning()
+      return NextResponse.json(created, { status: 201 })
+    }
     if (access.entity === 'leads') {
       const name = text(input.name, 120)
       const email = text(input.email, 254).toLowerCase()
@@ -509,6 +546,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
     }, { status: 201 })
   } catch (error) {
     console.error(`Failed to create ${access.entity} record`, error)
+    if (access.entity === 'purchases' && isMissingProcurementTable(error)) {
+      return invalid('Purchase list is unavailable until its database migration has been applied.', 503)
+    }
     if (error && typeof error === 'object' && 'code' in error && error.code === '23505') return invalid('A generated voucher conflicted with an existing username. Please try again.', 409)
     return invalid(`Unable to create ${access.entity === 'vouchers' ? 'vouchers' : access.entity.slice(0, -1)}.`, 500)
   }
@@ -528,6 +568,53 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
   try {
     const isInventoryBatch = access.entity === 'equipment' && id === 'batch'
     if (!isInventoryBatch && !uuidPattern.test(id)) return invalid('Record id is invalid.')
+    if (access.entity === 'purchases') {
+      const changes: {
+        name?: string
+        category?: string
+        quantity?: number
+        unit?: string
+        estimatedUnitCost?: number
+        priority?: string
+        status?: string
+        supplier?: string | null
+        notes?: string | null
+        updatedAt: Date
+      } = { updatedAt: new Date() }
+      if (input.name !== undefined) {
+        const name = text(input.name, 160)
+        if (!name) return invalid('An item name is required.')
+        changes.name = name
+      }
+      if (input.category !== undefined) changes.category = text(input.category, 80) || 'Network equipment'
+      if (input.quantity !== undefined) {
+        const quantity = Number(input.quantity)
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > 1000000) return invalid('Enter a quantity between 1 and 1,000,000.')
+        changes.quantity = quantity
+      }
+      if (input.unit !== undefined) changes.unit = text(input.unit, 30) || 'pcs'
+      if (input.estimatedUnitCost !== undefined) {
+        const estimatedUnitCost = Number(input.estimatedUnitCost)
+        if (!Number.isSafeInteger(estimatedUnitCost) || estimatedUnitCost < 0 || estimatedUnitCost > 2147483647) return invalid('Estimated unit cost must be a non-negative whole number.')
+        changes.estimatedUnitCost = estimatedUnitCost
+      }
+      if (input.priority !== undefined) {
+        const priority = text(input.priority, 20)
+        if (!priorities.includes(priority as typeof priorities[number])) return invalid('Select a valid priority.')
+        changes.priority = priority
+      }
+      if (input.status !== undefined) {
+        const status = text(input.status, 20)
+        if (!['needed', 'ordered', 'purchased'].includes(status)) return invalid('Select a valid purchase status.')
+        changes.status = status
+      }
+      if (input.supplier !== undefined) changes.supplier = text(input.supplier, 160) || null
+      if (input.notes !== undefined) changes.notes = text(input.notes, 2000) || null
+      if (Object.keys(changes).length === 1) return invalid('Provide a purchase-list field to update.')
+      const [updated] = await db.update(procurementItems).set(changes)
+        .where(and(eq(procurementItems.id, id), eq(procurementItems.tenantId, access.tenantId))).returning()
+      return updated ? NextResponse.json(updated) : invalid('Purchase-list item not found.', 404)
+    }
     if (access.entity === 'leads') {
       const changes: { status?: string; coverageStatus?: string; customerId?: string; updatedAt: Date } = { updatedAt: new Date() }
       if (input.status !== undefined) {
@@ -696,6 +783,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
     return invalid('Expense records cannot be changed after creation.')
   } catch (error) {
     console.error(`Failed to update ${access.entity} record`, error)
+    if (access.entity === 'purchases' && isMissingProcurementTable(error)) {
+      return invalid('Purchase list is unavailable until its database migration has been applied.', 503)
+    }
     if (error instanceof Error && error.message.startsWith('Inventory checkout:')) {
       return invalid(error.message.replace('Inventory checkout: ', ''), 400)
     }
@@ -743,12 +833,17 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
         ? await db.delete(supportTickets).where(and(eq(supportTickets.id, id), eq(supportTickets.tenantId, access.tenantId))).returning({ id: supportTickets.id })
         : access.entity === 'expenses'
           ? await db.delete(expenses).where(and(eq(expenses.id, id), eq(expenses.tenantId, access.tenantId))).returning({ id: expenses.id })
+          : access.entity === 'purchases'
+            ? await db.delete(procurementItems).where(and(eq(procurementItems.id, id), eq(procurementItems.tenantId, access.tenantId))).returning({ id: procurementItems.id })
           : access.entity === 'equipment'
             ? await db.delete(equipment).where(and(eq(equipment.id, id), eq(equipment.tenantId, access.tenantId))).returning({ id: equipment.id })
             : await db.delete(tr069Devices).where(and(eq(tr069Devices.id, id), eq(tr069Devices.tenantId, access.tenantId))).returning({ id: tr069Devices.id })
     return deleted.length ? NextResponse.json({ ok: true }) : invalid('Record not found.', 404)
   } catch (error) {
     console.error(`Failed to delete ${access.entity} record`, error)
+    if (access.entity === 'purchases' && isMissingProcurementTable(error)) {
+      return invalid('Purchase list is unavailable until its database migration has been applied.', 503)
+    }
     return invalid(`Unable to delete ${access.entity} record.`, 500)
   }
 }

@@ -1,9 +1,13 @@
-const { app, BrowserWindow, Menu, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu, session, shell } = require('electron')
 const path = require('node:path')
 const windowStateKeeper = require('electron-window-state')
 
 const appUrl = 'https://billing.lktech.life/login'
 const trustedHosts = new Set(['login.lktech.life', 'billing.lktech.life'])
+const downloadableInstallers = new Set([
+  '/downloads/LKTECH-Windows-x64-1.0.0.exe',
+  '/downloads/LKTECH-Windows-ia32-1.0.0.exe',
+])
 const isTrustedUrl = (value) => {
   try {
     const url = new URL(value)
@@ -46,6 +50,7 @@ const createWindow = () => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,
     },
   })
@@ -116,6 +121,37 @@ const createWindow = () => {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('open-download', (event, value) => {
+    if (!isTrustedUrl(event.senderFrame?.url || '')) {
+      throw new Error('Downloads can only be opened by LKTECH.')
+    }
+    let url
+    try {
+      url = new URL(value)
+    } catch {
+      throw new Error('The download URL is invalid.')
+    }
+    if (url.protocol !== 'https:' || url.hostname !== 'billing.lktech.life' || !downloadableInstallers.has(url.pathname)) {
+      throw new Error('This installer download is not allowed.')
+    }
+    return shell.openExternal(url.href)
+  })
+  ipcMain.handle('open-notification-settings', (event) => {
+    if (!isTrustedUrl(event.senderFrame?.url || '')) {
+      throw new Error('Notification settings can only be opened by LKTECH.')
+    }
+    if (process.platform !== 'win32') {
+      throw new Error('System notification settings are only supported on Windows.')
+    }
+    return shell.openExternal('ms-settings:notifications')
+  })
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(permission === 'notifications' && isTrustedUrl(webContents.getURL()))
+  })
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin) => (
+    permission === 'notifications' &&
+    Boolean(webContents && isTrustedUrl(webContents.getURL()) && isTrustedUrl(requestingOrigin))
+  ))
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

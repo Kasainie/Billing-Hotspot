@@ -9,6 +9,11 @@ const config: CapacitorConfig = {
     cleartext: false,
     allowNavigation: ['*.lktech.life'],
   },
+  plugins: {
+    LocalNotifications: {
+      sound: 'notification.wav',
+    },
+  },
 }
 
 export default config

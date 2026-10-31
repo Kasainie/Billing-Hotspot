@@ -15,7 +15,7 @@ function FeatureHeader() {
       <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
         <Link href="/" className="marketing-link flex items-center gap-2.5" aria-label="LKTECH home">
           <span className="grid size-9 place-items-center rounded-xl bg-[#0F172A] text-white shadow-sm"><Radio size={18} strokeWidth={2.3} /></span>
-          <BrandWordmark primary="LKTECH" accent="." className="text-[17px] font-extrabold tracking-[-0.06em]" />
+          <BrandWordmark primary="LKTECH" accent="." tone="dark" className="text-[17px] font-extrabold tracking-[-0.06em]" />
         </Link>
         <nav aria-label="Main navigation" className="flex items-center gap-2 sm:gap-4">
           <Link href="/features" className="marketing-link rounded-lg px-3 py-2 text-[13px] font-semibold text-slate-600 transition-colors hover:text-[#2563EB]">Features</Link>
@@ -49,7 +49,7 @@ function FeatureIcon({ feature, size = 20 }: { feature: MarketingFeature; size?:
 
 export function MarketingFeatureIndex() {
   return (
-    <main className="min-h-screen bg-[#F8FAFC] text-[#0F172A]">
+    <main className="marketing-tech-site min-h-screen bg-[#F8FAFC] text-[#0F172A]">
       <FeatureHeader />
       <section className="mx-auto max-w-7xl px-5 py-16 sm:px-8 sm:py-24 lg:px-10">
         <Link href="/" className="marketing-link inline-flex items-center gap-2 text-sm font-semibold text-[#2563EB]"><ArrowLeft size={15} /> Back to home</Link>
@@ -84,7 +84,7 @@ export function MarketingFeatureIndex() {
 
 export function MarketingFeatureDetail({ feature }: { feature: MarketingFeature }) {
   return (
-    <main className="min-h-screen bg-[#F8FAFC] text-[#0F172A]">
+    <main className="marketing-tech-site min-h-screen bg-[#F8FAFC] text-[#0F172A]">
       <FeatureHeader />
       <section className="mx-auto max-w-7xl px-5 py-12 sm:px-8 sm:py-20 lg:px-10">
         <Link href="/features" className="marketing-link inline-flex items-center gap-2 text-sm font-semibold text-[#2563EB]"><ArrowLeft size={15} /> All features</Link>

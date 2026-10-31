@@ -45,14 +45,14 @@ export function MarketingHome() {
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: productSchemaJson }} />
-      <main id="marketing-landing" className={`${landingSans.variable} ${landingHeading.variable} ${landingMono.variable} min-h-screen overflow-hidden bg-[#F8FAFC] text-[#0F172A]`}>
+      <main id="marketing-landing" className={`marketing-tech-site ${landingSans.variable} ${landingHeading.variable} ${landingMono.variable} min-h-screen overflow-hidden bg-[#F8FAFC] text-[#0F172A]`}>
         <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-[#F8FAFC]/90 backdrop-blur-xl">
           <div className="relative mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
             <Link href="/" className="marketing-link flex items-center gap-2.5" aria-label="LKTECH home">
               <span className="grid size-9 place-items-center rounded-xl bg-[#0F172A] text-white shadow-sm">
                 <Radio size={18} strokeWidth={2.3} />
               </span>
-              <BrandWordmark primary="LKTECH" accent="." className="text-[17px] font-extrabold tracking-[-0.06em]" />
+              <BrandWordmark primary="LKTECH" accent="." tone="dark" className="text-[17px] font-extrabold tracking-[-0.06em]" />
             </Link>
 
             <nav aria-label="Main navigation" className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-8 md:flex">
@@ -76,14 +76,14 @@ export function MarketingHome() {
           <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_78%_28%,rgba(37,99,235,0.08),transparent_34%)]" />
           <div className="relative mx-auto grid max-w-7xl items-center gap-14 px-5 pb-20 pt-14 sm:px-8 sm:pb-24 sm:pt-20 lg:grid-cols-[0.94fr_1.06fr] lg:gap-10 lg:px-10 lg:pb-28 lg:pt-24">
             <div className="max-w-[590px]">
-              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-3.5 py-2 shadow-[0_2px_8px_rgba(15,23,42,0.04)]">
+              <div className="landing-kicker mb-6 inline-flex items-center gap-2 rounded-full border border-blue-100 bg-white px-3.5 py-2 shadow-[0_2px_8px_rgba(15,23,42,0.04)]">
                 <span className="relative flex size-2">
                   <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
                   <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
                 </span>
                 <span className="landing-mono text-[10px] font-medium tracking-[0.08em] text-slate-600">ISP OPERATIONS PLATFORM</span>
               </div>
-              <h1 className="font-[var(--font-landing-heading)] text-[42px] font-extrabold leading-[1.08] tracking-[-0.065em] text-[#0F172A] sm:text-[54px] lg:text-[62px]">
+              <h1 className="landing-hero-title font-[var(--font-landing-heading)] text-[42px] font-extrabold leading-[1.08] tracking-[-0.065em] text-[#0F172A] sm:text-[54px] lg:text-[62px]">
                 Run your ISP with <span className="text-[#2563EB]">clarity.</span>
               </h1>
               <p className="mt-6 max-w-[520px] text-[16px] leading-7 text-[#334155] sm:text-[17px] sm:leading-[1.8]">
@@ -106,21 +106,21 @@ export function MarketingHome() {
 
             <div className="relative mx-auto w-full max-w-[620px] lg:ml-auto">
               <div aria-hidden="true" className="absolute -inset-6 rounded-[32px] bg-blue-200/30 blur-3xl" />
-              <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_32px_90px_rgba(15,23,42,0.14)]">
-                <div className="flex h-14 items-center justify-between border-b border-slate-100 px-5 sm:px-6">
+              <div className="landing-preview relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_32px_90px_rgba(15,23,42,0.14)]">
+                <div className="landing-preview-header flex h-14 items-center justify-between border-b border-slate-100 px-5 sm:px-6">
                   <div className="flex items-center gap-2.5">
                     <span className="grid size-7 place-items-center rounded-lg bg-[#0F172A] text-white"><Radio size={14} /></span>
                     <span className="text-xs font-bold tracking-tight text-slate-800">Network overview</span>
                     <ChevronDown size={13} className="text-slate-400" />
                   </div>
-                  <div className="flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1">
+                  <div className="landing-preview-live flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1">
                     <span className="size-1.5 rounded-full bg-emerald-500" />
                     <span className="landing-mono text-[9px] font-medium text-emerald-700">PREVIEW DATA</span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 p-4 sm:gap-4 sm:p-6">
-                  <div className="rounded-xl border border-slate-200/80 bg-white p-4 sm:p-5">
+                  <div className="landing-preview-metric rounded-xl border border-slate-200/80 bg-white p-4 sm:p-5">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-medium text-slate-500">Active subscribers</span>
                       <span className="grid size-7 place-items-center rounded-lg bg-blue-50 text-blue-600"><Wifi size={14} /></span>
@@ -136,7 +136,7 @@ export function MarketingHome() {
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-slate-200/80 bg-white p-4 sm:p-5">
+                  <div className="landing-preview-metric rounded-xl border border-slate-200/80 bg-white p-4 sm:p-5">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-medium text-slate-500">Payments today</span>
                       <span className="grid size-7 place-items-center rounded-lg bg-emerald-50 text-emerald-700"><CreditCard size={14} /></span>
@@ -152,7 +152,7 @@ export function MarketingHome() {
                     </div>
                   </div>
 
-                  <div className="col-span-2 rounded-xl border border-slate-200/80 bg-white p-4 sm:p-5">
+                  <div className="landing-preview-chart col-span-2 rounded-xl border border-slate-200/80 bg-white p-4 sm:p-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-medium text-slate-500">Revenue activity</p>
@@ -169,12 +169,12 @@ export function MarketingHome() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/70 px-5 py-3.5 sm:px-6">
+                <div className="landing-preview-footer flex items-center justify-between border-t border-slate-100 bg-slate-50/70 px-5 py-3.5 sm:px-6">
                   <span className="inline-flex items-center gap-2 text-[10px] font-medium text-slate-500"><span className="size-1.5 rounded-full bg-emerald-500" /> Router fleet connected</span>
                   <span className="landing-mono text-[9px] text-slate-400">ILLUSTRATIVE VIEW</span>
                 </div>
               </div>
-              <div className="absolute -bottom-5 -left-5 hidden items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_34px_rgba(15,23,42,0.12)] sm:flex">
+              <div className="landing-trust-callout absolute -bottom-5 -left-5 hidden items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-[0_12px_34px_rgba(15,23,42,0.12)] sm:flex">
                 <span className="grid size-9 place-items-center rounded-lg bg-[#0F172A] text-white"><ShieldCheck size={17} /></span>
                 <span><strong className="block text-xs font-semibold text-[#0F172A]">Operations in sync</strong><small className="mt-0.5 block text-[10px] text-slate-500">Billing to router, connected</small></span>
                 <Zap size={15} className="ml-1 text-[#2563EB]" />

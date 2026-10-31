@@ -44,14 +44,14 @@ const downloads = [
 
 export default function DownloadsPage() {
   return (
-    <main className={`${downloadHeading.variable} min-h-screen bg-[#F8FAFC] text-[#0F172A]`}>
+    <main className={`marketing-tech-site ${downloadHeading.variable} min-h-screen bg-[#F8FAFC] text-[#0F172A]`}>
       <header className="border-b border-slate-200/80 bg-white">
         <div className="mx-auto flex h-[72px] max-w-6xl items-center justify-between px-5 sm:px-8">
           <Link href="/" className="marketing-link flex items-center gap-2.5" aria-label="LKTECH home">
             <span className="grid size-9 place-items-center rounded-xl bg-[#0F172A] text-white">
               <Monitor size={18} />
             </span>
-            <BrandWordmark primary="LKTECH" accent="." className="text-[17px] font-extrabold tracking-[-0.06em]" />
+            <BrandWordmark primary="LKTECH" accent="." tone="dark" className="text-[17px] font-extrabold tracking-[-0.06em]" />
           </Link>
           <Link href="/login" className="marketing-link text-sm font-semibold text-slate-600 transition-colors hover:text-[#2563EB]">
             Sign in

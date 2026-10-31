@@ -5,7 +5,7 @@ import { ArrowDownToLine, CalendarClock, Clock3, MessageCircle, Minus, Plus, Ref
 import { KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
 import { SUPPORT_TICKET_CATEGORIES, supportTicketCategoryLabel } from '@/lib/support-tickets'
 
-type ModuleView = 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'Equipment' | 'TR-069' | 'Invoices'
+type ModuleView = 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'Equipment' | 'TR-069' | 'Invoices' | 'Purchases'
 type Lead = { id: string; name: string; email: string | null; phone: string | null; location: string | null; coverageStatus: string; customerId: string | null; source: string | null; notes: string | null; status: string; createdAt: string }
 type SubscriberPlan = { id: string; name: string; type: string; rateLimit: string; monthlyPrice: number; durationSeconds: number }
 type SupportTicket = { id: string; requesterName: string; requesterEmail: string | null; subject: string; description: string; category: string; priority: string; status: string; assignedTo: string | null; createdAt: string; updatedAt: string }
@@ -14,6 +14,7 @@ type Voucher = { id: string; packageId: string; packageName: string; username: s
 type VoucherPackage = { id: string; name: string; rateLimit: string; monthlyPrice: number; durationSeconds: number }
 type GeneratedVoucher = { id: string; username: string; password: string; packageName: string; validitySeconds: number }
 type Equipment = { id: string; name: string; category: string; serialNumber: string | null; manufacturer: string | null; model: string | null; status: string; condition: string; quantity: number; unit: string; minimumQuantity: number; usedQuantity: number; purchasedAt: string | null; notes: string | null; siteId: string | null; siteName: string | null }
+type PurchaseRequirement = { id: string; name: string; category: string; quantity: number; unit: string; estimatedUnitCost: number; priority: string; status: string; supplier: string | null; notes: string | null; createdAt: string; updatedAt: string }
 type InventoryMovement = { id: string; equipmentId: string; itemName: string; movementType: 'added' | 'used' | 'restocked' | 'adjusted'; quantity: number; notes: string | null; createdAt: string }
 type Tr069Device = { id: string; siteId: string | null; siteName: string | null; serialNumber: string; manufacturer: string | null; model: string | null; firmwareVersion: string | null; status: string; lastInformAt: string | null; notes: string | null; createdAt: string }
 type Invoice = { id: string; customerId: string; customerName: string; customerEmail: string; customerPhone: string | null; invoiceNumber: string; periodStart: string; periodEnd: string; dueAt: string; amount: number; description: string; status: string; paidAt: string | null; createdAt: string }
@@ -88,8 +89,8 @@ function downloadCsv(filename: string, rows: string[][]) {
 }
 
 export function OperationsWorkspace({ view }: { view: ModuleView }) {
-  const entity = view === 'Leads' ? 'leads' : view.startsWith('Ticket') ? 'tickets' : view === 'Expenses' ? 'expenses' : view === 'Equipment' ? 'equipment' : view === 'TR-069' ? 'tr069' : view === 'Invoices' ? 'invoices' : 'vouchers'
-  const [items, setItems] = useState<(Lead | SupportTicket | Expense | Voucher | Equipment | Tr069Device | Invoice)[]>([])
+  const entity = view === 'Purchases' ? 'purchases' : view === 'Leads' ? 'leads' : view.startsWith('Ticket') ? 'tickets' : view === 'Expenses' ? 'expenses' : view === 'Equipment' ? 'equipment' : view === 'TR-069' ? 'tr069' : view === 'Invoices' ? 'invoices' : 'vouchers'
+  const [items, setItems] = useState<(Lead | SupportTicket | Expense | Voucher | Equipment | Tr069Device | Invoice | PurchaseRequirement)[]>([])
   const [totals, setTotals] = useState<{ status: string; count: number; amount?: number }[]>([])
   const [expenseTotal, setExpenseTotal] = useState({ amount: 0, count: 0 })
   const [expenseCategories, setExpenseCategories] = useState<{ category: string; amount: string | number | null; count: number }[]>([])
@@ -122,13 +123,14 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
   const [equipmentForm, setEquipmentForm] = useState({ name: '', category: '', serialNumber: '', manufacturer: '', model: '', siteId: '', status: 'spare', condition: 'good', quantity: '0', unit: 'pcs', minimumQuantity: '0', purchasedAt: '', notes: '' })
   const [tr069Form, setTr069Form] = useState({ serialNumber: '', manufacturer: '', model: '', firmwareVersion: '', siteId: '', notes: '' })
   const [invoiceForm, setInvoiceForm] = useState({ period: new Date().toISOString().slice(0, 7), dueAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) })
+  const [purchaseForm, setPurchaseForm] = useState({ name: '', category: 'Network equipment', quantity: '1', unit: 'pcs', estimatedUnitCost: '0', priority: 'normal', supplier: '', notes: '' })
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
       const response = await fetch(`/api/operations/${entity}`, { cache: 'no-store' })
-      const result = await response.json() as WorkspaceRecord<Lead | SupportTicket | Expense | Voucher | Equipment | Tr069Device | Invoice> & { error?: string }
+      const result = await response.json() as WorkspaceRecord<Lead | SupportTicket | Expense | Voucher | Equipment | Tr069Device | Invoice | PurchaseRequirement> & { error?: string }
       if (!response.ok) throw new Error(result.error || `Unable to load ${entity}.`)
       setItems(result.items)
       setInventoryMovements(result.movements || [])
@@ -145,6 +147,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
         setVoucherForm((current) => ({ ...current, packageId: result.packages![0].id }))
       }
     } catch (reason) {
+      setItems([])
       setError(reason instanceof Error ? reason.message : 'Unable to load workspace records.')
     } finally {
       setLoading(false)
@@ -199,6 +202,9 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
       } else if (entity === 'equipment') {
         setNotice('Equipment record saved.')
         setEquipmentForm({ name: '', category: '', serialNumber: '', manufacturer: '', model: '', siteId: '', status: 'spare', condition: 'good', quantity: '0', unit: 'pcs', minimumQuantity: '0', purchasedAt: '', notes: '' })
+      } else if (entity === 'purchases') {
+        setNotice('Purchase-list item added.')
+        setPurchaseForm({ name: '', category: 'Network equipment', quantity: '1', unit: 'pcs', estimatedUnitCost: '0', priority: 'normal', supplier: '', notes: '' })
       } else if (entity === 'tr069') {
         setNotice('Device added to the TR-069 registry. It will remain pending until an ACS reports it.')
         setTr069Form({ serialNumber: '', manufacturer: '', model: '', firmwareVersion: '', siteId: '', notes: '' })
@@ -411,10 +417,12 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
     ])
   }
 
-  const title = view === 'Leads' ? 'Leads' : view.startsWith('Ticket') ? view : view === 'Expenses' ? 'Expenses' : view === 'Generate vouchers' ? 'Generate vouchers' : view === 'Voucher analytics' ? 'Voucher analytics' : view === 'Equipment' ? 'Inventory tracker' : view === 'TR-069' ? 'TR-069 device registry' : view === 'Invoices' ? 'Invoices' : 'Voucher list'
+  const title = view === 'Purchases' ? 'Purchase list' : view === 'Leads' ? 'Leads' : view.startsWith('Ticket') ? view : view === 'Expenses' ? 'Expenses' : view === 'Generate vouchers' ? 'Generate vouchers' : view === 'Voucher analytics' ? 'Voucher analytics' : view === 'Equipment' ? 'Inventory tracker' : view === 'TR-069' ? 'TR-069 device registry' : view === 'Invoices' ? 'Invoices' : 'Voucher list'
   const description = view === 'Leads'
     ? 'Capture prospects and track each opportunity through your sales pipeline.'
-    : view.startsWith('Ticket')
+    : view === 'Purchases'
+      ? 'Keep track of network equipment and supplies the team needs to purchase, including quantities, estimated costs, and progress.'
+      : view.startsWith('Ticket')
       ? 'Record customer issues, assign ownership, and track resolution.'
       : view === 'Expenses'
         ? 'Record and review operating costs for this workspace.'
@@ -435,7 +443,41 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
       {error && <p className="operations-message is-error" role="alert">{error}<button type="button" onClick={() => setError('')} aria-label="Dismiss error"><X size={14} /></button></p>}
       {notice && <p className="operations-message" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="Dismiss message"><X size={14} /></button></p>}
 
-      {view === 'Ticket analytics' ? <div className="operations-analytics">
+      {view === 'Purchases' ? <>
+        <div className="operations-stat-grid">
+          <article className="metric-card"><span className="eyebrow">Still needed</span><strong className="metric-value">{loading ? '—' : formatAmount((items as PurchaseRequirement[]).filter((item) => item.status === 'needed').length)}</strong><span className="operations-stat-caption">items to purchase</span></article>
+          <article className="metric-card"><span className="eyebrow">Estimated outstanding cost</span><strong className="metric-value">{loading ? '—' : `KSh ${formatAmount((items as PurchaseRequirement[]).filter((item) => item.status !== 'purchased').reduce((total, item) => total + item.quantity * item.estimatedUnitCost, 0))}`}</strong><span className="operations-stat-caption">needed and ordered items</span></article>
+        </div>
+        <form className="operations-form panel" onSubmit={(event) => {
+          event.preventDefault()
+          void createRecord({ ...purchaseForm, quantity: Number(purchaseForm.quantity), estimatedUnitCost: Number(purchaseForm.estimatedUnitCost) })
+        }}>
+          <h2>Add a needed purchase</h2>
+          <div className="operations-form-grid">
+            <label>Item<input required maxLength={160} value={purchaseForm.name} onChange={(event) => setPurchaseForm({ ...purchaseForm, name: event.target.value })} placeholder="MikroTik router, Cat6 cable…" /></label>
+            <label>Category<input required maxLength={80} value={purchaseForm.category} onChange={(event) => setPurchaseForm({ ...purchaseForm, category: event.target.value })} placeholder="Network equipment" /></label>
+            <label>Quantity<input required type="number" min="1" max="1000000" step="1" value={purchaseForm.quantity} onChange={(event) => setPurchaseForm({ ...purchaseForm, quantity: event.target.value })} /></label>
+            <label>Unit<input required maxLength={30} value={purchaseForm.unit} onChange={(event) => setPurchaseForm({ ...purchaseForm, unit: event.target.value })} placeholder="pcs, metres, boxes…" /></label>
+            <label>Estimated unit cost (KSh)<input required type="number" min="0" max="2147483647" step="1" value={purchaseForm.estimatedUnitCost} onChange={(event) => setPurchaseForm({ ...purchaseForm, estimatedUnitCost: event.target.value })} /></label>
+            <label>Priority<select value={purchaseForm.priority} onChange={(event) => setPurchaseForm({ ...purchaseForm, priority: event.target.value })}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
+            <label>Preferred supplier<input maxLength={160} value={purchaseForm.supplier} onChange={(event) => setPurchaseForm({ ...purchaseForm, supplier: event.target.value })} /></label>
+            <label>Notes<input maxLength={2000} value={purchaseForm.notes} onChange={(event) => setPurchaseForm({ ...purchaseForm, notes: event.target.value })} placeholder="Specifications, site, or reason needed" /></label>
+          </div>
+          <button type="submit" className="primary-button" disabled={saving}><Plus size={14} /> {saving ? 'Saving…' : 'Add to purchase list'}</button>
+        </form>
+        <RecordTable className="purchase-list-panel" title="Network purchases" items={filteredItems.length} loading={loading} filter={filter} setFilter={setFilter} filterLabel="Filter purchase list" emptyText="No items on the purchase list yet." headers={['Item', 'Quantity', 'Est. unit cost', 'Est. total', 'Priority', 'Status', 'Notes', '']}>
+          <tbody>{(filteredItems as PurchaseRequirement[]).map((item) => <tr key={item.id}>
+            <td><strong>{item.name}</strong><span>{item.category}</span></td>
+            <td>{formatAmount(item.quantity)} {item.unit}</td>
+            <td>KSh {formatAmount(item.estimatedUnitCost)}</td>
+            <td><strong>KSh {formatAmount(item.quantity * item.estimatedUnitCost)}</strong></td>
+            <td><select aria-label={`Priority for ${item.name}`} value={item.priority} disabled={saving} onChange={(event) => void updateRecord(item.id, { priority: event.target.value })}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></td>
+            <td><select aria-label={`Status for ${item.name}`} value={item.status} disabled={saving} onChange={(event) => void updateRecord(item.id, { status: event.target.value })}><option value="needed">Needed</option><option value="ordered">Ordered</option><option value="purchased">Purchased</option></select></td>
+            <td>{item.supplier && <span>Supplier: {item.supplier}</span>}{item.notes || '—'}</td>
+            <td><button type="button" className="text-button danger-text" disabled={saving} aria-label={`Remove ${item.name} from purchase list`} onClick={() => void deleteRecord(item.id, `Remove ${item.name} from the purchase list? This cannot be undone.`)}><Trash2 size={14} /></button></td>
+          </tr>)}</tbody>
+        </RecordTable>
+      </> : view === 'Ticket analytics' ? <div className="operations-analytics">
         <div className="operations-stat-grid">
           {['open', 'in_progress', 'waiting', 'resolved', 'closed'].map((status) => <article className="metric-card" key={status}><span className="eyebrow">{status.replace('_', ' ')}</span><strong className="metric-value">{loading ? '—' : formatAmount(recordCount(totals, status))}</strong><span className="operations-stat-caption">tickets</span></article>)}
         </div>
@@ -650,7 +692,8 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
   )
 }
 
-function RecordTable({ title, items, loading, filter, setFilter, filterLabel, emptyText, headers, children }: {
+function RecordTable({ className, title, items, loading, filter, setFilter, filterLabel, emptyText, headers, children }: {
+  className?: string
   title: string
   items: number
   loading: boolean
@@ -661,5 +704,5 @@ function RecordTable({ title, items, loading, filter, setFilter, filterLabel, em
   headers: string[]
   children: ReactNode
 }) {
-  return <section className="panel operations-panel"><div className="panel-heading"><div><h3>{title}</h3><span>{loading ? 'Loading records…' : `${items} matching records`}</span></div><input className="record-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={filterLabel} aria-label={filterLabel} /></div><div className="table-scroll"><table><thead><tr>{headers.map((header, index) => <th key={`${header}-${index}`}>{header}</th>)}</tr></thead>{children}{!loading && items === 0 && <tbody><tr><td colSpan={headers.length}>{emptyText}</td></tr></tbody>}</table></div></section>
+  return <section className={`panel operations-panel${className ? ` ${className}` : ''}`}><div className="panel-heading"><div><h3>{title}</h3><span>{loading ? 'Loading records…' : `${items} matching records`}</span></div><input className="record-filter" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={filterLabel} aria-label={filterLabel} /></div><div className="table-scroll"><table><thead><tr>{headers.map((header, index) => <th key={`${header}-${index}`}>{header}</th>)}</tr></thead>{children}{!loading && items === 0 && <tbody><tr><td colSpan={headers.length}>{emptyText}</td></tr></tbody>}</table></div></section>
 }

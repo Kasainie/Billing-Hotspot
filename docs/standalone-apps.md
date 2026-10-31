@@ -2,6 +2,8 @@
 
 The Android and Windows apps wrap the hosted LKTECH service at `https://billing.lktech.life`. They need an internet connection; application data and backend services remain hosted.
 
+The dashboard plays a short sound when a new alert appears for a pending payment, inactive site, or upcoming subscription expiration. Open **Notifications → Enable** to allow matching operating-system notifications. If permission was previously blocked, choose **Open settings**, allow LKTECH notifications, and return to the dashboard. Android opens LKTECH's app notification settings; Windows opens notification settings. Android uses the device notification sound; Windows uses the system notification service. Alerts are detected while the signed-in dashboard is running and connected; background push delivery is not configured.
+
 ## Android APK
 
 The Android Studio SDK must include Android platform 36 and Android Build Tools. Use JDK 21 with Gradle 8.14.3. In PowerShell, configure the SDK and JDK for the current terminal and build a debug APK:

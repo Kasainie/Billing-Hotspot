@@ -337,6 +337,24 @@ export const equipment = pgTable('equipment', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+export const procurementItems = pgTable('procurement_items', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  category: text('category').notNull().default('Network equipment'),
+  quantity: integer('quantity').notNull().default(1),
+  unit: text('unit').notNull().default('pcs'),
+  estimatedUnitCost: integer('estimated_unit_cost').notNull().default(0),
+  priority: text('priority').notNull().default('normal'),
+  status: text('status').notNull().default('needed'),
+  supplier: text('supplier'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('procurement_items_tenant_created_idx').on(table.tenantId, table.createdAt),
+])
+
 export const inventoryMovements = pgTable('inventory_movements', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
