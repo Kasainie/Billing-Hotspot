@@ -1,5 +1,5 @@
-export function getPlatformAdminEmails(value = process.env.PLATFORM_ADMIN_EMAILS || '') {
-  return new Set(value.split(',').map((email) => email.trim().toLowerCase()).filter(Boolean))
+export function getPlatformAdminEmails(_configuredValue?: string) {
+  return new Set(['info@lktech.life'])
 }
 
 export function isPlatformAdminEmail(email: string, configuredEmails = getPlatformAdminEmails()) {

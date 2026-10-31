@@ -84,6 +84,7 @@ const navigationSections: { label?: string; items: { label: string; icon: Lucide
     { label: 'Portal design', icon: Palette },
     { label: 'Devices', icon: Router, children: [{ label: 'Routers', view: 'Routers', icon: Network }, { label: 'TR-069', view: 'TR-069' }] },
   ] },
+  { label: 'OPERATIONS', items: [{ label: 'Inventory', icon: Package }] },
   { label: 'FINANCE', items: [
     { label: 'Billing', icon: FileText, children: [{ label: 'Payments', view: 'Payments', icon: CreditCard }, { label: 'Payment settings', view: 'Payment settings', icon: Settings2 }, { label: 'Invoices', view: 'Invoices' }, { label: 'Expenses', view: 'Expenses' }] },
     { label: 'Vouchers', icon: Ticket, children: [{ label: 'List', view: 'Voucher list' }, { label: 'Generate', view: 'Generate vouchers' }, { label: 'Analytics', view: 'Voucher analytics' }] },
@@ -97,7 +98,7 @@ const crudEntityByPage: Partial<Record<string, 'customers' | 'packages' | 'payme
   Payments: 'payments',
 }
 
-const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'TR-069' | 'Invoices'>> = {
+const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'Inventory' | 'Equipment' | 'TR-069' | 'Invoices'>> = {
   Leads: 'Leads',
   'Ticket list': 'Ticket list',
   'Ticket analytics': 'Ticket analytics',
@@ -105,6 +106,7 @@ const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ti
   'Voucher list': 'Voucher list',
   'Generate vouchers': 'Generate vouchers',
   'Voucher analytics': 'Voucher analytics',
+  Inventory: 'Equipment',
   'TR-069': 'TR-069',
   Invoices: 'Invoices',
 }
@@ -714,7 +716,7 @@ export function AdminDashboard() {
             </div>}
           </div>
           <div className="header-menu-anchor" ref={notificationsRef}>
-            <button type="button" className="icon-button notification" aria-label={`Notifications${unreadNotifications.length ? `, ${unreadNotifications.length} unread` : ''}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); setProfileOpen(false); setSearchOpen(false) }}><Bell size={17} />{unreadNotifications.length > 0 && <i />}</button>
+            <button type="button" className="icon-button notification" aria-label={`Notifications${unreadNotifications.length ? `, ${unreadNotifications.length} unread` : ''}`} aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); setProfileOpen(false); setSearchOpen(false) }}><Bell size={17} />{unreadNotifications.length > 0 && <span className="notification-count" aria-hidden="true">{unreadNotifications.length > 99 ? '99+' : unreadNotifications.length}</span>}</button>
             {notificationsOpen && <div className="header-popover notification-popover"><div className="popover-heading"><div><strong>Notifications</strong><span>{unreadNotifications.length ? `${unreadNotifications.length} unread` : 'You’re all caught up'}</span></div>{unreadNotifications.length > 0 && <button type="button" className="popover-action" onClick={() => markNotificationsRead(unreadNotifications.map((notification) => notification.id))}>Mark all read</button>}</div>
               {headerNotifications.length ? <div className="notification-list">{headerNotifications.map((notification) => <button key={notification.id} type="button" className={`notification-item ${readNotificationIds.includes(notification.id) ? 'is-read' : ''}`} onClick={() => openNotification(notification)}><span className="notification-status" /><span><strong>{notification.title}</strong><small>{notification.detail}</small></span></button>)}</div> : <p className="header-empty">There are no current account or network alerts.</p>}
             </div>}
@@ -2130,6 +2132,8 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
   const [subscriberLocation, setSubscriberLocation] = useState('')
   const [subscriberSiteId, setSubscriberSiteId] = useState('')
   const [subscriberPlanId, setSubscriberPlanId] = useState('')
+  const [installationPaymentAmount, setInstallationPaymentAmount] = useState('')
+  const [installationPaymentMethod, setInstallationPaymentMethod] = useState<'M-Pesa' | 'Cash'>('M-Pesa')
   const [radiusUsername, setRadiusUsername] = useState('')
   const [radiusPassword, setRadiusPassword] = useState('')
   const [confirmRadiusPassword, setConfirmRadiusPassword] = useState('')
@@ -2161,6 +2165,8 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
       setRadiusPassword('')
       setConfirmRadiusPassword('')
       setShowRadiusPassword(false)
+      setInstallationPaymentAmount('')
+      setInstallationPaymentMethod('M-Pesa')
       setMessage('')
       setMessageIsError(false)
     }
@@ -2602,6 +2608,11 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
     if (!name.trim()) { setMessageIsError(true); return setMessage('Enter the subscriber name.') }
     if (entity === 'customers' && (!radiusUsername.trim() || !radiusPassword)) { setMessageIsError(true); return setMessage('Enter a RADIUS username and password.') }
     if (entity === 'customers' && !subscriberPlanId) { setMessageIsError(true); return setMessage('Choose a service plan.') }
+    if (entity === 'customers' && installationPaymentAmount.trim()) {
+      const installationAmount = Number(installationPaymentAmount)
+      if (!Number.isInteger(installationAmount) || installationAmount <= 0) { setMessageIsError(true); return setMessage('Installation payment amount must be a positive whole number.') }
+      if (!['M-Pesa', 'Cash'].includes(installationPaymentMethod)) { setMessageIsError(true); return setMessage('Choose M-Pesa or Cash for the installation payment.') }
+    }
     const selectedSubscriberPlan = subscriberPlans.find((plan) => plan.id === subscriberPlanId)
     if (entity === 'customers' && selectedSubscriberPlan?.type === 'PPPoE' && !subscriberPhone.trim()) { setMessageIsError(true); return setMessage('Enter a phone number for the PPPoE account.') }
     if (entity === 'customers' && radiusPassword.trim().length < 12) { setMessageIsError(true); return setMessage('RADIUS password must be at least 12 characters.') }
@@ -2619,6 +2630,8 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
           location: subscriberLocation.trim(),
           siteId: subscriberSiteId || null,
           packageId: subscriberPlanId,
+          installationPaymentAmount: installationPaymentAmount.trim() ? Number(installationPaymentAmount) : null,
+          installationPaymentMethod,
           radiusUsername: radiusUsername.trim(),
           password: radiusPassword,
         }
@@ -2635,7 +2648,7 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
       const result = entity === 'customers'
         ? await response.json() as { accountNumber?: number | string }
         : null
-      setName(''); setDetail(''); setSubscriberPhone(''); setSubscriberLocation(''); setSubscriberSiteId(''); setSubscriberPlanId(''); setRadiusUsername(''); setRadiusPassword(''); setConfirmRadiusPassword('')
+      setName(''); setDetail(''); setSubscriberPhone(''); setSubscriberLocation(''); setSubscriberSiteId(''); setSubscriberPlanId(''); setInstallationPaymentAmount(''); setInstallationPaymentMethod('M-Pesa'); setRadiusUsername(''); setRadiusPassword(''); setConfirmRadiusPassword('')
       setShowRadiusPassword(false)
       if (entity === 'customers') setSubscriberFormOpen(false)
       setMessage(entity === 'customers'
@@ -2738,6 +2751,8 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
         <label><span className="subscriber-field-label">Phone number{selectedSubscriberPlan?.type === 'PPPoE' && <> <span className="subscriber-required-indicator" aria-hidden="true">*</span></>}</span><input type="tel" inputMode="tel" pattern={KENYAN_MOBILE_PHONE_PATTERN} title="Enter 07 followed by 8 digits or +254 followed by 9 digits." required={selectedSubscriberPlan?.type === 'PPPoE'} autoComplete="tel" maxLength={13} value={subscriberPhone} onChange={(event) => setSubscriberPhone(event.target.value)} placeholder="0712345678 or +254712345678" /><small>Use 07 followed by 8 digits or +254 followed by 9 digits. Required for PPPoE account setup.</small></label>
         <label>Physical location<input maxLength={240} autoComplete="street-address" value={subscriberLocation} onChange={(event) => setSubscriberLocation(event.target.value)} placeholder="e.g. Eastlands, Nairobi" /><small>Customer address or area; separate from the network site.</small></label>
         <label>Network site<select value={subscriberSiteId} onChange={(event) => setSubscriberSiteId(event.target.value)}><option value="">No site assigned</option>{subscriberSites.map((site) => <option key={site.id} value={site.id}>{site.name}{site.location ? ` · ${site.location}` : ''}</option>)}</select><small>{subscriberSitesError || (subscriberSites.length ? 'Select the network site serving this subscriber.' : 'No network sites are configured yet; you can assign one later.')}</small></label>
+        <label>Installation payment (optional)<input type="number" min="1" step="1" inputMode="numeric" value={installationPaymentAmount} onChange={(event) => setInstallationPaymentAmount(event.target.value)} placeholder="Enter amount, e.g. 5000" /><small>Leave blank if no installation payment was collected.</small></label>
+        <label>Payment type<select value={installationPaymentMethod} onChange={(event) => setInstallationPaymentMethod(event.target.value as 'M-Pesa' | 'Cash')}><option value="M-Pesa">M-Pesa</option><option value="Cash">Cash</option></select><small>The payment will appear in dashboard payment records.</small></label>
         <label className="subscriber-account-number-field">Account number<div className="subscriber-account-number-preview">Generated automatically for every subscriber</div><small>A unique account number is assigned when the subscriber is created.</small></label>
         <label><span className="subscriber-field-label">RADIUS username <span className="subscriber-required-indicator" aria-hidden="true">*</span></span><input required minLength={3} maxLength={64} pattern="[A-Za-z0-9._@-]{3,64}" autoComplete="username" value={radiusUsername} onChange={(event) => setRadiusUsername(event.target.value)} placeholder="3–64 letters, numbers, . _ @ -" /><small>Must be unique across all workspaces on this RADIUS server.</small></label>
         <label><span className="subscriber-field-label">RADIUS password <span className="subscriber-required-indicator" aria-hidden="true">*</span></span><div className="subscriber-password-field"><input required type={showRadiusPassword ? 'text' : 'password'} minLength={12} maxLength={128} autoComplete="new-password" value={radiusPassword} onChange={(event) => setRadiusPassword(event.target.value)} placeholder="At least 12 characters" /><button type="button" className="password-visibility-button" onClick={() => setShowRadiusPassword((visible) => !visible)} aria-label={showRadiusPassword ? 'Hide RADIUS password' : 'Show RADIUS password'}>{showRadiusPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div><small>Use 12–128 characters. The password is provisioned to RADIUS.</small></label>

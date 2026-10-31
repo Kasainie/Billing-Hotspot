@@ -313,10 +313,23 @@ export const equipment = pgTable('equipment', {
   model: text('model'),
   status: text('status').notNull().default('in_service'),
   condition: text('condition').notNull().default('good'),
+  quantity: integer('quantity').notNull().default(0),
+  unit: text('unit').notNull().default('pcs'),
+  minimumQuantity: integer('minimum_quantity').notNull().default(0),
   purchasedAt: timestamp('purchased_at', { withTimezone: true }),
   notes: text('notes'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export const inventoryMovements = pgTable('inventory_movements', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  equipmentId: uuid('equipment_id').notNull().references(() => equipment.id, { onDelete: 'cascade' }),
+  movementType: text('movement_type').notNull(),
+  quantity: integer('quantity').notNull(),
+  notes: text('notes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export const tr069Devices = pgTable('tr069_devices', {
@@ -626,7 +639,7 @@ export const hotspotPurchases = pgTable('hotspot_purchases', {
   uniqueIndex('hotspot_purchases_receipt_unique_idx').on(table.receipt),
 ])
 
-export const schema = { tenants, tenantUsers, emailVerificationCodes, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, tenantPaymentGateways, tenantSmsSettings, tenantWorkspaceSettings, smsMessages, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerConnectorQueries, routerMetricSamples }
+export const schema = { tenants, tenantUsers, emailVerificationCodes, tenantMemberships, tenantSessions, passwordResetTokens, tenantPaymentSettings, tenantPaymentGateways, tenantSmsSettings, tenantWorkspaceSettings, smsMessages, mobileMoneyTransactions, sites, customers, payments, leads, supportTickets, expenses, packages, vouchers, equipment, inventoryMovements, tr069Devices, invoices, hotspotPortalSettings, radcheck, radreply, pppoeAccounts, pppoePayments, hotspotPurchases, routerProvisioningTokens, routerMonitors, routerRemoteSessions, routerConnectorCommands, routerConnectorQueries, routerMetricSamples }
 export type Site = typeof sites.$inferSelect
 export type Customer = typeof customers.$inferSelect
 export type Payment = typeof payments.$inferSelect

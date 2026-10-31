@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { and, count, desc, eq, gte, lt, sql, sum } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { customers, equipment, expenses, invoices, leads, packages, radcheck, radreply, sites, subscriberCredits, supportTickets, tr069Devices, vouchers } from '@/lib/db/schema'
+import { customers, equipment, expenses, inventoryMovements, invoices, leads, packages, radcheck, radreply, sites, subscriberCredits, supportTickets, tr069Devices, vouchers } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { enqueueTenantTemplateSms, getTenantTemplateSettings } from '@/lib/message-template-delivery'
@@ -91,6 +91,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
         model: equipment.model,
         status: equipment.status,
         condition: equipment.condition,
+        quantity: equipment.quantity,
+        unit: equipment.unit,
+        minimumQuantity: equipment.minimumQuantity,
         purchasedAt: equipment.purchasedAt,
         notes: equipment.notes,
         siteId: equipment.siteId,
@@ -99,7 +102,24 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
       }).from(equipment).leftJoin(sites, and(eq(sites.id, equipment.siteId), eq(sites.tenantId, access.tenantId)))
         .where(eq(equipment.tenantId, access.tenantId)).orderBy(desc(equipment.createdAt)).limit(500)
       const totals = await db.select({ status: equipment.status, count: count() }).from(equipment).where(eq(equipment.tenantId, access.tenantId)).groupBy(equipment.status)
-      return NextResponse.json({ items, totals, sites: await db.select({ id: sites.id, name: sites.name }).from(sites).where(eq(sites.tenantId, access.tenantId)) })
+      const movements = await db.select({
+        id: inventoryMovements.id,
+        equipmentId: inventoryMovements.equipmentId,
+        itemName: equipment.name,
+        movementType: inventoryMovements.movementType,
+        quantity: inventoryMovements.quantity,
+        notes: inventoryMovements.notes,
+        createdAt: inventoryMovements.createdAt,
+      }).from(inventoryMovements).innerJoin(equipment, and(eq(equipment.id, inventoryMovements.equipmentId), eq(equipment.tenantId, access.tenantId)))
+        .where(eq(inventoryMovements.tenantId, access.tenantId)).orderBy(desc(inventoryMovements.createdAt)).limit(100)
+      const usedMovements = await db.select({ equipmentId: inventoryMovements.equipmentId, quantity: inventoryMovements.quantity })
+        .from(inventoryMovements).where(and(eq(inventoryMovements.tenantId, access.tenantId), eq(inventoryMovements.movementType, 'used')))
+      const usedByItem = new Map<string, number>()
+      for (const movement of usedMovements) {
+        usedByItem.set(movement.equipmentId, (usedByItem.get(movement.equipmentId) ?? 0) + movement.quantity)
+      }
+      const inventoryItems = items.map((item) => ({ ...item, usedQuantity: usedByItem.get(item.id) ?? 0 }))
+      return NextResponse.json({ items: inventoryItems, movements, totals, sites: await db.select({ id: sites.id, name: sites.name }).from(sites).where(eq(sites.tenantId, access.tenantId)) })
     }
     if (access.entity === 'tr069') {
       const [items, sitesList] = await Promise.all([
@@ -285,7 +305,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
       }
       const status = text(input.status, 30) || 'in_service'
       const condition = text(input.condition, 20) || 'good'
-      if (!['in_service', 'spare', 'maintenance', 'retired'].includes(status)) return invalid('Select a valid equipment status.')
+      const quantity = Number.isInteger(Number(input.quantity)) ? Number(input.quantity) : 0
+      const minimumQuantity = Number.isInteger(Number(input.minimumQuantity)) ? Number(input.minimumQuantity) : 0
+      if (quantity < 0 || minimumQuantity < 0) return invalid('Quantity and minimum quantity cannot be negative.')
+      if (!['new', 'unused', 'in_service', 'spare', 'maintenance', 'retired'].includes(status)) return invalid('Select a valid equipment status.')
       if (!['good', 'fair', 'poor'].includes(condition)) return invalid('Select a valid equipment condition.')
       const purchasedAt = input.purchasedAt ? new Date(String(input.purchasedAt)) : null
       if (purchasedAt && !Number.isFinite(purchasedAt.getTime())) return invalid('Enter a valid purchase date.')
@@ -299,9 +322,21 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         model: text(input.model, 120) || null,
         status,
         condition,
+        quantity,
+        unit: text(input.unit, 30) || 'pcs',
+        minimumQuantity,
         purchasedAt,
         notes: text(input.notes, 2000) || null,
       }).returning()
+      if (created && quantity > 0) {
+        await db.insert(inventoryMovements).values({
+          tenantId: access.tenantId,
+          equipmentId: created.id,
+          movementType: 'added',
+          quantity,
+          notes: 'Opening stock added',
+        })
+      }
       return NextResponse.json(created, { status: 201 })
     }
     if (access.entity === 'invoices') {
@@ -476,7 +511,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
   const access = await getAuthorizedEntity(request, context, true)
   if ('response' in access) return access.response
   const id = request.nextUrl.searchParams.get('id') || ''
-  if (!uuidPattern.test(id)) return invalid('Record id is invalid.')
   let input: Record<string, unknown>
   try {
     input = await request.json() as Record<string, unknown>
@@ -485,6 +519,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
   }
 
   try {
+    const isInventoryBatch = access.entity === 'equipment' && id === 'batch'
+    if (!isInventoryBatch && !uuidPattern.test(id)) return invalid('Record id is invalid.')
     if (access.entity === 'leads') {
       const changes: { status?: string; coverageStatus?: string; customerId?: string; updatedAt: Date } = { updatedAt: new Date() }
       if (input.status !== undefined) {
@@ -557,13 +593,74 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
       return updated ? NextResponse.json({ ok: true }) : invalid('Voucher not found.', 404)
     }
     if (access.entity === 'equipment') {
+      if (Array.isArray(input.checkouts)) {
+        const checkouts = input.checkouts as { id?: unknown; quantity?: unknown }[]
+        if (checkouts.length === 0) return invalid('Select at least one inventory item.')
+        const checkedOut = await db.transaction(async (tx) => {
+          let count = 0
+          for (const checkout of checkouts) {
+            const recordId = text(checkout.id, 50)
+            const quantity = Number(checkout.quantity)
+            if (!uuidPattern.test(recordId) || !Number.isInteger(quantity) || quantity <= 0) {
+              throw new Error('Inventory checkout: Each checkout requires a valid item and quantity.')
+            }
+            const [record] = await tx.select({ quantity: equipment.quantity, name: equipment.name })
+              .from(equipment).where(and(eq(equipment.id, recordId), eq(equipment.tenantId, access.tenantId))).limit(1)
+            if (!record) throw new Error('Inventory checkout: An inventory item was not found.')
+            if (record.quantity < quantity) throw new Error(`Inventory checkout: Only ${record.quantity} units of ${record.name} are available.`)
+            const [updated] = await tx.update(equipment).set({ quantity: record.quantity - quantity, updatedAt: new Date() })
+              .where(and(eq(equipment.id, recordId), eq(equipment.tenantId, access.tenantId))).returning({ id: equipment.id })
+            if (!updated) throw new Error(`Inventory checkout: Unable to update stock for ${record.name}.`)
+            await tx.insert(inventoryMovements).values({
+              tenantId: access.tenantId,
+              equipmentId: recordId,
+              movementType: 'used',
+              quantity,
+              notes: 'Items checked out for installation or use',
+            })
+            count += 1
+          }
+          return count
+        })
+        return NextResponse.json({ checkedOut })
+      }
+      if (input.restock && typeof input.restock === 'object') {
+        const restock = input.restock as { id?: unknown; quantity?: unknown }
+        const recordId = text(restock.id, 50)
+        const quantity = Number(restock.quantity)
+        if (!uuidPattern.test(recordId) || !Number.isInteger(quantity) || quantity <= 0) {
+          return invalid('Enter a valid inventory item and restock quantity.')
+        }
+        const result = await db.transaction(async (tx) => {
+          const [record] = await tx.select({ quantity: equipment.quantity, name: equipment.name })
+            .from(equipment).where(and(eq(equipment.id, recordId), eq(equipment.tenantId, access.tenantId))).limit(1)
+          if (!record) return null
+          await tx.update(equipment).set({ quantity: record.quantity + quantity, updatedAt: new Date() })
+            .where(and(eq(equipment.id, recordId), eq(equipment.tenantId, access.tenantId)))
+          await tx.insert(inventoryMovements).values({
+            tenantId: access.tenantId,
+            equipmentId: recordId,
+            movementType: 'restocked',
+            quantity,
+            notes: 'Stock replenished',
+          })
+          return record.name
+        })
+        return result ? NextResponse.json({ restocked: result, quantity }) : invalid('Inventory record not found.', 404)
+      }
       const status = input.status === undefined ? undefined : text(input.status, 30)
       const condition = input.condition === undefined ? undefined : text(input.condition, 20)
-      if (status !== undefined && !['in_service', 'spare', 'maintenance', 'retired'].includes(status)) return invalid('Select a valid equipment status.')
+      const quantity = input.quantity === undefined ? undefined : Number(input.quantity)
+      const minimumQuantity = input.minimumQuantity === undefined ? undefined : Number(input.minimumQuantity)
+      if (status !== undefined && !['new', 'unused', 'in_service', 'spare', 'maintenance', 'retired'].includes(status)) return invalid('Select a valid equipment status.')
       if (condition !== undefined && !['good', 'fair', 'poor'].includes(condition)) return invalid('Select a valid equipment condition.')
+      if (quantity !== undefined && (!Number.isInteger(quantity) || quantity < 0)) return invalid('Quantity must be a non-negative whole number.')
+      if (minimumQuantity !== undefined && (!Number.isInteger(minimumQuantity) || minimumQuantity < 0)) return invalid('Minimum quantity must be a non-negative whole number.')
       const [updated] = await db.update(equipment).set({
         ...(status !== undefined ? { status } : {}),
         ...(condition !== undefined ? { condition } : {}),
+        ...(quantity !== undefined ? { quantity } : {}),
+        ...(minimumQuantity !== undefined ? { minimumQuantity } : {}),
         updatedAt: new Date(),
       }).where(and(eq(equipment.id, id), eq(equipment.tenantId, access.tenantId))).returning()
       return updated ? NextResponse.json(updated) : invalid('Equipment record not found.', 404)
@@ -592,6 +689,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
     return invalid('Expense records cannot be changed after creation.')
   } catch (error) {
     console.error(`Failed to update ${access.entity} record`, error)
+    if (error instanceof Error && error.message.startsWith('Inventory checkout:')) {
+      return invalid(error.message.replace('Inventory checkout: ', ''), 400)
+    }
     return invalid(`Unable to update ${access.entity} record.`, 500)
   }
 }

@@ -21,10 +21,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ t
   if (input.status !== 'active' && input.status !== 'suspended') {
     return NextResponse.json({ error: 'Choose active or suspended status.' }, { status: 400 })
   }
-  if (tenantId === access.session.tenantId) {
-    return NextResponse.json({ error: 'Switch to another active workspace before changing this workspace status.' }, { status: 409 })
-  }
-
   try {
     const [tenant] = await db.update(tenants).set({ status: input.status })
       .where(eq(tenants.id, tenantId))

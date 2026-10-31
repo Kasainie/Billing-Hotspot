@@ -103,6 +103,28 @@ export function PlatformAdminDashboard({ adminEmail }: { adminEmail: string }) {
   const selectedTenant = data.selectedTenant
   const refresh = () => void load(selectedTenantId)
 
+  async function openWorkspace(tenant: PlatformTenant) {
+    if (tenant.status !== 'active') {
+      setError('Reactivate this workspace before opening it.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch('/api/auth/switch-tenant', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tenantId: tenant.id }),
+      })
+      if (!response.ok) throw new Error(await readApiError(response, 'Unable to open this workspace.'))
+      window.location.assign('/')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to open this workspace.')
+      setBusy(false)
+    }
+  }
+
   async function createTenant(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setBusy(true)
@@ -255,13 +277,17 @@ export function PlatformAdminDashboard({ adminEmail }: { adminEmail: string }) {
                 <td><button type="button" className="platform-tenant-select" onClick={() => setSelectedTenantId(tenant.id)}><strong>{tenant.name}</strong><small>{tenant.slug}</small></button></td>
                 <td><span className={`platform-status ${tenant.status === 'active' ? 'active' : 'suspended'}`}>{tenant.status}</span></td>
                 <td>{count(tenant.memberCount)}</td><td>{count(tenant.siteCount)}</td><td>{count(tenant.subscriberCount)}</td><td>{count(tenant.routerCount)}</td><td>{date(tenant.createdAt)}</td>
-                <td><button type="button" className={`platform-inline-action ${tenant.status === 'active' ? 'suspend' : ''}`} disabled={busy || tenant.id === 'default'} onClick={() => void updateTenantStatus(tenant)}>{tenant.status === 'active' ? 'Suspend' : 'Reactivate'}</button></td>
+                <td>
+                  <button type="button" className="platform-inline-action" disabled={busy || tenant.status !== 'active'} onClick={() => void openWorkspace(tenant)}>Open</button>
+                  {' '}
+                  <button type="button" className={`platform-inline-action ${tenant.status === 'active' ? 'suspend' : ''}`} disabled={busy} onClick={() => void updateTenantStatus(tenant)}>{tenant.status === 'active' ? 'Suspend' : 'Reactivate'}</button>
+                </td>
               </tr>)}
             </tbody></table></div> : <p className="platform-empty">{query ? 'No workspaces match this filter.' : 'No tenant workspaces yet.'}</p>}
           </section>
           <section className="platform-panel panel">
-            {!selectedTenant ? <div className="platform-detail-empty"><Building2 size={22} /><h2>Tenant support view</h2><p>Select a workspace to review its metadata, aggregate counts, and access roster. Subscriber and payment records remain private to each ISP workspace.</p><button className="platform-button secondary" type="button" onClick={() => { const first = data.tenants[0]; if (first) setSelectedTenantId(first.id) }}>Select a workspace <ChevronDown size={14} /></button></div> : <>
-              <div className="platform-detail-heading"><div><span className={`platform-status ${selectedTenant.tenant.status === 'active' ? 'active' : 'suspended'}`}>{selectedTenant.tenant.status}</span><h2>{selectedTenant.tenant.name}</h2><p>{selectedTenant.tenant.slug} · created {date(selectedTenant.tenant.createdAt)}</p></div><button type="button" className="platform-button secondary" onClick={() => setSelectedTenantId('')} aria-label="Close tenant support view">Close</button></div>
+            {!selectedTenant ? <div className="platform-detail-empty"><Building2 size={22} /><h2>Tenant support view</h2><p>Select a workspace to review its metadata, members, subscriber totals, and operational controls. The system administrator can open any active workspace.</p><button className="platform-button secondary" type="button" onClick={() => { const first = data.tenants[0]; if (first) setSelectedTenantId(first.id) }}>Select a workspace <ChevronDown size={14} /></button></div> : <>
+              <div className="platform-detail-heading"><div><span className={`platform-status ${selectedTenant.tenant.status === 'active' ? 'active' : 'suspended'}`}>{selectedTenant.tenant.status}</span><h2>{selectedTenant.tenant.name}</h2><p>{selectedTenant.tenant.slug} · created {date(selectedTenant.tenant.createdAt)}</p></div><div className="platform-detail-actions"><button type="button" className="platform-button primary" disabled={busy || selectedTenant.tenant.status !== 'active'} onClick={() => void openWorkspace(selectedTenant.tenant)}>Open workspace</button><button type="button" className="platform-button secondary" onClick={() => setSelectedTenantId('')} aria-label="Close tenant support view">Close</button></div></div>
               <div className="platform-tenant-stats"><span><strong>{count(selectedTenant.tenant.siteCount)}</strong> sites</span><span><strong>{count(selectedTenant.tenant.subscriberCount)}</strong> subscribers</span><span><strong>{count(selectedTenant.tenant.routerCount)}</strong> routers</span></div>
               <div className="platform-members-heading"><div><h3>Workspace access</h3><p>Verified accounts and assigned workspace roles.</p></div><span>{selectedTenant.members.length} members</span></div>
               <form className="platform-add-member" onSubmit={(event) => void addMember(event)}><label className="visually-hidden" htmlFor="platform-member-email">Verified account email</label><input id="platform-member-email" type="email" required value={memberEmail} onChange={(event) => setMemberEmail(event.target.value)} placeholder="Verified account email" /><label className="visually-hidden" htmlFor="platform-member-role">Workspace role</label><select id="platform-member-role" value={memberRole} onChange={(event) => setMemberRole(event.target.value)}><option value="member">Member</option><option value="admin">Admin</option><option value="owner">Owner</option></select><button type="submit" className="platform-button primary" disabled={busy}><UserPlus size={14} /> Add</button></form>

@@ -156,7 +156,7 @@ function formatSampleTime(value: string) {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : '—'
 }
 
-function LineChart({ title, subtitle, icon: Icon, values, color = '#ff8a18', secondaryValues, secondaryColor = '#737b80', unit = '%', startTime, endTime }: {
+function LineChart({ title, subtitle, icon: Icon, values, color = '#ff8a18', secondaryValues, secondaryColor = '#737b80', primaryLabel, secondaryLabel, unit = '%', startTime, endTime }: {
   title: string
   subtitle: string
   icon: typeof Cpu
@@ -164,13 +164,30 @@ function LineChart({ title, subtitle, icon: Icon, values, color = '#ff8a18', sec
   color?: string
   secondaryValues?: number[]
   secondaryColor?: string
+  primaryLabel?: string
+  secondaryLabel?: string
   unit?: string
   startTime?: string
   endTime?: string
 }) {
+  const maximum = unit === '%' ? 100 : Math.max(...values, ...(secondaryValues || []), 1)
+  const minimum = 0
+  const scaleSpan = Math.max(maximum - minimum, 1)
+  const yTicks = [4, 3, 2, 1, 0].map((step) => {
+    const value = minimum + (scaleSpan * step) / 4
+    const formatted = unit === 'Mbps' || unit === 'Mb/s'
+      ? `${value.toFixed(value >= 10 ? 0 : 1)} ${unit}`
+      : `${Math.round(value)}${unit === '%' ? '%' : ''}`
+    return { value, y: 152 - (step / 4) * 128, formatted }
+  })
+  const xTicks = [0, 1, 2, 3, 4].map((step) => ({
+    x: 30 + (step / 4) * 580,
+    index: values.length < 2 ? 0 : Math.round((values.length - 1) * step / 4),
+  }))
+
   const points = useMemo(() => {
     if (!values.length) return ''
-    const minimum = unit === '%' ? 0 : Math.min(...values)
+    const minimum = 0
     const maximum = unit === '%' ? 100 : Math.max(...values, ...(secondaryValues || []), 1)
     const span = Math.max(maximum - minimum, 1)
     return values.map((value, index) => `${values.length < 2 ? 320 : 30 + index / (values.length - 1) * 580},${152 - ((value - minimum) / span) * 128}`).join(' ')
@@ -178,10 +195,27 @@ function LineChart({ title, subtitle, icon: Icon, values, color = '#ff8a18', sec
   const secondaryPoints = useMemo(() => {
     if (!secondaryValues?.length) return ''
     const maximum = unit === '%' ? 100 : Math.max(...values, ...secondaryValues, 1)
-    const minimum = unit === '%' ? 0 : Math.min(...values, ...secondaryValues)
+    const minimum = 0
     const span = Math.max(maximum - minimum, 1)
     return secondaryValues.map((value, index) => `${secondaryValues.length < 2 ? 320 : 30 + index / (secondaryValues.length - 1) * 580},${152 - ((value - minimum) / span) * 128}`).join(' ')
   }, [secondaryValues, unit, values])
+
+  const formatTimeTick = (step: number) => {
+    if (!startTime || !endTime) return ''
+    const start = new Date(startTime).getTime()
+    const end = new Date(endTime).getTime()
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return ''
+    return new Date(start + ((end - start) * step) / 4).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  const latestPrimary = values.at(-1)
+  const latestSecondary = secondaryValues?.at(-1)
+  const latestPrimaryY = latestPrimary == null ? 152 : 152 - (latestPrimary / scaleSpan) * 128
+  const latestSecondaryY = latestSecondary == null ? 152 : 152 - (latestSecondary / scaleSpan) * 128
+  const latestLabelsOverlap = latestSecondary != null && Math.abs(latestPrimaryY - latestSecondaryY) < 18
 
   return (
     <section className="router-monitor-chart panel">
@@ -189,12 +223,24 @@ function LineChart({ title, subtitle, icon: Icon, values, color = '#ff8a18', sec
       {values.length < 2
         ? <div className="router-chart-empty">{values.length ? 'Collecting samples…' : 'No monitoring history in this time range yet.'}</div>
         : <div className="router-chart-plot">
-          <div className="router-chart-grid"><i /><i /><i /><i /></div>
           <svg viewBox="0 0 640 180" role="img" aria-label={`${title} over ${subtitle}`}>
+            {yTicks.map((tick) => (
+              <g key={tick.formatted}>
+                <line x1="30" x2="610" y1={tick.y} y2={tick.y} className="router-chart-horizontal-grid" />
+                <text x="24" y={tick.y + 3} textAnchor="end" className="router-chart-y-label">{tick.formatted}</text>
+              </g>
+            ))}
+            {xTicks.map((tick, index) => (
+              <g key={index}>
+                <line x1={tick.x} x2={tick.x} y1="24" y2="152" className="router-chart-vertical-grid" />
+                {formatTimeTick(index) && <text x={tick.x} y="164" textAnchor={index === 0 ? 'start' : 'middle'} transform={index === 0 ? undefined : `rotate(-35 ${tick.x} 164)`} className="router-chart-x-label">{formatTimeTick(index)}</text>}
+              </g>
+            ))}
             <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             {secondaryPoints && <polyline points={secondaryPoints} fill="none" stroke={secondaryColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
+            {latestPrimary != null && <><circle cx="610" cy={latestPrimaryY} r="4" fill={color} stroke="#fff" strokeWidth="2" /><text x="604" y={Math.max(16, latestPrimaryY - (latestLabelsOverlap ? 14 : 8))} textAnchor="end" className="router-chart-value-label" fill={color}>{primaryLabel ? `${primaryLabel}: ` : ''}{latestPrimary.toFixed(unit === '%' ? 0 : 1)} {unit}</text></>}
+            {latestSecondary != null && <><circle cx="610" cy={latestSecondaryY} r="3.5" fill={secondaryColor} stroke="#fff" strokeWidth="2" /><text x="604" y={Math.min(148, latestSecondaryY + (latestLabelsOverlap ? 16 : 16))} textAnchor="end" className="router-chart-value-label" fill={secondaryColor}>{secondaryLabel ? `${secondaryLabel}: ` : ''}{latestSecondary.toFixed(1)} {unit}</text></>}
           </svg>
-          <div className="router-chart-endpoints"><span>{startTime ? new Date(startTime).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</span><span>{endTime ? new Date(endTime).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</span></div>
         </div>}
     </section>
   )
@@ -364,7 +410,7 @@ export function RouterMonitorDetail({
     void loadSummary()
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadSummary()
-    }, 60_000)
+    }, 1_000)
     return () => window.clearInterval(interval)
   }, [loadSummary])
 
@@ -576,9 +622,20 @@ export function RouterMonitorDetail({
       {tab === 'System' && <>
         <div className="router-monitor-layout">
           <div className="router-monitor-main">
-            <section className="router-monitor-chart panel">
-              <LineChart title="Bandwidth" subtitle={`${bandwidthRates.at(-1) ? `↓ ${bandwidthRates.at(-1)!.rx.toFixed(2)} Mbps · ↑ ${bandwidthRates.at(-1)!.tx.toFixed(2)} Mbps` : 'Waiting for counter samples'} · ${ranges.find((item) => item.id === range)?.label}`} icon={Wifi} values={bandwidthRates.map((point) => point.rx)} secondaryValues={bandwidthRates.map((point) => point.tx)} color="#ff8a18" secondaryColor="#737b80" unit="Mbps" startTime={samples[0]?.sampledAt} endTime={samples.at(-1)?.sampledAt} />
-            </section>
+            <LineChart
+              title="Bandwidth"
+              subtitle={`${bandwidthRates.at(-1) ? `Download ${bandwidthRates.at(-1)!.rx.toFixed(2)} Mbps · Upload ${bandwidthRates.at(-1)!.tx.toFixed(2)} Mbps` : 'Waiting for counter samples'} · ${ranges.find((item) => item.id === range)?.label}`}
+              icon={Wifi}
+              values={bandwidthRates.map((point) => point.rx)}
+              secondaryValues={bandwidthRates.map((point) => point.tx)}
+              color="#ff8a18"
+              secondaryColor="#737b80"
+              primaryLabel="Download"
+              secondaryLabel="Upload"
+              unit="Mbps"
+              startTime={samples[0]?.sampledAt}
+              endTime={samples.at(-1)?.sampledAt}
+            />
             <LineChart title="CPU load" subtitle={`Utilisation · ${ranges.find((item) => item.id === range)?.label}`} icon={Cpu} values={cpuValues} startTime={samples[0]?.sampledAt} endTime={samples.at(-1)?.sampledAt} />
             <LineChart title="Memory used" subtitle={`Router resource · ${ranges.find((item) => item.id === range)?.label}`} icon={MemoryStick} values={memoryValues} color="#16a675" startTime={samples[0]?.sampledAt} endTime={samples.at(-1)?.sampledAt} />
             <LineChart title="Disk used" subtitle={`Router storage · ${ranges.find((item) => item.id === range)?.label}`} icon={HardDrive} values={diskValues} color="#688bb8" startTime={samples[0]?.sampledAt} endTime={samples.at(-1)?.sampledAt} />
@@ -599,7 +656,7 @@ export function RouterMonitorDetail({
             <section className="router-monitor-health panel router-connection-panel">
               <div className="router-monitor-side-heading"><strong>Connection &amp; monitoring</strong></div>
               <ResourceValue icon={Clock3} label="Last heartbeat" value={router.lastSeenAt ? formatSampleTime(router.lastSeenAt) : 'Never received'} />
-              <ResourceValue icon={RefreshCw} label="Monitoring cadence" value={router.connectorEnabled ? 'Metrics 1 min · status 5 sec' : router.monitored ? 'Router reports every 30 sec' : 'Not configured'} />
+              <ResourceValue icon={RefreshCw} label="Monitoring cadence" value={router.connectorEnabled ? 'Bandwidth and telemetry sync every 1 sec' : router.monitored ? 'Bandwidth and telemetry sync every 1 sec' : 'Not configured'} />
               <ResourceValue icon={RouterIcon} label="Device model" value={router.boardName || 'Unavailable'} />
               <button className="outline-button" type="button" onClick={onReprovision}>Install / reinstall RouterOS monitor</button>
             </section>
@@ -703,7 +760,7 @@ export function RouterMonitorDetail({
           <p className="router-diagnosis-updated">{router.metricsUpdatedAt ? `Telemetry sample ${formatSampleTime(router.metricsUpdatedAt)}` : 'No telemetry sample has been received yet.'}</p>
         </div>
       </section>}
-      <div className="router-monitor-last-updated">{loading ? 'Loading telemetry…' : lastRefreshedAt ? `Dashboard refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()} · router reports every 30 seconds` : 'Waiting for telemetry'}<button type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={12} className={refreshing ? 'is-spinning' : undefined} /> Refresh</button></div>
+      <div className="router-monitor-last-updated">{loading ? 'Loading telemetry…' : lastRefreshedAt ? `Dashboard refreshed ${new Date(lastRefreshedAt).toLocaleTimeString()} · live auto-refresh every 1 second` : 'Waiting for telemetry'}<button type="button" onClick={() => void loadMetrics()} disabled={refreshing}><RefreshCw size={12} className={refreshing ? 'is-spinning' : undefined} /> Refresh</button></div>
     </section>
   )
 }

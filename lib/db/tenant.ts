@@ -1,11 +1,12 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
 import { isIP } from 'node:net'
 import { promisify } from 'node:util'
-import { and, eq, gt } from 'drizzle-orm'
+import { and, eq, gt, sql } from 'drizzle-orm'
 import { cookies } from 'next/headers'
 import type { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
 import { tenantMemberships, tenantSessions, tenantUsers, tenants } from '@/lib/db/schema'
+import { isPlatformAdminEmail } from '@/lib/platform-admin-access'
 
 const scrypt = promisify(scryptCallback)
 export const DEFAULT_TENANT_ID = 'default'
@@ -75,10 +76,10 @@ export async function getTenantSession(request?: NextRequest): Promise<TenantSes
     tenantId: tenants.id,
     tenantName: tenants.name,
     tenantSlug: tenants.slug,
-    role: tenantMemberships.role,
+    membershipRole: tenantMemberships.role,
   }).from(tenantSessions)
     .innerJoin(tenantUsers, eq(tenantUsers.id, tenantSessions.userId))
-    .innerJoin(tenantMemberships, and(
+    .leftJoin(tenantMemberships, and(
       eq(tenantMemberships.userId, tenantSessions.userId),
       eq(tenantMemberships.tenantId, tenantSessions.tenantId),
     ))
@@ -86,10 +87,35 @@ export async function getTenantSession(request?: NextRequest): Promise<TenantSes
     .where(and(eq(tenantSessions.tokenHash, tokenHash), gt(tenantSessions.expiresAt, new Date()), eq(tenants.status, 'active')))
     .limit(1)
 
-  return row ? { ...row, tokenHash } : null
+  if (!row) return null
+  const platformAdmin = isPlatformAdminEmail(row.email)
+  return {
+    userId: row.userId,
+    email: row.email,
+    name: row.name,
+    tenantId: row.tenantId,
+    tenantName: row.tenantName,
+    tenantSlug: row.tenantSlug,
+    role: platformAdmin ? 'owner' : (row.membershipRole || ''),
+    tokenHash,
+  }
 }
 
 export async function getTenantMemberships(userId: string) {
+  const [user] = await db.select({ email: tenantUsers.email })
+    .from(tenantUsers)
+    .where(eq(tenantUsers.id, userId))
+    .limit(1)
+  if (user && isPlatformAdminEmail(user.email)) {
+    return db.select({
+      id: tenants.id,
+      name: tenants.name,
+      slug: tenants.slug,
+      role: sql<string>`'owner'`,
+    }).from(tenants)
+      .where(eq(tenants.status, 'active'))
+      .orderBy(tenants.createdAt)
+  }
   return db.select({
     id: tenants.id,
     name: tenants.name,

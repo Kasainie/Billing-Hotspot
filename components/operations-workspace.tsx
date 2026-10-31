@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowDownToLine, CalendarClock, Clock3, MessageCircle, Plus, RefreshCw, ShieldCheck, Ticket, Trash2, X } from 'lucide-react'
+import { ArrowDownToLine, CalendarClock, Clock3, MessageCircle, Minus, Plus, RefreshCw, ShieldCheck, Ticket, Trash2, X } from 'lucide-react'
 import { KENYAN_MOBILE_PHONE_PATTERN } from '@/lib/kenyan-phone'
 import { SUPPORT_TICKET_CATEGORIES, supportTicketCategoryLabel } from '@/lib/support-tickets'
 
@@ -13,14 +13,27 @@ type Expense = { id: string; category: string; description: string; amount: numb
 type Voucher = { id: string; packageId: string; packageName: string; username: string; status: string; validitySeconds: number | null; activatedAt: string | null; expiresAt: string | null; createdAt: string }
 type VoucherPackage = { id: string; name: string; rateLimit: string; monthlyPrice: number; durationSeconds: number }
 type GeneratedVoucher = { id: string; username: string; password: string; packageName: string; validitySeconds: number }
-type Equipment = { id: string; name: string; category: string; serialNumber: string | null; manufacturer: string | null; model: string | null; status: string; condition: string; purchasedAt: string | null; notes: string | null; siteId: string | null; siteName: string | null }
+type Equipment = { id: string; name: string; category: string; serialNumber: string | null; manufacturer: string | null; model: string | null; status: string; condition: string; quantity: number; unit: string; minimumQuantity: number; usedQuantity: number; purchasedAt: string | null; notes: string | null; siteId: string | null; siteName: string | null }
+type InventoryMovement = { id: string; equipmentId: string; itemName: string; movementType: 'added' | 'used' | 'restocked' | 'adjusted'; quantity: number; notes: string | null; createdAt: string }
 type Tr069Device = { id: string; siteId: string | null; siteName: string | null; serialNumber: string; manufacturer: string | null; model: string | null; firmwareVersion: string | null; status: string; lastInformAt: string | null; notes: string | null; createdAt: string }
 type Invoice = { id: string; customerId: string; customerName: string; customerEmail: string; customerPhone: string | null; invoiceNumber: string; periodStart: string; periodEnd: string; dueAt: string; amount: number; description: string; status: string; paidAt: string | null; createdAt: string }
-type WorkspaceRecord<T> = { items: T[]; totals?: { status: string; count: number; amount?: number }[]; total?: { amount: number; count: number }; byCategory?: { category: string; amount: string | number | null; count: number }[]; byTicketCategory?: { category: string; count: number }[]; byPackage?: { packageName: string; count: number }[]; packages?: VoucherPackage[]; plans?: SubscriberPlan[]; sites?: { id: string; name: string; location?: string }[]; activeCustomers?: { id: string; name: string; monthlyRate: number; plan: string | null }[] }
+type WorkspaceRecord<T> = { items: T[]; movements?: InventoryMovement[]; totals?: { status: string; count: number; amount?: number }[]; total?: { amount: number; count: number }; byCategory?: { category: string; amount: string | number | null; count: number }[]; byTicketCategory?: { category: string; count: number }[]; byPackage?: { packageName: string; count: number }[]; packages?: VoucherPackage[]; plans?: SubscriberPlan[]; sites?: { id: string; name: string; location?: string }[]; activeCustomers?: { id: string; name: string; monthlyRate: number; plan: string | null }[] }
 
 const leadStatuses = ['new', 'contacted', 'qualified', 'converted', 'lost']
 const ticketStatuses = ['open', 'in_progress', 'waiting', 'resolved', 'closed']
 const ticketPriorities = ['low', 'normal', 'high', 'urgent']
+const inventoryPresetNames = [
+  'Ubiquiti Litebeam M5',
+  'Tenda F6 router',
+  'TP-Link EAP 110',
+  'Outdoor Cat6 cable',
+  'Indoor Cat6 cable',
+  'Globe tape',
+  'Cable ties',
+  'Cable clips',
+  'Nails 2 inches',
+  'Nails 4 inches',
+]
 
 function formatAmount(value: number) {
   return new Intl.NumberFormat().format(value)
@@ -82,6 +95,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
   const [expenseCategories, setExpenseCategories] = useState<{ category: string; amount: string | number | null; count: number }[]>([])
   const [voucherPackageCounts, setVoucherPackageCounts] = useState<{ packageName: string; count: number }[]>([])
   const [ticketCategoryCounts, setTicketCategoryCounts] = useState<{ category: string; count: number }[]>([])
+  const [inventoryMovements, setInventoryMovements] = useState<InventoryMovement[]>([])
   const [availablePackages, setAvailablePackages] = useState<VoucherPackage[]>([])
   const [siteOptions, setSiteOptions] = useState<{ id: string; name: string; location?: string }[]>([])
   const [subscriberPlans, setSubscriberPlans] = useState<SubscriberPlan[]>([])
@@ -95,6 +109,9 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [filter, setFilter] = useState('')
+  const [selectedInventoryIds, setSelectedInventoryIds] = useState<string[]>([])
+  const [inventoryCheckoutQuantities, setInventoryCheckoutQuantities] = useState<Record<string, string>>({})
+  const [inventoryRestockQuantities, setInventoryRestockQuantities] = useState<Record<string, string>>({})
   const [voucherStatusFilter, setVoucherStatusFilter] = useState('all')
   const [voucherNow, setVoucherNow] = useState(() => Date.now())
   const [leadForm, setLeadForm] = useState({ name: '', email: '', phone: '', location: '', coverageStatus: 'pending', source: '', notes: '' })
@@ -102,7 +119,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
   const [ticketForm, setTicketForm] = useState({ requesterName: '', requesterEmail: '', subject: '', description: '', category: 'no_internet', priority: 'normal' })
   const [expenseForm, setExpenseForm] = useState({ category: '', description: '', amount: '', paidTo: '', reference: '', occurredAt: new Date().toISOString().slice(0, 10) })
   const [voucherForm, setVoucherForm] = useState({ packageId: '', quantity: '10', sendSms: false, phone: '' })
-  const [equipmentForm, setEquipmentForm] = useState({ name: '', category: '', serialNumber: '', manufacturer: '', model: '', siteId: '', status: 'in_service', condition: 'good', purchasedAt: '', notes: '' })
+  const [equipmentForm, setEquipmentForm] = useState({ name: '', category: '', serialNumber: '', manufacturer: '', model: '', siteId: '', status: 'spare', condition: 'good', quantity: '0', unit: 'pcs', minimumQuantity: '0', purchasedAt: '', notes: '' })
   const [tr069Form, setTr069Form] = useState({ serialNumber: '', manufacturer: '', model: '', firmwareVersion: '', siteId: '', notes: '' })
   const [invoiceForm, setInvoiceForm] = useState({ period: new Date().toISOString().slice(0, 7), dueAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) })
 
@@ -114,6 +131,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
       const result = await response.json() as WorkspaceRecord<Lead | SupportTicket | Expense | Voucher | Equipment | Tr069Device | Invoice> & { error?: string }
       if (!response.ok) throw new Error(result.error || `Unable to load ${entity}.`)
       setItems(result.items)
+      setInventoryMovements(result.movements || [])
       setTotals(result.totals || [])
       setExpenseTotal(result.total || { amount: 0, count: 0 })
       setExpenseCategories(result.byCategory || [])
@@ -180,7 +198,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
         setNotice(`Billing period ${result.period}: ${result.created} invoices issued; ${result.skipped} already existed or were not eligible out of ${result.eligible} active subscribers.`)
       } else if (entity === 'equipment') {
         setNotice('Equipment record saved.')
-        setEquipmentForm({ name: '', category: '', serialNumber: '', manufacturer: '', model: '', siteId: '', status: 'in_service', condition: 'good', purchasedAt: '', notes: '' })
+        setEquipmentForm({ name: '', category: '', serialNumber: '', manufacturer: '', model: '', siteId: '', status: 'spare', condition: 'good', quantity: '0', unit: 'pcs', minimumQuantity: '0', purchasedAt: '', notes: '' })
       } else if (entity === 'tr069') {
         setNotice('Device added to the TR-069 registry. It will remain pending until an ACS reports it.')
         setTr069Form({ serialNumber: '', manufacturer: '', model: '', firmwareVersion: '', siteId: '', notes: '' })
@@ -281,6 +299,65 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
     }
   }
 
+  async function checkoutInventory() {
+    if (selectedInventoryIds.length === 0) return
+    const checkouts = selectedInventoryIds.map((id) => {
+      const quantity = Number(inventoryCheckoutQuantities[id] ?? '1')
+      return { id, quantity }
+    })
+    if (checkouts.some(({ quantity }) => !Number.isInteger(quantity) || quantity <= 0)) {
+      setError('Enter a whole quantity greater than zero for every selected item.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch(`/api/operations/equipment?id=batch`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ checkouts }),
+      })
+      const result = await response.json() as { error?: string; checkedOut?: number }
+      if (!response.ok) throw new Error(result.error || 'Unable to check out inventory items.')
+      setNotice(`${result.checkedOut ?? checkouts.length} inventory item${checkouts.length === 1 ? '' : 's'} checked out and stock reduced.`)
+      setSelectedInventoryIds([])
+      setInventoryCheckoutQuantities({})
+      await load()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to check out inventory items.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function restockInventory(id: string, itemName: string) {
+    const quantity = Number(inventoryRestockQuantities[id] ?? '1')
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      setError(`Enter a valid restock quantity for ${itemName}.`)
+      return
+    }
+    setSaving(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch('/api/operations/equipment?id=batch', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ restock: { id, quantity } }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to restock this item.')
+      setNotice(`${quantity} ${itemName} added to stock.`)
+      setInventoryRestockQuantities((current) => ({ ...current, [id]: '1' }))
+      await load()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to restock this item.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function deleteRecord(id: string, confirmation = 'Delete this record? This cannot be undone.') {
     if (!window.confirm(confirmation)) return
     setSaving(true)
@@ -333,7 +410,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
     ])
   }
 
-  const title = view === 'Leads' ? 'Leads' : view.startsWith('Ticket') ? view : view === 'Expenses' ? 'Expenses' : view === 'Generate vouchers' ? 'Generate vouchers' : view === 'Voucher analytics' ? 'Voucher analytics' : view === 'Equipment' ? 'Equipment inventory' : view === 'TR-069' ? 'TR-069 device registry' : view === 'Invoices' ? 'Invoices' : 'Voucher list'
+  const title = view === 'Leads' ? 'Leads' : view.startsWith('Ticket') ? view : view === 'Expenses' ? 'Expenses' : view === 'Generate vouchers' ? 'Generate vouchers' : view === 'Voucher analytics' ? 'Voucher analytics' : view === 'Equipment' ? 'Inventory tracker' : view === 'TR-069' ? 'TR-069 device registry' : view === 'Invoices' ? 'Invoices' : 'Voucher list'
   const description = view === 'Leads'
     ? 'Capture prospects and track each opportunity through your sales pipeline.'
     : view.startsWith('Ticket')
@@ -341,7 +418,7 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
       : view === 'Expenses'
         ? 'Record and review operating costs for this workspace.'
         : view === 'Equipment'
-          ? 'Track equipment, condition, service status, and assigned network site.'
+          ? 'Track stock quantities, low-stock limits, condition, usage status, and assigned network sites.'
           : view === 'TR-069'
             ? 'Maintain a device registry. Live remote management requires an ACS/CWMP server.'
             : view === 'Invoices'
@@ -381,22 +458,111 @@ export function OperationsWorkspace({ view }: { view: ModuleView }) {
         {view === 'Ticket list' && <form className="operations-form panel" onSubmit={(event) => { event.preventDefault(); void createRecord(ticketForm) }}><h2>Create support ticket</h2><div className="operations-form-grid"><label>Requester<input required maxLength={120} value={ticketForm.requesterName} onChange={(event) => setTicketForm({ ...ticketForm, requesterName: event.target.value })} /></label><label>Requester email<input type="email" maxLength={254} value={ticketForm.requesterEmail} onChange={(event) => setTicketForm({ ...ticketForm, requesterEmail: event.target.value })} /></label><label>Subject<input required maxLength={180} value={ticketForm.subject} onChange={(event) => setTicketForm({ ...ticketForm, subject: event.target.value })} /></label><label>Category<select value={ticketForm.category} onChange={(event) => setTicketForm({ ...ticketForm, category: event.target.value })}>{SUPPORT_TICKET_CATEGORIES.map((category) => <option key={category} value={category}>{supportTicketCategoryLabel(category)}</option>)}</select></label><label>Priority<select value={ticketForm.priority} onChange={(event) => setTicketForm({ ...ticketForm, priority: event.target.value })}>{ticketPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label><label className="operations-wide">Description<textarea required maxLength={5000} rows={3} value={ticketForm.description} onChange={(event) => setTicketForm({ ...ticketForm, description: event.target.value })} /></label></div><button type="submit" className="primary-button" disabled={saving}><Plus size={14} /> {saving ? 'Creating…' : 'Create ticket'}</button></form>}
         <RecordTable title="Support tickets" items={filteredItems.length} loading={loading} filter={filter} setFilter={setFilter} filterLabel="Filter tickets" emptyText="No tickets found." headers={['Ticket', 'Requester', 'Category', 'Priority', 'Status', 'Assigned to', 'Updated', '']}><tbody>{(filteredItems as SupportTicket[]).map((ticket) => <tr key={ticket.id}><td><strong>{ticket.subject}</strong><span>{ticket.description}</span></td><td>{ticket.requesterName}{ticket.requesterEmail && <span>{ticket.requesterEmail}</span>}</td><td><select aria-label={`Category for ${ticket.subject}`} value={ticket.category} disabled={saving} onChange={(event) => void updateRecord(ticket.id, { category: event.target.value })}>{SUPPORT_TICKET_CATEGORIES.map((category) => <option key={category} value={category}>{supportTicketCategoryLabel(category)}</option>)}</select></td><td><select aria-label={`Priority for ${ticket.subject}`} value={ticket.priority} disabled={saving} onChange={(event) => void updateRecord(ticket.id, { priority: event.target.value })}>{ticketPriorities.map((priority) => <option key={priority}>{priority}</option>)}</select></td><td><select aria-label={`Status for ${ticket.subject}`} value={ticket.status} disabled={saving} onChange={(event) => void updateRecord(ticket.id, { status: event.target.value })}>{ticketStatuses.map((status) => <option key={status} value={status}>{status.replace('_', ' ')}</option>)}</select></td><td><input aria-label={`Assignee for ${ticket.subject}`} defaultValue={ticket.assignedTo || ''} placeholder="Assign technician" disabled={saving} onBlur={(event) => { const assignedTo = event.currentTarget.value.trim(); if (assignedTo !== (ticket.assignedTo || '')) void updateRecord(ticket.id, { assignedTo }) }} /></td><td>{formatDate(ticket.updatedAt)}</td><td><button type="button" className="text-button danger-text" disabled={saving} aria-label={`Delete ticket ${ticket.subject}`} onClick={() => void deleteRecord(ticket.id)}><Trash2 size={14} /></button></td></tr>)}</tbody></RecordTable>
       </> : view === 'Equipment' ? <>
-        <div className="operations-stat-grid">{['in_service', 'spare', 'maintenance', 'retired'].map((status) => <article className="metric-card" key={status}><span className="eyebrow">{status.replace('_', ' ')}</span><strong className="metric-value">{loading ? '—' : formatAmount(recordCount(totals, status))}</strong><span className="operations-stat-caption">equipment records</span></article>)}</div>
-        <form className="operations-form panel" onSubmit={(event) => { event.preventDefault(); void createRecord({ ...equipmentForm, purchasedAt: equipmentForm.purchasedAt || null, siteId: equipmentForm.siteId || null }) }}>
-          <h2>Add equipment</h2><div className="operations-form-grid">
-            <label>Name<input required maxLength={120} value={equipmentForm.name} onChange={(event) => setEquipmentForm({ ...equipmentForm, name: event.target.value })} placeholder="Router, switch, ONT…" /></label>
-            <label>Category<input required maxLength={80} value={equipmentForm.category} onChange={(event) => setEquipmentForm({ ...equipmentForm, category: event.target.value })} placeholder="Router, switch, fiber…" /></label>
-            <label>Serial number<input maxLength={120} value={equipmentForm.serialNumber} onChange={(event) => setEquipmentForm({ ...equipmentForm, serialNumber: event.target.value })} /></label>
+        <div className="operations-stat-grid">
+          <article className="metric-card"><span className="eyebrow">Inventory items</span><strong className="metric-value">{loading ? '—' : formatAmount(items.length)}</strong><span className="operations-stat-caption">different products</span></article>
+          <article className="metric-card"><span className="eyebrow">Items remaining</span><strong className="metric-value">{loading ? '—' : formatAmount((items as Equipment[]).reduce((total, item) => total + item.quantity, 0))}</strong><span className="operations-stat-caption">units currently in stock</span></article>
+          <article className="metric-card"><span className="eyebrow">Items used</span><strong className="metric-value">{loading ? '—' : formatAmount((items as Equipment[]).reduce((total, item) => total + item.usedQuantity, 0))}</strong><span className="operations-stat-caption">units checked out</span></article>
+          <article className="metric-card"><span className="eyebrow">Low stock</span><strong className="metric-value">{loading ? '—' : formatAmount((items as Equipment[]).filter((record) => record.quantity <= record.minimumQuantity).length)}</strong><span className="operations-stat-caption">items at or below limit</span></article>
+        </div>
+        <form className="operations-form panel" onSubmit={(event) => {
+          event.preventDefault()
+          void createRecord({
+            ...equipmentForm,
+            quantity: Number(equipmentForm.quantity),
+            minimumQuantity: Number(equipmentForm.minimumQuantity),
+            purchasedAt: equipmentForm.purchasedAt || null,
+            siteId: equipmentForm.siteId || null,
+          })
+        }}>
+          <h2>Add inventory item</h2><div className="operations-form-grid">
+            <label>Item name<input required list="inventory-item-presets" maxLength={120} value={equipmentForm.name} onChange={(event) => setEquipmentForm({ ...equipmentForm, name: event.target.value })} placeholder="Select a preset or enter a custom item" /><datalist id="inventory-item-presets">{inventoryPresetNames.map((name) => <option key={name} value={name} />)}</datalist></label>
+            <label>Category<input required maxLength={80} value={equipmentForm.category} onChange={(event) => setEquipmentForm({ ...equipmentForm, category: event.target.value })} placeholder="Hardware, cable, consumable…" /></label>
             <label>Manufacturer<input maxLength={120} value={equipmentForm.manufacturer} onChange={(event) => setEquipmentForm({ ...equipmentForm, manufacturer: event.target.value })} /></label>
             <label>Model<input maxLength={120} value={equipmentForm.model} onChange={(event) => setEquipmentForm({ ...equipmentForm, model: event.target.value })} /></label>
+            <label>Quantity<input required type="number" min="0" step="1" value={equipmentForm.quantity} onChange={(event) => setEquipmentForm({ ...equipmentForm, quantity: event.target.value })} /></label>
+            <label>Unit<select value={equipmentForm.unit} onChange={(event) => setEquipmentForm({ ...equipmentForm, unit: event.target.value })}><option value="pcs">Pieces</option><option value="roll">Rolls</option><option value="meter">Meters</option><option value="pack">Packs</option><option value="box">Boxes</option><option value="kg">Kilograms</option></select></label>
             <label>Site<select value={equipmentForm.siteId} onChange={(event) => setEquipmentForm({ ...equipmentForm, siteId: event.target.value })}><option value="">Unassigned</option>{siteOptions.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</select></label>
-            <label>Status<select value={equipmentForm.status} onChange={(event) => setEquipmentForm({ ...equipmentForm, status: event.target.value })}><option value="in_service">In service</option><option value="spare">Spare</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></label>
+            <label>Status<select value={equipmentForm.status} onChange={(event) => setEquipmentForm({ ...equipmentForm, status: event.target.value })}><option value="new">New</option><option value="unused">Unused</option><option value="in_service">In service</option><option value="spare">Spare</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></label>
             <label>Condition<select value={equipmentForm.condition} onChange={(event) => setEquipmentForm({ ...equipmentForm, condition: event.target.value })}><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option></select></label>
             <label>Purchase date<input type="date" value={equipmentForm.purchasedAt} onChange={(event) => setEquipmentForm({ ...equipmentForm, purchasedAt: event.target.value })} /></label>
             <label className="operations-wide">Notes<textarea maxLength={2000} rows={2} value={equipmentForm.notes} onChange={(event) => setEquipmentForm({ ...equipmentForm, notes: event.target.value })} /></label>
-          </div><button type="submit" className="primary-button" disabled={saving}><Plus size={14} /> {saving ? 'Saving…' : 'Add equipment'}</button>
+          </div><button type="submit" className="primary-button" disabled={saving}><Plus size={14} /> {saving ? 'Saving…' : 'Add inventory item'}</button>
         </form>
-        <RecordTable title="Equipment inventory" items={filteredItems.length} loading={loading} filter={filter} setFilter={setFilter} filterLabel="Filter equipment" emptyText="No equipment records yet." headers={['Equipment', 'Category', 'Site', 'Condition', 'Status', 'Serial / model', '']}><tbody>{(filteredItems as Equipment[]).map((record) => <tr key={record.id}><td><strong>{record.name}</strong>{record.manufacturer && <span>{record.manufacturer}</span>}</td><td>{record.category}</td><td>{record.siteName || 'Unassigned'}</td><td><select aria-label={`Condition of ${record.name}`} value={record.condition} disabled={saving} onChange={(event) => void updateRecord(record.id, { condition: event.target.value })}><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option></select></td><td><select aria-label={`Status of ${record.name}`} value={record.status} disabled={saving} onChange={(event) => void updateRecord(record.id, { status: event.target.value })}><option value="in_service">In service</option><option value="spare">Spare</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></td><td>{[record.serialNumber, record.model].filter(Boolean).join(' · ') || '—'}</td><td><button type="button" className="text-button danger-text" disabled={saving} aria-label={`Delete ${record.name}`} onClick={() => void deleteRecord(record.id)}><Trash2 size={14} /></button></td></tr>)}</tbody></RecordTable>
+        <section className="panel inventory-store-panel">
+          <div className="panel-heading"><div><h3>Stock store</h3><span>Remaining and used quantities for every item</span></div></div>
+          {loading ? <p className="header-empty">Loading inventory…</p> : (items as Equipment[]).length === 0 ? <p className="header-empty">No inventory items yet.</p> : (
+            <div className="inventory-store-grid">
+              {(items as Equipment[]).map((record) => {
+                const selected = selectedInventoryIds.includes(record.id)
+                const lowStock = record.quantity <= record.minimumQuantity
+                return <article className={`inventory-store-card${lowStock ? ' is-low-stock' : ''}`} key={record.id}>
+                  <div className="inventory-store-card-head">
+                    <label className="inventory-select"><input type="checkbox" checked={selected} disabled={saving || record.quantity === 0} onChange={(event) => {
+                      if (event.target.checked) {
+                        setSelectedInventoryIds((current) => [...current, record.id])
+                        setInventoryCheckoutQuantities((current) => ({ ...current, [record.id]: current[record.id] || '1' }))
+                      } else {
+                        setSelectedInventoryIds((current) => current.filter((id) => id !== record.id))
+                      }
+                    }} /><span>{record.category}</span></label>
+                    {lowStock && <span className="inventory-low-badge">Low stock</span>}
+                  </div>
+                  <div className="inventory-store-title"><strong>{record.name}</strong>{record.model && <span>{record.model}</span>}</div>
+                  <div className="inventory-stock-counts">
+                    <div><span>Remaining</span><strong>{formatAmount(record.quantity)}</strong><small>{record.unit}</small></div>
+                    <div><span>Used</span><strong>{formatAmount(record.usedQuantity)}</strong><small>{record.unit}</small></div>
+                  </div>
+                  <div className="inventory-store-actions">
+                    <label><span>Used</span><input type="number" min="1" max={record.quantity} step="1" value={inventoryCheckoutQuantities[record.id] ?? '1'} disabled={saving || !selected || record.quantity === 0} onChange={(event) => setInventoryCheckoutQuantities((current) => ({ ...current, [record.id]: event.target.value }))} /></label>
+                    <label><span>Restock</span><input type="number" min="1" step="1" value={inventoryRestockQuantities[record.id] ?? '1'} disabled={saving} onChange={(event) => setInventoryRestockQuantities((current) => ({ ...current, [record.id]: event.target.value }))} /></label>
+                    <button type="button" className="outline-button" disabled={saving} onClick={() => void restockInventory(record.id, record.name)}><Plus size={13} /> Restock</button>
+                  </div>
+                </article>
+              })}
+            </div>
+          )}
+        </section>
+        <form className="operations-form panel" onSubmit={(event) => { event.preventDefault(); void checkoutInventory() }}>
+          <h2>Check out used items</h2>
+          <p>Select items in the table below, enter each quantity used, then check them out. Stock is reduced immediately.</p>
+          <button type="submit" className="primary-button" disabled={saving || selectedInventoryIds.length === 0}><Minus size={14} /> {saving ? 'Checking out…' : `Check out ${selectedInventoryIds.length || ''} selected item${selectedInventoryIds.length === 1 ? '' : 's'}`}</button>
+        </form>
+        <RecordTable title="Inventory tracker" items={filteredItems.length} loading={loading} filter={filter} setFilter={setFilter} filterLabel="Filter inventory" emptyText="No inventory items yet." headers={['Select', 'Item', 'Category', 'Stock', 'Used quantity', 'Site', 'Condition', 'Status', 'Model', '']}><tbody>{(filteredItems as Equipment[]).map((record) => {
+          const lowStock = record.quantity <= record.minimumQuantity
+          const selected = selectedInventoryIds.includes(record.id)
+          return <tr key={record.id}>
+            <td><input type="checkbox" checked={selected} aria-label={`Select ${record.name}`} disabled={saving || record.quantity === 0} onChange={(event) => {
+              if (event.target.checked) {
+                setSelectedInventoryIds((current) => [...current, record.id])
+                setInventoryCheckoutQuantities((current) => ({ ...current, [record.id]: current[record.id] || '1' }))
+              } else {
+                setSelectedInventoryIds((current) => current.filter((id) => id !== record.id))
+              }
+            }} /></td>
+            <td><strong>{record.name}</strong>{record.manufacturer && <span>{record.manufacturer}</span>}</td>
+            <td>{record.category}</td>
+            <td><input className={lowStock ? 'inventory-low-stock-input' : ''} aria-label={`Quantity of ${record.name}`} type="number" min="0" step="1" defaultValue={record.quantity} disabled={saving} onBlur={(event) => { const quantity = Number(event.currentTarget.value); if (Number.isInteger(quantity) && quantity >= 0 && quantity !== record.quantity) void updateRecord(record.id, { quantity }) }} /><span>{record.unit}</span></td>
+            <td><input className="inventory-used-input" aria-label={`Used quantity of ${record.name}`} type="number" min="1" max={record.quantity} step="1" value={inventoryCheckoutQuantities[record.id] ?? '1'} disabled={saving || !selected} onChange={(event) => setInventoryCheckoutQuantities((current) => ({ ...current, [record.id]: event.target.value }))} /></td>
+            <td>{record.siteName || 'Unassigned'}</td>
+            <td><select aria-label={`Condition of ${record.name}`} value={record.condition} disabled={saving} onChange={(event) => void updateRecord(record.id, { condition: event.target.value })}><option value="good">Good</option><option value="fair">Fair</option><option value="poor">Poor</option></select></td>
+            <td><select aria-label={`Status of ${record.name}`} value={record.status} disabled={saving} onChange={(event) => void updateRecord(record.id, { status: event.target.value })}><option value="new">New</option><option value="unused">Unused</option><option value="in_service">In service</option><option value="spare">Spare</option><option value="maintenance">Maintenance</option><option value="retired">Retired</option></select></td>
+            <td>{record.model || '—'}</td>
+            <td><button type="button" className="text-button danger-text" disabled={saving} aria-label={`Delete ${record.name}`} onClick={() => void deleteRecord(record.id, 'Delete this inventory item? This cannot be undone.')}><Trash2 size={14} /></button></td>
+          </tr>
+        })}</tbody></RecordTable>
+        <section className="panel inventory-history-panel">
+          <div className="panel-heading"><div><h3>Stock movement history</h3><span>Recent additions, restocks, and item usage</span></div></div>
+          {inventoryMovements.length === 0 ? <p className="header-empty">No stock movements recorded yet.</p> : (
+            <div className="table-scroll"><table><thead><tr><th>Item</th><th>Movement</th><th>Quantity</th><th>Date</th></tr></thead><tbody>
+              {inventoryMovements.map((movement) => <tr key={movement.id}>
+                <td><strong>{movement.itemName}</strong>{movement.notes && <span>{movement.notes}</span>}</td>
+                <td><span className={`inventory-movement movement-${movement.movementType}`}>{movement.movementType}</span></td>
+                <td><strong>{movement.movementType === 'used' ? '-' : '+'}{formatAmount(movement.quantity)}</strong></td>
+                <td>{formatDate(movement.createdAt)}</td>
+              </tr>)}
+            </tbody></table></div>
+          )}
+        </section>
       </> : view === 'TR-069' ? <>
         <div className="operations-message is-warning"><span><strong>ACS connection not configured.</strong> This is a device registry only; live CWMP informs, remote configuration, and connection tests are not available until an ACS/CWMP server is connected.</span></div>
         <form className="operations-form panel" onSubmit={(event) => { event.preventDefault(); void createRecord({ ...tr069Form, siteId: tr069Form.siteId || null }) }}>

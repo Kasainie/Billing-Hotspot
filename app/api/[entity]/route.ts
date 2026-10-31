@@ -51,6 +51,10 @@ function validate(entity: Entity, input: Record<string, unknown>) {
   if (entity === 'customers' && (typeof input.radiusUsername !== 'string' || !/^[a-zA-Z0-9._@-]{3,64}$/.test(input.radiusUsername.trim()))) return 'RADIUS username must be 3-64 letters, numbers, dots, underscores, @ signs, or hyphens'
   if (entity === 'customers' && (typeof input.password !== 'string' || input.password.trim().length < 12 || input.password.length > 128)) return 'RADIUS password must be 12-128 characters'
   if (entity === 'customers' && (typeof input.packageId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.packageId))) return 'Select a valid service plan'
+  if (entity === 'customers' && input.installationPaymentAmount !== undefined && input.installationPaymentAmount !== null &&
+      (!Number.isInteger(Number(input.installationPaymentAmount)) || Number(input.installationPaymentAmount) <= 0)) return 'Installation payment amount must be a positive whole number'
+  if (entity === 'customers' && input.installationPaymentAmount !== undefined && input.installationPaymentAmount !== null &&
+      !['M-Pesa', 'Cash'].includes(String(input.installationPaymentMethod))) return 'Select M-Pesa or Cash as the installation payment type'
   if (entity === 'packages') {
     if (typeof input.name !== 'string' || input.name.trim().length > 80) return 'Package name must be 80 characters or fewer'
     if (!packageTypes.includes(String(input.type))) return 'Select a valid package type'
@@ -338,6 +342,17 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
         if (plan.type === 'PPPoE' && normalizedPhone) {
           await tx.update(pppoeAccounts).set({ customerId: createdCustomer.id })
             .where(and(eq(pppoeAccounts.accountNumber, accountNumber), eq(pppoeAccounts.tenantId, tenantId)))
+        }
+
+        if (input.installationPaymentAmount !== undefined && input.installationPaymentAmount !== null) {
+          await tx.insert(payments).values({
+            tenantId,
+            customerId: createdCustomer.id,
+            amount: Number(input.installationPaymentAmount),
+            status: 'paid',
+            method: String(input.installationPaymentMethod),
+            reference: `INSTALL-${accountNumber}`,
+          })
         }
 
         return { customer: createdCustomer, accountNumber, planType: plan.type, error: null, status: 201 }

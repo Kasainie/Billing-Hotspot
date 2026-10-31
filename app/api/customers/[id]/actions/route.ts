@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { customers, invoices, packages, pppoeAccounts, radcheck, radreply, subscriberCredits, subscriberEvents, supportTickets } from '@/lib/db/schema'
+import { customers, invoices, packages, payments, pppoeAccounts, radcheck, radreply, subscriberCredits, subscriberEvents, supportTickets } from '@/lib/db/schema'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { sendSubscriberSms } from '@/lib/db/tenant-sms'
 import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
@@ -73,6 +73,61 @@ export async function POST(request: NextRequest, context: RouteContext<'/api/cus
         tenantId, customerId: id, eventType: 'note', description: note, createdBy: actorId,
       }).returning({ id: subscriberEvents.id, description: subscriberEvents.description, createdAt: subscriberEvents.createdAt })
       return NextResponse.json({ event }, { status: 201 })
+    }
+
+    if (action === 'manual_payment') {
+      const amount = input.amount
+      const method = input.method
+      const reference = typeof input.reference === 'string' ? input.reference.trim() : ''
+      const idempotencyKey = typeof input.idempotencyKey === 'string' ? input.idempotencyKey : ''
+      if (typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount < 1 || amount > 1000000000) {
+        return responseError('Enter a positive whole-number payment amount.')
+      }
+      if (method !== 'M-Pesa' && method !== 'Cash') {
+        return responseError('Payment method must be M-Pesa or Cash.')
+      }
+      if (reference.length > 120) return responseError('Payment reference must be 120 characters or fewer.')
+      if (!uuidPattern.test(idempotencyKey)) return responseError('Payment request id is invalid.')
+
+      const result = await db.transaction(async (tx) => {
+        const [customer] = await tx.select({ id: customers.id, accountNumber: customers.accountNumber }).from(customers)
+          .where(and(eq(customers.id, id), eq(customers.tenantId, tenantId))).for('update').limit(1)
+        if (!customer) return { error: 'Subscriber not found.', status: 404 as const }
+
+        const paymentReference = reference
+          ? `${reference} [MANUAL-${idempotencyKey}]`
+          : `MANUAL-${customer.accountNumber || id}-${idempotencyKey}`
+        const [existing] = await tx.select({ id: payments.id }).from(payments)
+          .where(and(eq(payments.tenantId, tenantId), eq(payments.customerId, id), eq(payments.reference, paymentReference))).limit(1)
+        if (existing) return { paymentId: existing.id, duplicate: true }
+
+        const [payment] = await tx.insert(payments).values({
+          tenantId,
+          customerId: id,
+          amount,
+          status: 'paid',
+          method,
+          reference: paymentReference,
+          paidAt: new Date(),
+        }).returning({ id: payments.id })
+        await tx.insert(subscriberEvents).values({
+          tenantId,
+          customerId: id,
+          eventType: 'payment_recorded',
+          description: `Manual ${method} payment of KSh ${amount.toLocaleString('en-KE')} recorded.`,
+          metadata: { amount, method, reference: reference || null, paymentId: payment.id, idempotencyKey },
+          createdBy: actorId,
+        })
+        return { paymentId: payment.id, duplicate: false }
+      })
+      if ('error' in result && result.error) {
+        return responseError(result.error, typeof result.status === 'number' ? result.status : 400)
+      }
+      return NextResponse.json({
+        message: result.duplicate
+          ? 'This manual payment was already recorded.'
+          : `KSh ${amount.toLocaleString('en-KE')} ${method} payment recorded.`,
+      })
     }
 
     if (action === 'vip') {

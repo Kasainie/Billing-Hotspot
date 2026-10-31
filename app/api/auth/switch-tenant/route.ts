@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { tenantMemberships, tenantSessions, tenants } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { isPlatformAdminEmail } from '@/lib/platform-admin-access'
 
 export async function POST(request: NextRequest) {
   const session = await getTenantSession(request)
@@ -16,6 +17,15 @@ export async function POST(request: NextRequest) {
   }
   const tenantId = typeof input.tenantId === 'string' ? input.tenantId : ''
   try {
+    if (isPlatformAdminEmail(session.email)) {
+      const [tenant] = await db.select({ id: tenants.id })
+        .from(tenants)
+        .where(and(eq(tenants.id, tenantId), eq(tenants.status, 'active')))
+        .limit(1)
+      if (!tenant) return NextResponse.json({ error: 'Workspace not found or is suspended.' }, { status: 404 })
+      await db.update(tenantSessions).set({ tenantId }).where(eq(tenantSessions.tokenHash, session.tokenHash))
+      return NextResponse.json({ ok: true, platformAdmin: true })
+    }
     const [membership] = await db.select({ tenantId: tenantMemberships.tenantId })
       .from(tenantMemberships)
       .innerJoin(tenants, eq(tenants.id, tenantMemberships.tenantId))

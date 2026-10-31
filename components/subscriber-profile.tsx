@@ -553,7 +553,7 @@ export function SubscriberProfile({
   const [liveData, setLiveData] = useState<SubscriberLiveData | null>(null)
   const [liveRate, setLiveRate] = useState<SubscriberUsageRate | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [actionDialog, setActionDialog] = useState<'edit' | 'expiry' | 'sms' | 'credentials' | 'payment_details' | 'invoice' | 'compensate' | 'ticket' | 'plan' | null>(null)
+  const [actionDialog, setActionDialog] = useState<'edit' | 'expiry' | 'sms' | 'credentials' | 'payment_details' | 'manual_payment' | 'invoice' | 'compensate' | 'ticket' | 'plan' | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [exportingReport, setExportingReport] = useState(false)
   const [actionMessage, setActionMessage] = useState('')
@@ -575,6 +575,9 @@ export function SubscriberProfile({
     const due = new Date(Date.now() + 14 * 86_400_000)
     return `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, '0')}-${String(due.getDate()).padStart(2, '0')}`
   })
+  const [manualPaymentAmount, setManualPaymentAmount] = useState('')
+  const [manualPaymentMethod, setManualPaymentMethod] = useState<'Cash' | 'M-Pesa'>('M-Pesa')
+  const [manualPaymentReference, setManualPaymentReference] = useState('')
   const [ticketSubject, setTicketSubject] = useState('')
   const [ticketDescription, setTicketDescription] = useState('')
   const [ticketCategory, setTicketCategory] = useState('no_internet')
@@ -771,6 +774,19 @@ export function SubscriberProfile({
       void performAction('sms', { message: smsMessage })
     } else if (actionDialog === 'credentials' || actionDialog === 'payment_details') {
       void performAction(actionDialog)
+    } else if (actionDialog === 'manual_payment') {
+      const amount = Number(manualPaymentAmount)
+      if (!Number.isSafeInteger(amount) || amount < 1) {
+        setActionError(true)
+        setActionMessage('Enter a positive whole-number payment amount.')
+        return
+      }
+      void performAction('manual_payment', {
+        amount,
+        method: manualPaymentMethod,
+        reference: manualPaymentReference.trim(),
+        idempotencyKey: crypto.randomUUID(),
+      })
     } else if (actionDialog === 'invoice') {
       void performAction('invoice', { dueAt: invoiceDueAt })
     } else if (actionDialog === 'compensate') {
@@ -909,6 +925,7 @@ export function SubscriberProfile({
                 <button type="button" role="menuitem" disabled title="Customer self-service portal is not configured"><Wifi size={14} /> View customer portal</button>
                 <button type="button" role="menuitem" disabled={!data.phone || !data.radiusUsername || !data.radiusPassword} onClick={() => { setActionMessage(''); setActionDialog('credentials'); setMenuOpen(false) }}><Send size={14} /> Send credentials</button>
                 <button type="button" role="menuitem" disabled={!data.phone} onClick={() => { setActionMessage(''); setActionDialog('payment_details'); setMenuOpen(false) }}><MessageCircle size={14} /> Send payment details</button>
+                <button type="button" role="menuitem" onClick={() => { setActionMessage(''); setActionError(false); setManualPaymentAmount(data.monthlyRate > 0 ? String(data.monthlyRate) : ''); setManualPaymentMethod('M-Pesa'); setManualPaymentReference(''); setActionDialog('manual_payment'); setMenuOpen(false) }}><CreditCard size={14} /> Record manual payment</button>
                 <button type="button" role="menuitem" onClick={() => { setActionMessage(''); setActionDialog('invoice'); setMenuOpen(false) }}><FileText size={14} /> Generate invoice</button>
                 <button type="button" role="menuitem" disabled={!data.radiusUsername || data.status === 'suspended'} onClick={() => void performAction('subscription', { status: 'suspended' })}><Pause size={14} /> Pause subscription</button>
                 <button type="button" role="menuitem" disabled title="FUP override is unavailable until an operator policy is configured"><Activity size={14} /> FUP override · unavailable</button>
@@ -1069,8 +1086,7 @@ export function SubscriberProfile({
       </section>}
 
       {tab === 'Payments' && <section className="subscriber-profile-panel subscriber-profile-table-panel">
-        <h4><CreditCard size={16} /> Payment history</h4>
-        <p>{data.billing.payments.length} recorded payments · {formatMoney(data.billing.lifetimeValue)} paid total</p>
+        <div className="subscriber-profile-section-heading"><div><h4><CreditCard size={16} /> Payment history</h4><p>{data.billing.payments.length} recorded payments · {formatMoney(data.billing.lifetimeValue)} paid total</p></div><button type="button" className="primary-button" onClick={() => { setActionMessage(''); setActionError(false); setManualPaymentAmount(data.monthlyRate > 0 ? String(data.monthlyRate) : ''); setManualPaymentMethod('M-Pesa'); setManualPaymentReference(''); setActionDialog('manual_payment') }}><CreditCard size={14} /> Record payment</button></div>
         <div className="subscriber-profile-table-scroll"><table><thead><tr><th>DATE</th><th>REFERENCE</th><th>METHOD</th><th>STATUS</th><th>AMOUNT</th></tr></thead><tbody>
           {data.billing.payments.map((payment) => <tr key={payment.id}><td>{formatDate(payment.paidAt)}</td><td>{payment.reference || '—'}</td><td>{payment.method || '—'}</td><td>{payment.status}</td><td>{formatMoney(payment.amount)}</td></tr>)}
           {!data.billing.payments.length && <tr><td colSpan={5} className="subscriber-profile-empty">No payments are linked to this subscriber.</td></tr>}
@@ -1135,6 +1151,7 @@ export function SubscriberProfile({
           <div className="subscriber-action-dialog-heading"><div><span>SUBSCRIBER ACTION</span><h3 id={`subscriber-action-title-${data.id}`}>{({
             edit: 'Edit subscriber', expiry: 'Change subscription expiry', sms: 'Send SMS',
             credentials: 'Send login credentials', payment_details: 'Send payment details',
+            manual_payment: 'Record manual payment',
             invoice: 'Generate invoice', compensate: 'Compensate subscriber', ticket: 'Create support ticket', plan: 'Change service package',
           })[actionDialog]}</h3></div><button type="button" aria-label="Close dialog" disabled={actionBusy} onClick={() => setActionDialog(null)}><X size={17} /></button></div>
           <form onSubmit={submitDialogAction}>
@@ -1147,6 +1164,11 @@ export function SubscriberProfile({
             {actionDialog === 'sms' && <label className="subscriber-action-form-field">Message to {data.name}<textarea required maxLength={500} rows={4} value={smsMessage} onChange={(event) => setSmsMessage(event.target.value)} placeholder="Type a message…" /><small>{smsMessage.length}/500 characters · {data.phone || 'No phone number'}</small></label>}
             {actionDialog === 'credentials' && <p className="subscriber-action-warning">This sends the stored RADIUS username and password to {data.phone}. Only continue if this number is verified and the subscriber requested their credentials.</p>}
             {actionDialog === 'payment_details' && <p className="subscriber-action-warning">This sends plan and monthly price details to {data.phone}: {data.plan || 'plan not set'} · {formatMoney(data.monthlyRate)}/month.</p>}
+            {actionDialog === 'manual_payment' && <div className="subscriber-action-form-grid">
+              <label>Payment amount (KSh)<input required type="number" min="1" max="1000000000" step="1" value={manualPaymentAmount} onChange={(event) => setManualPaymentAmount(event.target.value)} /></label>
+              <label>Payment method<select value={manualPaymentMethod} onChange={(event) => setManualPaymentMethod(event.target.value as 'Cash' | 'M-Pesa')}><option value="M-Pesa">M-Pesa</option><option value="Cash">Cash</option></select></label>
+              <label className="subscriber-action-wide">Payment reference (optional)<input maxLength={120} value={manualPaymentReference} onChange={(event) => setManualPaymentReference(event.target.value)} placeholder="For example, transaction code or receipt number" /></label>
+            </div>}
             {actionDialog === 'invoice' && <><p className="subscriber-action-warning">Creates the current month’s invoice for {formatMoney(data.monthlyRate)}. Available account credit will be applied in full if it covers the invoice. An invoice can only be generated once per month.</p><label className="subscriber-action-form-field">Due date<input required type="date" value={invoiceDueAt} onChange={(event) => setInvoiceDueAt(event.target.value)} /></label></>}
             {actionDialog === 'compensate' && <div className="subscriber-action-form-grid">
               <label>Compensation type<select value={compensationKind} onChange={(event) => setCompensationKind(event.target.value as 'days' | 'credit')}><option value="days">Free service days</option><option value="credit">Account credit (KSh)</option></select></label>
@@ -1166,7 +1188,7 @@ export function SubscriberProfile({
               {selectedPlanOption && <p className="subscriber-action-wide">Selected: <strong>{selectedPlanOption.name}</strong> · {selectedPlanOption.rateLimit}. {selectedPlanOption.monthlyPrice > data.monthlyRate ? `Price increases by ${formatMoney(selectedPlanOption.monthlyPrice - data.monthlyRate)} per month.` : selectedPlanOption.monthlyPrice < data.monthlyRate ? `Price decreases by ${formatMoney(data.monthlyRate - selectedPlanOption.monthlyPrice)} per month.` : 'Monthly price remains unchanged.'}</p>}
             </div>}
             {actionError && actionMessage && <p className="subscriber-action-error" role="alert">{actionMessage}</p>}
-            <div className="subscriber-action-dialog-actions"><button type="button" className="outline-button" disabled={actionBusy} onClick={() => setActionDialog(null)}>Cancel</button><button className="primary-button" type="submit" disabled={actionBusy || (actionDialog === 'plan' && !selectedPackageId)}>{actionBusy ? 'Working…' : actionDialog === 'credentials' || actionDialog === 'payment_details' ? 'Confirm and send' : actionDialog === 'invoice' ? 'Generate invoice' : actionDialog === 'plan' ? 'Update package' : 'Save'}</button></div>
+            <div className="subscriber-action-dialog-actions"><button type="button" className="outline-button" disabled={actionBusy} onClick={() => setActionDialog(null)}>Cancel</button><button className="primary-button" type="submit" disabled={actionBusy || (actionDialog === 'plan' && !selectedPackageId)}>{actionBusy ? 'Working…' : actionDialog === 'credentials' || actionDialog === 'payment_details' ? 'Confirm and send' : actionDialog === 'manual_payment' ? 'Record payment' : actionDialog === 'invoice' ? 'Generate invoice' : actionDialog === 'plan' ? 'Update package' : 'Save'}</button></div>
           </form>
         </div>
       </div>}

@@ -23,9 +23,16 @@ function needsPasswordConfirmation(input: RequestInfo | URL, init?: RequestInit)
 
 export function AdminPasswordConfirmation() {
   const requests = useRef<PasswordRequest[]>([])
+  const passwordInputRef = useRef<HTMLInputElement>(null)
   const [activeRequest, setActiveRequest] = useState<PasswordRequest | null>(null)
   const [password, setPassword] = useState('')
   const [validationError, setValidationError] = useState('')
+
+  useEffect(() => {
+    if (!activeRequest) return
+    const input = passwordInputRef.current
+    input?.focus()
+  }, [activeRequest])
 
   const cancelRequest = useCallback((request: PasswordRequest) => {
     const requestIndex = requests.current.indexOf(request)
@@ -118,9 +125,12 @@ export function AdminPasswordConfirmation() {
         <span className="section-eyebrow">CONFIRM ADMIN ACTION</span>
         <h2 id="admin-password-confirmation-title">Enter your password</h2>
         <p>Verify your account password to make this change. You’ll be asked again for the next change.</p>
-        <label>
+        <label htmlFor="admin-password-confirmation-input">
           Account password
           <input
+            ref={passwordInputRef}
+            id="admin-password-confirmation-input"
+            name="adminPassword"
             autoFocus
             type="password"
             autoComplete="current-password"
