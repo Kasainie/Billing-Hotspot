@@ -7,7 +7,8 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getTenantSession(request)
     if (!session) return NextResponse.json({ user: null, tenant: null, memberships: [] }, { status: 401 })
-    const memberships = await getTenantMemberships(session.userId)
+    const memberships = (await getTenantMemberships(session.userId))
+      .filter((membership) => membership.id === session.tenantId)
     return NextResponse.json({
       user: { id: session.userId, name: session.name, email: session.email },
       platformAdmin: isPlatformAdminEmail(session.email),

@@ -30,6 +30,21 @@ export const emailVerificationCodes = pgTable('email_verification_codes', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+export const adminActionConfirmationCodes = pgTable('admin_action_confirmation_codes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => tenantUsers.id, { onDelete: 'cascade' }),
+  action: text('action').notNull(),
+  recordId: text('record_id').notNull(),
+  payloadHash: text('payload_hash').notNull(),
+  codeHash: text('code_hash').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('admin_action_confirmation_lookup_idx').on(table.tenantId, table.action, table.recordId),
+])
+
 export const tenantMemberships = pgTable('tenant_memberships', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),

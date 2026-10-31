@@ -16,28 +16,35 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
 
-  const name = typeof input.name === 'string' ? input.name.trim() : ''
-  const slug = typeof input.slug === 'string' ? input.slug.trim().toLowerCase() : ''
+  const requestedName = typeof input.name === 'string' ? input.name.trim() : ''
+  const requestedSlug = typeof input.slug === 'string' ? input.slug.trim().toLowerCase() : ''
   const portalName = typeof input.portalName === 'string' ? input.portalName.trim() : ''
-  if (name.length < 2 || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) return NextResponse.json({ error: 'ISP or account name must be 2 to 80 characters.' }, { status: 400 })
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 63) return NextResponse.json({ error: 'Workspace address must use lowercase letters, numbers, and hyphens.' }, { status: 400 })
-  if (portalName.length < 2 || portalName.length > 48 || /[\u0000-\u001f\u007f]/.test(portalName)) return NextResponse.json({ error: 'Captive portal name must be 2 to 48 characters.' }, { status: 400 })
+  if (requestedName && (requestedName.length < 2 || requestedName.length > 80 || /[\u0000-\u001f\u007f]/.test(requestedName))) return NextResponse.json({ error: 'ISP or account name must be 2 to 80 characters.' }, { status: 400 })
+  if (requestedSlug && (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(requestedSlug) || requestedSlug.length > 63)) return NextResponse.json({ error: 'Workspace address must use lowercase letters, numbers, and hyphens.' }, { status: 400 })
+  if (portalName && (portalName.length < 2 || portalName.length > 48 || /[\u0000-\u001f\u007f]/.test(portalName))) return NextResponse.json({ error: 'Captive portal name must be 2 to 48 characters.' }, { status: 400 })
+  if (!requestedName && !requestedSlug && !portalName) return NextResponse.json({ error: 'Provide a workspace name or portal setting to update.' }, { status: 400 })
 
   try {
+    const [currentTenant] = await db.select({ name: tenants.name, slug: tenants.slug }).from(tenants).where(eq(tenants.id, session.tenantId)).limit(1)
+    if (!currentTenant) return NextResponse.json({ error: 'Workspace not found.' }, { status: 404 })
+    const name = requestedName || currentTenant.name
+    const slug = requestedSlug || currentTenant.slug
     const [conflict] = await db.select({ id: tenants.id }).from(tenants)
       .where(and(eq(tenants.slug, slug), ne(tenants.id, session.tenantId))).limit(1)
     if (conflict) return NextResponse.json({ error: 'That workspace address is already in use.' }, { status: 409 })
 
     await db.transaction(async (tx) => {
       await tx.update(tenants).set({ name, slug }).where(eq(tenants.id, session.tenantId))
-      await tx.insert(hotspotPortalSettings).values({
-        tenantId: session.tenantId,
-        id: 1,
-        companyName: portalName,
-      }).onConflictDoUpdate({
-        target: [hotspotPortalSettings.tenantId, hotspotPortalSettings.id],
-        set: { companyName: portalName, updatedAt: new Date() },
-      })
+      if (portalName) {
+        await tx.insert(hotspotPortalSettings).values({
+          tenantId: session.tenantId,
+          id: 1,
+          companyName: portalName,
+        }).onConflictDoUpdate({
+          target: [hotspotPortalSettings.tenantId, hotspotPortalSettings.id],
+          set: { companyName: portalName, updatedAt: new Date() },
+        })
+      }
     })
 
     return NextResponse.json({ name, slug, portalName })

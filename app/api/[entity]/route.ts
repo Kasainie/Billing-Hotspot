@@ -8,6 +8,8 @@ import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 import { enqueueTenantTemplateSms } from '@/lib/message-template-delivery'
 import { toHotspotRadiusReplies } from '@/lib/hotspot-products'
 import { radiusAccountingFreshnessPredicate } from '@/lib/radius-accounting'
+import { requireAdminActionConfirmation } from '@/lib/db/admin-action-confirmation'
+import { getOfficialRecordsCutoff } from '@/lib/official-records-cutoff'
 
 const tables = { sites, customers, packages, payments } as const
 type Entity = keyof typeof tables
@@ -101,7 +103,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
       return NextResponse.json({ error: 'Pagination must use a limit from 1 to 200 and a non-negative offset.' }, { status: 400 })
     }
     if (entity === 'customers') {
-      const customerRows = await db.select().from(customers).where(eq(customers.tenantId, tenantId))
+      const customerRows = await db.select().from(customers).where(and(
+        eq(customers.tenantId, tenantId),
+        sql`${customers.createdAt} >= ${getOfficialRecordsCutoff()}`,
+      ))
         .orderBy(desc(customers.createdAt)).limit(pageLimit).offset(pageOffset)
       const usernames = customerRows.map((row) => row.radiusUsername).filter((username): username is string => Boolean(username))
       const planNames = [...new Set(customerRows.map((row) => row.plan).filter((plan): plan is string => Boolean(plan)))]
@@ -195,7 +200,10 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
       }))
     }
     const orderColumn = entity === 'payments' ? payments.paidAt : entity === 'packages' ? packages.createdAt : sites.createdAt
-    const rows = await db.select().from(table).where(eq(table.tenantId, tenantId)).orderBy(desc(orderColumn as never)).limit(pageLimit).offset(pageOffset)
+    const recordFilter = entity === 'payments'
+      ? and(eq(table.tenantId, tenantId), sql`${payments.paidAt} >= ${getOfficialRecordsCutoff()}`)
+      : eq(table.tenantId, tenantId)
+    const rows = await db.select().from(table).where(recordFilter).orderBy(desc(orderColumn as never)).limit(pageLimit).offset(pageOffset)
     return NextResponse.json(rows)
   } catch (error) {
     console.error(`Failed to load tenant ${entity}`, error)
@@ -410,7 +418,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
       nasRestrictions: input.nasRestrictions as string[],
     } : values
     if (entity === 'payments') {
-      const [payment] = await db.insert(payments).values({ ...insertValues, tenantId } as never).returning()
+      const amount = Number(input.amount)
+      if (!Number.isInteger(amount) || amount <= 0) {
+        return NextResponse.json({ error: 'Payment amount must be a positive whole number.' }, { status: 400 })
+      }
+      let paidAt: Date | undefined
+      if (input.paidAt !== undefined && input.paidAt !== null && input.paidAt !== '') {
+        const parsedPaidAt = new Date(String(input.paidAt))
+        if (!Number.isFinite(parsedPaidAt.getTime())) {
+          return NextResponse.json({ error: 'Payment date and time is invalid.' }, { status: 400 })
+        }
+        paidAt = parsedPaidAt
+      }
+      const [payment] = await db.insert(payments).values({ ...insertValues, tenantId, amount, ...(paidAt ? { paidAt } : {}) } as never).returning()
       if (payment.status === 'paid' && payment.customerId) {
         const [customer] = await db.select({
           name: customers.name,
@@ -449,10 +469,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ en
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ entity: string }> }) {
   const { entity } = await context.params
-  if (entity !== 'packages') return NextResponse.json({ error: 'Only packages can be updated here' }, { status: 404 })
   const id = request.nextUrl.searchParams.get('id') || ''
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-    return NextResponse.json({ error: 'Package id is invalid' }, { status: 400 })
+    return NextResponse.json({ error: `${entity === 'sites' ? 'Site' : 'Package'} id is invalid` }, { status: 400 })
   }
 
   let input: Record<string, unknown>
@@ -464,10 +483,6 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return NextResponse.json({ error: 'Package update is invalid' }, { status: 400 })
   }
-  if (!packageAvailabilities.includes(String(input.availability))) {
-    return NextResponse.json({ error: 'Select a valid package availability' }, { status: 400 })
-  }
-  if (!process.env.DATABASE_URL?.trim()) return NextResponse.json({ error: 'Package updates require a configured database' }, { status: 503 })
 
   const access = await requireTenantAdmin(request)
   if (access.response) return access.response
@@ -475,6 +490,24 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ e
   const tenantId = session.tenantId
 
   try {
+    if (entity === 'sites') {
+      const name = typeof input.name === 'string' ? input.name.trim() : ''
+      const location = typeof input.location === 'string' ? input.location.trim() : ''
+      if (!name) return NextResponse.json({ error: 'Enter a site name.' }, { status: 400 })
+      if (!location) return NextResponse.json({ error: 'Enter a site location.' }, { status: 400 })
+      const confirmationResponse = await requireAdminActionConfirmation(request, 'rename_site', id, { name, location })
+      if (confirmationResponse) return confirmationResponse
+      if (!process.env.DATABASE_URL?.trim()) return NextResponse.json({ error: 'Site updates require a configured database' }, { status: 503 })
+      const [row] = await db.update(sites).set({ name, location })
+        .where(and(eq(sites.id, id), eq(sites.tenantId, tenantId))).returning()
+      if (!row) return NextResponse.json({ error: 'Site not found in this workspace.' }, { status: 404 })
+      return NextResponse.json(row)
+    }
+    if (entity !== 'packages') return NextResponse.json({ error: 'Only packages and sites can be updated here' }, { status: 404 })
+    if (!packageAvailabilities.includes(String(input.availability))) {
+      return NextResponse.json({ error: 'Select a valid package availability' }, { status: 400 })
+    }
+    if (!process.env.DATABASE_URL?.trim()) return NextResponse.json({ error: 'Package updates require a configured database' }, { status: 503 })
     const availabilityOnly = Object.keys(input).length === 1
     if (!availabilityOnly) {
       const validationError = validate('packages', input)
@@ -532,6 +565,10 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     return NextResponse.json({ error: 'Subscriber id is invalid.' }, { status: 400 })
   }
   const tenantId = session.tenantId
+  if (entity === 'sites') {
+    const confirmationResponse = await requireAdminActionConfirmation(request, 'delete_site', id, {})
+    if (confirmationResponse) return confirmationResponse
+  }
 
   const hasDatabase = Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim())
   if (!hasDatabase) {

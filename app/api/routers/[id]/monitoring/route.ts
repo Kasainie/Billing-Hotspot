@@ -6,6 +6,7 @@ import { routerMonitors } from '@/lib/db/schema'
 import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { buildRouterMonitorScript } from '@/lib/router-monitor-script'
 import { hashRouterMonitorToken } from '@/lib/router-monitoring'
+import { requireAdminActionConfirmation } from '@/lib/db/admin-action-confirmation'
 
 async function authorize(request: NextRequest, id: string) {
   const access = await requireTenantAdmin(request)
@@ -63,10 +64,41 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
 }
 
+export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params
+  const access = await authorize(request, id)
+  if ('response' in access) return access.response
+  let input: { name?: unknown }
+  try {
+    input = await request.json() as typeof input
+  } catch {
+    return NextResponse.json({ error: 'Router update is invalid JSON.' }, { status: 400 })
+  }
+  const name = typeof input.name === 'string' ? input.name.trim() : ''
+  if (!/^[a-zA-Z0-9 _-]{1,48}$/.test(name)) {
+    return NextResponse.json({ error: 'Enter a valid router name using 1-48 letters, numbers, spaces, hyphen, or underscore.' }, { status: 400 })
+  }
+  const confirmationResponse = await requireAdminActionConfirmation(request, 'rename_router', id, { name })
+  if (confirmationResponse) return confirmationResponse
+  try {
+    const [updated] = await db.update(routerMonitors).set({ routerName: name }).where(and(
+      eq(routerMonitors.id, id),
+      eq(routerMonitors.tenantId, access.tenantId),
+    )).returning({ id: routerMonitors.id, routerName: routerMonitors.routerName })
+    if (!updated) return NextResponse.json({ error: 'Router monitor not found in this workspace.' }, { status: 404 })
+    return NextResponse.json(updated)
+  } catch (error) {
+    console.error('Failed to rename router monitor', error)
+    return NextResponse.json({ error: 'Unable to rename the router.' }, { status: 503 })
+  }
+}
+
 export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params
   const access = await authorize(request, id)
   if ('response' in access) return access.response
+  const confirmationResponse = await requireAdminActionConfirmation(request, 'delete_router', id, {})
+  if (confirmationResponse) return confirmationResponse
   try {
     const [removed] = await db.delete(routerMonitors).where(and(
       eq(routerMonitors.id, access.id),

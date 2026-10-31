@@ -3,6 +3,7 @@ import { and, count, desc, eq, gte, lte, sum } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { customers, packages, payments, sites } from '@/lib/db/schema'
 import { getTenantSession } from '@/lib/db/tenant'
+import { getOfficialRecordsCutoff } from '@/lib/official-records-cutoff'
 
 export async function GET(request: NextRequest) {
   const session = await getTenantSession(request)
@@ -17,22 +18,37 @@ export async function GET(request: NextRequest) {
   try {
     const range = request.nextUrl.searchParams.get('range')
     const rangeMilliseconds = range === '24 hours' ? 24 * 60 * 60 * 1000 : range === '7 days' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000
-    const paymentSince = new Date(Date.now() - rangeMilliseconds)
+    const paymentSinceCandidate = new Date(Date.now() - rangeMilliseconds)
+    const paymentSince = paymentSinceCandidate < getOfficialRecordsCutoff() ? getOfficialRecordsCutoff() : paymentSinceCandidate
     const now = new Date()
     const expiringBefore = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
     const [siteRows, customerRows, paymentRows, packageRows, expiringCustomerRows, activeCustomerCount, totalCustomerCount, paidPaymentSummary, customerCountsBySite] = await Promise.all([
       db.select().from(sites).where(eq(sites.tenantId, tenantId)).orderBy(desc(sites.createdAt)),
-      db.select().from(customers).where(eq(customers.tenantId, tenantId)).orderBy(desc(customers.createdAt)).limit(100),
-      db.select().from(payments).where(eq(payments.tenantId, tenantId)).orderBy(desc(payments.paidAt)).limit(100),
+      db.select().from(customers).where(and(
+        eq(customers.tenantId, tenantId),
+        gte(customers.createdAt, getOfficialRecordsCutoff()),
+      )).orderBy(desc(customers.createdAt)).limit(100),
+      db.select().from(payments).where(and(
+        eq(payments.tenantId, tenantId),
+        gte(payments.paidAt, getOfficialRecordsCutoff()),
+      )).orderBy(desc(payments.paidAt)).limit(100),
       db.select().from(packages).where(eq(packages.tenantId, tenantId)).orderBy(desc(packages.createdAt)),
       db.select().from(customers).where(and(
         eq(customers.tenantId, tenantId),
         eq(customers.status, 'active'),
+        gte(customers.createdAt, getOfficialRecordsCutoff()),
         gte(customers.expiresAt, now),
         lte(customers.expiresAt, expiringBefore),
       )).orderBy(customers.expiresAt).limit(100),
-      db.select({ value: count() }).from(customers).where(and(eq(customers.tenantId, tenantId), eq(customers.status, 'active'))),
-      db.select({ value: count() }).from(customers).where(eq(customers.tenantId, tenantId)),
+      db.select({ value: count() }).from(customers).where(and(
+        eq(customers.tenantId, tenantId),
+        eq(customers.status, 'active'),
+        gte(customers.createdAt, getOfficialRecordsCutoff()),
+      )),
+      db.select({ value: count() }).from(customers).where(and(
+        eq(customers.tenantId, tenantId),
+        gte(customers.createdAt, getOfficialRecordsCutoff()),
+      )),
       db.select({ amount: sum(payments.amount), count: count() }).from(payments).where(and(
         eq(payments.tenantId, tenantId),
         eq(payments.status, 'paid'),

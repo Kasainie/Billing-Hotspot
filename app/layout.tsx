@@ -72,7 +72,7 @@ export default function RootLayout({
       <body className="antialiased">
         {children}
         <AdminPasswordConfirmation />
-        {process.env.NODE_ENV === 'production' && process.env.VERCEL === '1' && <Analytics />}
+        <Analytics />
       </body>
     </html>
   )

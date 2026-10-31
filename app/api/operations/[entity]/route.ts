@@ -8,6 +8,7 @@ import { requireTenantAdmin } from '@/lib/db/tenant-authorization'
 import { enqueueTenantTemplateSms, getTenantTemplateSettings } from '@/lib/message-template-delivery'
 import { normalizeKenyanPhoneInput } from '@/lib/kenyan-phone'
 import { SUPPORT_TICKET_CATEGORIES } from '@/lib/support-tickets'
+import { getOfficialRecordsCutoff } from '@/lib/official-records-cutoff'
 
 const entities = ['leads', 'tickets', 'expenses', 'vouchers', 'equipment', 'tr069', 'invoices'] as const
 type Entity = typeof entities[number]
@@ -57,8 +58,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
   try {
     if (access.entity === 'leads') {
       const [items, totals, plans, sitesList] = await Promise.all([
-        db.select().from(leads).where(eq(leads.tenantId, access.tenantId)).orderBy(desc(leads.createdAt)).limit(500),
-        db.select({ status: leads.status, count: count() }).from(leads).where(eq(leads.tenantId, access.tenantId)).groupBy(leads.status),
+        db.select().from(leads).where(and(eq(leads.tenantId, access.tenantId), gte(leads.createdAt, getOfficialRecordsCutoff()))).orderBy(desc(leads.createdAt)).limit(500),
+        db.select({ status: leads.status, count: count() }).from(leads).where(and(eq(leads.tenantId, access.tenantId), gte(leads.createdAt, getOfficialRecordsCutoff()))).groupBy(leads.status),
         db.select({ id: packages.id, name: packages.name, type: packages.type, rateLimit: packages.rateLimit, monthlyPrice: packages.monthlyPrice, durationSeconds: packages.durationSeconds })
           .from(packages).where(and(eq(packages.tenantId, access.tenantId), eq(packages.active, true), sql`${packages.availability} <> 'off'`)),
         db.select({ id: sites.id, name: sites.name, location: sites.location }).from(sites).where(eq(sites.tenantId, access.tenantId)),
@@ -67,17 +68,17 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
     }
     if (access.entity === 'tickets') {
       const [items, totals, byCategory] = await Promise.all([
-        db.select().from(supportTickets).where(eq(supportTickets.tenantId, access.tenantId)).orderBy(desc(supportTickets.updatedAt)).limit(500),
-        db.select({ status: supportTickets.status, count: count() }).from(supportTickets).where(eq(supportTickets.tenantId, access.tenantId)).groupBy(supportTickets.status),
-        db.select({ category: supportTickets.category, count: count() }).from(supportTickets).where(eq(supportTickets.tenantId, access.tenantId)).groupBy(supportTickets.category),
+        db.select().from(supportTickets).where(and(eq(supportTickets.tenantId, access.tenantId), gte(supportTickets.createdAt, getOfficialRecordsCutoff()))).orderBy(desc(supportTickets.updatedAt)).limit(500),
+        db.select({ status: supportTickets.status, count: count() }).from(supportTickets).where(and(eq(supportTickets.tenantId, access.tenantId), gte(supportTickets.createdAt, getOfficialRecordsCutoff()))).groupBy(supportTickets.status),
+        db.select({ category: supportTickets.category, count: count() }).from(supportTickets).where(and(eq(supportTickets.tenantId, access.tenantId), gte(supportTickets.createdAt, getOfficialRecordsCutoff()))).groupBy(supportTickets.category),
       ])
       return NextResponse.json({ items, totals, byTicketCategory: byCategory })
     }
     if (access.entity === 'expenses') {
       const [items, total, byCategory] = await Promise.all([
-        db.select().from(expenses).where(eq(expenses.tenantId, access.tenantId)).orderBy(desc(expenses.occurredAt)).limit(500),
-        db.select({ amount: sum(expenses.amount), count: count() }).from(expenses).where(eq(expenses.tenantId, access.tenantId)),
-        db.select({ category: expenses.category, amount: sum(expenses.amount), count: count() }).from(expenses).where(eq(expenses.tenantId, access.tenantId)).groupBy(expenses.category),
+        db.select().from(expenses).where(and(eq(expenses.tenantId, access.tenantId), gte(expenses.occurredAt, getOfficialRecordsCutoff()))).orderBy(desc(expenses.occurredAt)).limit(500),
+        db.select({ amount: sum(expenses.amount), count: count() }).from(expenses).where(and(eq(expenses.tenantId, access.tenantId), gte(expenses.occurredAt, getOfficialRecordsCutoff()))),
+        db.select({ category: expenses.category, amount: sum(expenses.amount), count: count() }).from(expenses).where(and(eq(expenses.tenantId, access.tenantId), gte(expenses.occurredAt, getOfficialRecordsCutoff()))).groupBy(expenses.category),
       ])
       return NextResponse.json({ items, total: { amount: Number(total[0]?.amount ?? 0), count: total[0]?.count ?? 0 }, byCategory })
     }
@@ -175,12 +176,18 @@ export async function GET(request: NextRequest, context: { params: Promise<{ ent
         packageId: vouchers.packageId,
         packageName: packages.name,
         username: vouchers.username,
+        password: radcheck.value,
         status: vouchers.status,
         validitySeconds: vouchers.validitySeconds,
         activatedAt: vouchers.activatedAt,
         expiresAt: vouchers.expiresAt,
         createdAt: vouchers.createdAt,
       }).from(vouchers).innerJoin(packages, and(eq(packages.id, vouchers.packageId), eq(packages.tenantId, access.tenantId)))
+        .leftJoin(radcheck, and(
+          eq(radcheck.username, vouchers.username),
+          eq(radcheck.tenantId, access.tenantId),
+          eq(radcheck.attribute, 'Cleartext-Password'),
+        ))
         .where(eq(vouchers.tenantId, access.tenantId)).orderBy(desc(vouchers.createdAt)).limit(500),
       db.select({ status: vouchers.status, count: count() }).from(vouchers).where(eq(vouchers.tenantId, access.tenantId)).groupBy(vouchers.status),
       db.select({ id: packages.id, name: packages.name, rateLimit: packages.rateLimit, monthlyPrice: packages.monthlyPrice, durationSeconds: packages.durationSeconds })

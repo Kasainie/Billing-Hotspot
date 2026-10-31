@@ -424,7 +424,7 @@ export function RouterMonitorDetail({
     void loadRouterSessions()
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadRouterSessions()
-    }, 10_000)
+    }, 1_000)
     return () => window.clearInterval(interval)
   }, [loadRouterSessions, tab])
 

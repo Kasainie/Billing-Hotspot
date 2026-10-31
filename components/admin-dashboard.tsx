@@ -53,6 +53,7 @@ import {
   UserRound,
   Users,
   Wifi,
+  TrendingUp,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -70,9 +71,25 @@ import { StaffManagement } from '@/components/staff-management'
 import { SettingsCenter } from '@/components/settings-center'
 import { parseCsv } from '@/lib/subscriber-csv'
 import { exportTabularReport, type ReportExportFormat } from '@/lib/report-export'
+import { StandaloneAnalytics } from '@/components/standalone-analytics'
+
+async function requestOwnerConfirmation(action: string, recordId: string, payload: unknown) {
+  const response = await fetch('/api/admin-action-confirmation', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action, recordId, payload }),
+  })
+  const result = await response.json() as { ownerEmail?: string; error?: string }
+  if (!response.ok) throw new Error(result.error || 'Unable to send the owner confirmation email.')
+  const ownerEmail = result.ownerEmail || 'the workspace owner'
+  const code = window.prompt(`A confirmation code was sent to ${ownerEmail}. Enter the six-digit code:`)
+  if (!code?.trim()) return null
+  return /^\d{6}$/.test(code.trim()) ? code.trim() : ''
+}
 
 const navigationSections: { label?: string; items: { label: string; icon: LucideIcon; count?: string; children?: { label: string; view: string; icon?: LucideIcon }[] }[] }[] = [
   { items: [{ label: 'Overview', icon: LayoutDashboard }] },
+  { label: 'INSIGHTS', items: [{ label: 'Analytics', icon: TrendingUp }] },
   { label: 'CUSTOMERS', items: [
     { label: 'Subscribers', icon: Users },
     { label: 'Leads', icon: Activity },
@@ -84,6 +101,7 @@ const navigationSections: { label?: string; items: { label: string; icon: Lucide
     { label: 'Portal design', icon: Palette },
     { label: 'Devices', icon: Router, children: [{ label: 'Routers', view: 'Routers', icon: Network }, { label: 'TR-069', view: 'TR-069' }] },
   ] },
+  { label: 'CONFIGURATION', items: [{ label: 'Sites', icon: Globe2 }] },
   { label: 'OPERATIONS', items: [{ label: 'Inventory', icon: Package }] },
   { label: 'FINANCE', items: [
     { label: 'Billing', icon: FileText, children: [{ label: 'Payments', view: 'Payments', icon: CreditCard }, { label: 'Payment settings', view: 'Payment settings', icon: Settings2 }, { label: 'Invoices', view: 'Invoices' }, { label: 'Expenses', view: 'Expenses' }] },
@@ -96,6 +114,7 @@ const crudEntityByPage: Partial<Record<string, 'customers' | 'packages' | 'payme
   Subscribers: 'customers',
   Plans: 'packages',
   Payments: 'payments',
+  Sites: 'sites',
 }
 
 const operationsViewByPage: Partial<Record<string, 'Leads' | 'Ticket list' | 'Ticket analytics' | 'Expenses' | 'Voucher list' | 'Generate vouchers' | 'Voucher analytics' | 'Inventory' | 'Equipment' | 'TR-069' | 'Invoices'>> = {
@@ -230,6 +249,9 @@ export function AdminDashboard() {
   const [dashboardNotice, setDashboardNotice] = useState('')
   const [showAllSites, setShowAllSites] = useState(false)
   const [deletingSiteId, setDeletingSiteId] = useState('')
+  const [editingSiteId, setEditingSiteId] = useState('')
+  const [editingSiteName, setEditingSiteName] = useState('')
+  const [editingSiteLocation, setEditingSiteLocation] = useState('')
   const [dataStatus, setDataStatus] = useState<'loading' | 'live' | 'error'>('loading')
   const [currentTenantId, setCurrentTenantId] = useState('')
   const [currentTenantName, setCurrentTenantName] = useState('Loading workspace…')
@@ -490,6 +512,7 @@ export function AdminDashboard() {
       { id: 'plans', label: 'Plans', detail: 'Manage internet packages', target: 'Plans', type: 'Page' },
       { id: 'payments', label: 'Payments', detail: 'View billing transactions', target: 'Payments', type: 'Page' },
       { id: 'live-sessions', label: 'Live sessions', detail: 'See connected hotspot devices', target: 'Live sessions', type: 'Page' },
+      { id: 'sites', label: 'Sites', detail: 'Configure network site names and locations', target: 'Sites', type: 'Page' },
       { id: 'routers', label: 'Routers', detail: 'Provision network devices', target: 'Routers', type: 'Page' },
       { id: 'portal-design', label: 'Portal design', detail: 'Customize the hotspot portal', target: 'Portal design', type: 'Page' },
       { id: 'payment-settings', label: 'Payment settings', detail: 'Configure payment providers', target: 'Payment settings', type: 'Page' },
@@ -500,7 +523,7 @@ export function AdminDashboard() {
 
     const records: SearchResult[] = [
       ...dashboardData.customers.map((item) => ({ id: `customer-${item.id}`, label: item.name, detail: `Subscriber · ${item.email}`, target: 'Subscribers', type: 'Subscriber' })),
-      ...dashboardData.sites.map((item) => ({ id: `site-${item.id}`, label: item.name, detail: `Site · ${item.location}`, target: 'Overview', type: 'Site' })),
+      ...dashboardData.sites.map((item) => ({ id: `site-${item.id}`, label: item.name, detail: `Site · ${item.location}`, target: 'Sites', type: 'Site' })),
       ...dashboardData.packages.map((item) => ({ id: `package-${item.id}`, label: item.name, detail: `Plan · ${item.downloadMbps}/${item.uploadMbps} Mbps`, target: 'Plans', type: 'Plan' })),
       ...dashboardData.payments.map((item) => ({ id: `payment-${item.id}`, label: item.reference || `Payment ${item.id.slice(0, 8)}`, detail: `Payment · ${item.status} · ${item.amount}`, target: 'Payments', type: 'Payment' })),
     ].filter((item) => `${item.label} ${item.detail}`.toLowerCase().includes(term))
@@ -559,6 +582,9 @@ export function AdminDashboard() {
   function openSearchResult(result: SearchResult) {
     setActiveNav(result.target)
     setSearchOpen(false)
+    if (result.type !== 'Subscriber' && result.type !== 'Plan' && result.type !== 'Payment') {
+      setCrudSearchTerm('')
+    }
     if (result.type === 'Site') {
       setQuery(result.label)
       setShowAllSites(true)
@@ -596,7 +622,13 @@ export function AdminDashboard() {
     setDeletingSiteId(site.id)
     setDashboardNotice('')
     try {
-      const response = await fetch(`/api/sites?id=${encodeURIComponent(site.id)}`, { method: 'DELETE' })
+      const code = await requestOwnerConfirmation('delete_site', site.id, {})
+      if (code === null) return
+      if (!code) throw new Error('Enter the six-digit owner confirmation code.')
+      const response = await fetch(`/api/sites?id=${encodeURIComponent(site.id)}`, {
+        method: 'DELETE',
+        headers: { 'x-admin-email-confirmation': code },
+      })
       const result = await response.json() as { error?: string }
       if (!response.ok) throw new Error(result.error || 'Unable to delete site.')
       setDashboardData((current) => ({
@@ -609,6 +641,60 @@ export function AdminDashboard() {
       window.dispatchEvent(new Event('workspace-data-changed'))
     } catch (error) {
       setDashboardNotice(error instanceof Error ? error.message : 'Unable to delete site.')
+    } finally {
+      setDeletingSiteId('')
+    }
+  }
+  function startRenamingSite(site: typeof displayedSites[number]) {
+    setEditingSiteId(site.id)
+    setEditingSiteName(site.name)
+    setEditingSiteLocation(site.location || '')
+    setDashboardNotice('')
+  }
+  function cancelRenamingSite() {
+    setEditingSiteId('')
+    setEditingSiteName('')
+    setEditingSiteLocation('')
+  }
+  async function saveSiteName() {
+    const name = editingSiteName.trim()
+    const location = editingSiteLocation.trim()
+    if (!name) {
+      setDashboardNotice('Enter a site name.')
+      return
+    }
+    if (!location) {
+      setDashboardNotice('Enter a site location.')
+      return
+    }
+    setDeletingSiteId(editingSiteId)
+    setDashboardNotice('')
+    try {
+      const code = await requestOwnerConfirmation('rename_site', editingSiteId, { name, location })
+      if (code === null) return
+      if (!code) throw new Error('Enter the six-digit owner confirmation code.')
+      const response = await fetch(`/api/sites?id=${encodeURIComponent(editingSiteId)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', 'x-admin-email-confirmation': code },
+        body: JSON.stringify({ name, location }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to rename site.')
+      await fetch('/api/tenants/current', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      }).catch(() => undefined)
+      setDashboardData((current) => ({
+        ...current,
+        sites: current.sites.map((site) => site.id === editingSiteId ? { ...site, name, location } : site),
+      }))
+      setCurrentTenantName(name)
+      cancelRenamingSite()
+      setDashboardNotice(`Site renamed to "${name}".`)
+      window.dispatchEvent(new Event('workspace-data-changed'))
+    } catch (error) {
+      setDashboardNotice(error instanceof Error ? error.message : 'Unable to rename site.')
     } finally {
       setDeletingSiteId('')
     }
@@ -695,10 +781,9 @@ export function AdminDashboard() {
         <div className="workspace-picker">
           <select aria-label="Active workspace" value={currentTenantId} onChange={(event) => switchWorkspace(event.target.value)}>
             {currentTenantId && <option value={currentTenantId}>{currentTenantName}</option>}
-            {memberships.filter((membership) => membership.id !== currentTenantId).map((membership) => <option key={membership.id} value={membership.id}>{membership.name}</option>)}
           </select>
         </div>
-        <nav className="navigation-list" aria-label="Main navigation">{navigationSections.map((section) => <div className="nav-section" key={section.label || 'overview'}>{section.label && <p className="nav-label">{section.label}</p>}{section.items.map(({ label, icon: Icon, count, children }) => { const itemCount = count ?? (label === 'Subscribers' && dataStatus === 'live' ? dashboardData.summary.totalCustomers.toLocaleString('en-KE') : label === 'Live sessions' && onlineClientCount !== null ? onlineClientCount.toLocaleString('en-KE') : null); return <div className="nav-group" key={label}><button className={`nav-item ${activeNav === label ? 'active' : ''}`} aria-label={label} title={sidebarCollapsed ? label : undefined} aria-expanded={children ? expandedNav.includes(label) : undefined} onClick={() => { if (children) { if (sidebarCollapsed) { setSidebarCollapsed(false); setExpandedNav((current) => current.includes(label) ? current : [...current, label]); return } setExpandedNav((current) => current.includes(label) ? current.filter((group) => group !== label) : [...current, label]); return } setActiveNav(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{itemCount !== null && itemCount !== undefined && <b aria-label={label === 'Live sessions' ? `${itemCount} clients online` : label === 'Subscribers' ? `${itemCount} subscribers total` : undefined}>{itemCount}</b>}{children && (expandedNav.includes(label) ? <ChevronDown className="nav-chevron" size={15} /> : <ChevronRight className="nav-chevron" size={15} />)}</button>{children && expandedNav.includes(label) && <div className="nav-children">{children.map(({ label: childLabel, view, icon: ChildIcon }) => <button key={view} className={`nav-child ${activeNav === view ? 'active' : ''}`} onClick={() => { setActiveNav(view); setMobileOpen(false) }}>{ChildIcon ? <ChildIcon size={15} /> : <span className="nav-child-dot" />}<span>{childLabel}</span></button>)}</div>}</div> })}</div>)}{isPlatformAdmin && <a className="nav-item platform-admin-nav-link" href="/platform-admin"><ShieldCheck size={17} /><span>Platform admin</span></a>}</nav>
+        <nav className="navigation-list" aria-label="Main navigation">{navigationSections.map((section) => <div className="nav-section" key={section.label || 'overview'}>{section.label && <p className="nav-label">{section.label}</p>}{section.items.map(({ label, icon: Icon, count, children }) => { const itemCount = count ?? (label === 'Subscribers' && dataStatus === 'live' ? dashboardData.summary.totalCustomers.toLocaleString('en-KE') : label === 'Live sessions' && onlineClientCount !== null ? onlineClientCount.toLocaleString('en-KE') : null); return <div className="nav-group" key={label}><button className={`nav-item ${activeNav === label ? 'active' : ''}`} aria-label={label} title={sidebarCollapsed ? label : undefined} aria-expanded={children ? expandedNav.includes(label) : undefined} onClick={() => { if (children) { if (sidebarCollapsed) { setSidebarCollapsed(false); setExpandedNav((current) => current.includes(label) ? current : [...current, label]); return } setExpandedNav((current) => current.includes(label) ? current.filter((group) => group !== label) : [...current, label]); return } setCrudSearchTerm(''); setActiveNav(label); setMobileOpen(false) }}><Icon size={17} /><span>{label}</span>{itemCount !== null && itemCount !== undefined && <b aria-label={label === 'Live sessions' ? `${itemCount} clients online` : label === 'Subscribers' ? `${itemCount} subscribers total` : undefined}>{itemCount}</b>}{children && (expandedNav.includes(label) ? <ChevronDown className="nav-chevron" size={15} /> : <ChevronRight className="nav-chevron" size={15} />)}</button>{children && expandedNav.includes(label) && <div className="nav-children">{children.map(({ label: childLabel, view, icon: ChildIcon }) => <button key={view} className={`nav-child ${activeNav === view ? 'active' : ''}`} onClick={() => { setCrudSearchTerm(''); setActiveNav(view); setMobileOpen(false) }}>{ChildIcon ? <ChildIcon size={15} /> : <span className="nav-child-dot" />}<span>{childLabel}</span></button>)}</div>}</div> })}</div>)}{isPlatformAdmin && <a className="nav-item platform-admin-nav-link" href="/platform-admin"><ShieldCheck size={17} /><span>Platform admin</span></a>}</nav>
         <div className="sidebar-footer"><div className="support-card"><div className="support-icon"><Cable size={16} /></div><strong>Need help?</strong><span>Check the integration guide</span><a href="#activity">Open docs <ArrowUpRight size={12} /></a></div><div className="user-row"><div className="avatar">{currentUser.slice(0, 2).toUpperCase() || 'U'}</div><div><strong>{currentUser || 'Workspace user'}</strong><span>{currentTenantName}</span></div><button type="button" className="workspace-logout" onClick={signOut}>Sign out</button></div></div>
       </aside>
 
@@ -757,7 +842,7 @@ export function AdminDashboard() {
           </div>
         </div></header>
         <div className="page-wrap" data-dashboard-network={dashboardSections.network} data-dashboard-activity={dashboardSections.activity} data-dashboard-operations={dashboardSections.operations}>
-          {activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions onOnlineCountChange={setOnlineClientCount} onOpenSubscriber={(customerId) => { setCrudSearchTerm(customerId); setSubscriberProfileTargetId(customerId); setActiveNav('Subscribers') }} /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Settings' ? <SettingsCenter onNavigate={setActiveNav} onProfileNameChange={setCurrentUser} /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'Communications' ? <CommunicationsCenter /> : activeNav === 'Payments' ? <PaymentReconciliation /> : activeNav === 'Staff' ? <StaffManagement currentRole={memberships.find((membership) => membership.id === currentTenantId)?.role || ''} currentEmail={currentEmail} /> : activeNav === 'Profile' ? <section className="profile-page"><div className="page-heading"><div><div className="live-label"><StatusDot /> ACCOUNT</div><h1>Your profile</h1><p>Your account identity and current workspace access.</p></div></div><div className="profile-page-grid"><article className="panel profile-page-card"><span>ACCOUNT</span><div className="profile-page-identity"><div className="profile-avatar">{userInitials}</div><div><h2>{currentUser || 'Workspace user'}</h2><p>{currentEmail || 'Email unavailable'}</p></div></div><dl><div><dt>Name</dt><dd>{currentUser || 'Not available'}</dd></div><div><dt>Email</dt><dd>{currentEmail || 'Not available'}</dd></div></dl></article><article className="panel profile-page-card"><span>WORKSPACE ACCESS</span><h2>{currentTenantName}</h2><dl><div><dt>Workspace</dt><dd>{currentTenantName}</dd></div><div><dt>Your role</dt><dd>{memberships.find((membership) => membership.id === currentTenantId)?.role || (isPlatformAdmin ? 'Platform administrator' : 'Workspace member')}</dd></div><div><dt>Available workspaces</dt><dd>{memberships.length}</dd></div></dl></article></div></section> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={crudSearchTerm} initialExpandedId={activeNav === 'Subscribers' ? subscriberProfileTargetId : ''} onInitialProfileOpened={() => setSubscriberProfileTargetId('')} /> : <ModulePanel title={activeNav} /> : null}
+          {activeNav === 'Analytics' ? <StandaloneAnalytics /> : activeNav === 'Routers' ? <RouterManagement /> : activeNav === 'Live sessions' ? <LiveHotspotSessions onOnlineCountChange={setOnlineClientCount} onOpenSubscriber={(customerId) => { setCrudSearchTerm(customerId); setSubscriberProfileTargetId(customerId); setActiveNav('Subscribers') }} /> : activeNav === 'Portal design' ? <PortalTemplatePanel /> : activeNav === 'Settings' ? <SettingsCenter onNavigate={setActiveNav} onProfileNameChange={setCurrentUser} /> : activeNav === 'Payment settings' ? <PaymentSettings /> : activeNav === 'Communications' ? <CommunicationsCenter /> : activeNav === 'Payments' ? <PaymentReconciliation /> : activeNav === 'Staff' ? <StaffManagement currentRole={memberships.find((membership) => membership.id === currentTenantId)?.role || ''} currentEmail={currentEmail} /> : activeNav === 'Profile' ? <section className="profile-page"><div className="page-heading"><div><div className="live-label"><StatusDot /> ACCOUNT</div><h1>Your profile</h1><p>Your account identity and current workspace access.</p></div></div><div className="profile-page-grid"><article className="panel profile-page-card"><span>ACCOUNT</span><div className="profile-page-identity"><div className="profile-avatar">{userInitials}</div><div><h2>{currentUser || 'Workspace user'}</h2><p>{currentEmail || 'Email unavailable'}</p></div></div><dl><div><dt>Name</dt><dd>{currentUser || 'Not available'}</dd></div><div><dt>Email</dt><dd>{currentEmail || 'Not available'}</dd></div></dl></article><article className="panel profile-page-card"><span>WORKSPACE ACCESS</span><h2>{currentTenantName}</h2><dl><div><dt>Workspace</dt><dd>{currentTenantName}</dd></div><div><dt>Your role</dt><dd>{memberships.find((membership) => membership.id === currentTenantId)?.role || (isPlatformAdmin ? 'Platform administrator' : 'Workspace member')}</dd></div><div><dt>Available workspaces</dt><dd>{memberships.length}</dd></div></dl></article></div></section> : operationsViewByPage[activeNav] ? <OperationsWorkspace view={operationsViewByPage[activeNav]!} /> : activeNav !== 'Overview' ? crudEntityByPage[activeNav] === 'packages' ? <PackagePanel initialFilter={crudSearchTerm} /> : crudEntityByPage[activeNav] ? <CrudPanel entity={crudEntityByPage[activeNav]!} initialFilter={activeNav === 'Subscribers' || activeNav === 'Payments' || activeNav === 'Plans' ? crudSearchTerm : ''} initialExpandedId={activeNav === 'Subscribers' ? subscriberProfileTargetId : ''} onInitialProfileOpened={() => setSubscriberProfileTargetId('')} /> : <ModulePanel title={activeNav} /> : null}
           {activeNav === 'Overview' ? <>
           <div className="page-heading"><div><div className="live-label"><StatusDot tone={networkStatusTone} /> WORKSPACE OVERVIEW</div><h1>{timeGreeting || 'Welcome'}, {currentUser.trim().split(/\s+/)[0] || 'there'}.</h1><p>Workspace records and billing activity for your network.</p></div><div className="heading-actions"><button ref={customizeButtonRef} type="button" className="outline-button" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={openDashboardCustomization}><SlidersHorizontal size={15} /> Customize</button><select className="outline-button report-export-format" aria-label="Workspace report export format" value={dashboardExportFormat} onChange={(event) => setDashboardExportFormat(event.target.value as ReportExportFormat)} disabled={exportingDashboardReport}><option value="csv">CSV</option><option value="excel">Excel (.xlsx)</option><option value="pdf">PDF</option></select><button type="button" className="primary-button" onClick={() => void exportDashboardReport()} disabled={exportingDashboardReport}><ArrowDownRight size={15} /> {exportingDashboardReport ? 'Exporting…' : 'Export report'}</button></div></div>
           {dashboardNotice && <p className="dashboard-notice" role="status">{dashboardNotice}<button type="button" aria-label="Dismiss message" onClick={() => setDashboardNotice('')}><X size={13} /></button></p>}
@@ -776,8 +861,17 @@ export function AdminDashboard() {
           <div className="section-toolbar"><div><h2>Network overview</h2><p>Review configured sites and payment totals.</p></div><div className="toolbar-controls"><select value={siteFilter} onChange={(event) => setSiteFilter(event.target.value)} aria-label="Filter sites"><option>All sites</option>{displayedSites.map((site) => <option key={site.name}>{site.name}</option>)}</select><select value={range} onChange={(event) => setRange(event.target.value)} aria-label="Select time range"><option>30 days</option><option>7 days</option><option>24 hours</option></select></div></div>
           {dashboardSections.network && <div className="overview-grid">
             <section className="panel site-panel">
-              <div className="panel-heading"><div><h3>Configured sites</h3><span>{dataStatus === 'live' ? `${dashboardData.sites.length} sites in this workspace` : 'Workspace site records'}</span></div><button type="button" className="text-button" onClick={() => setShowAllSites((value) => !value)} disabled={filteredSites.length <= 3}>{showAllSites ? 'Show less' : 'View all'} <ArrowUpRight size={13} /></button></div>
-              {dataStatus === 'loading' ? <p className="header-empty">Loading site records…</p> : dataStatus === 'error' ? <p className="header-empty">Site records are unavailable.</p> : visibleSites.length ? visibleSites.map((site) => <div className="site-row" key={site.id}><div className={`site-icon site-${site.color}`}><Globe2 size={17} /></div><div className="site-info"><strong>{site.name}</strong><span>{site.location || site.code}</span></div><div className="site-stat"><strong>{formatDashboardValue(site.customers)}</strong><span>subscribers</span></div><div className="health"><div><StatusDot tone={site.status.toLowerCase() === 'active' ? 'green' : 'amber'} /></div><span>{site.status}</span></div><button type="button" className="text-button danger-text" aria-label={`Delete site ${site.name}`} title={`Delete site ${site.name}`} disabled={deletingSiteId !== ''} onClick={() => void deleteSite(site)}><Trash2 size={14} />{deletingSiteId === site.id ? 'Deleting…' : 'Delete'}</button></div>) : <p className="header-empty">{siteFilter === 'All sites' ? 'No sites have been added to this workspace.' : 'No sites match this filter.'}</p>}
+              <div className="panel-heading"><div><h3>Configured sites</h3><span>{dataStatus === 'live' ? `${dashboardData.sites.length} sites in this workspace` : 'Workspace site records'}</span></div><button type="button" className="text-button" onClick={() => setActiveNav('Sites')}>View all <ArrowUpRight size={13} /></button></div>
+              {dataStatus === 'loading' ? <p className="header-empty">Loading site records…</p> : dataStatus === 'error' ? <p className="header-empty">Site records are unavailable.</p> : visibleSites.length ? visibleSites.map((site) => editingSiteId === site.id ? <div className="site-row site-edit-row" key={site.id}>
+                <div className={`site-icon site-${site.color}`}><Globe2 size={17} /></div>
+                <div className="site-info site-edit-fields">
+                  <input value={editingSiteName} maxLength={120} onChange={(event) => setEditingSiteName(event.target.value)} aria-label="Site name" />
+                  <input value={editingSiteLocation} maxLength={160} onChange={(event) => setEditingSiteLocation(event.target.value)} aria-label="Site location" />
+                </div>
+                <div className="site-stat"><strong>{formatDashboardValue(site.customers)}</strong><span>subscribers</span></div>
+                <div className="health"><StatusDot tone={site.status.toLowerCase() === 'active' ? 'green' : 'amber'} /><span>{site.status}</span></div>
+                <div className="site-edit-actions"><button type="button" className="text-button" disabled={deletingSiteId !== ''} onClick={() => void saveSiteName()}>{deletingSiteId === site.id ? 'Saving…' : 'Save'}</button><button type="button" className="text-button danger-text" disabled={deletingSiteId !== ''} onClick={cancelRenamingSite}>Cancel</button></div>
+              </div> : <div className="site-row" key={site.id}><div className={`site-icon site-${site.color}`}><Globe2 size={17} /></div><div className="site-info"><strong>{site.name}</strong><span>{site.location || site.code}</span></div><div className="site-stat"><strong>{formatDashboardValue(site.customers)}</strong><span>subscribers</span></div><div className="health"><div><StatusDot tone={site.status.toLowerCase() === 'active' ? 'green' : 'amber'} /></div><span>{site.status}</span></div><div className="site-row-actions"><button type="button" className="text-button" aria-label={`Rename site ${site.name}`} title={`Rename site ${site.name}`} disabled={deletingSiteId !== '' || editingSiteId !== ''} onClick={() => startRenamingSite(site)}>Rename</button><button type="button" className="text-button danger-text" aria-label={`Delete site ${site.name}`} title={`Delete site ${site.name}`} disabled={deletingSiteId !== ''} onClick={() => void deleteSite(site)}><Trash2 size={14} />{deletingSiteId === site.id ? 'Deleting…' : 'Delete'}</button></div></div>) : <p className="header-empty">{siteFilter === 'All sites' ? 'No sites have been added to this workspace.' : 'No sites match this filter.'}</p>}
             </section>
             <section className="panel revenue-panel">
               <div className="panel-heading"><div><h3>Payments received</h3><span>Confirmed payments · {range}</span></div></div>
@@ -1513,7 +1607,13 @@ function RouterManagement() {
   }
 
   const removeRouterMonitor = async (router: RouterMonitorRecord) => {
-    const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/monitoring`, { method: 'DELETE' })
+    const code = await requestOwnerConfirmation('delete_router', router.id, {})
+    if (code === null) return
+    if (!code) throw new Error('Enter the six-digit owner confirmation code.')
+    const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/monitoring`, {
+      method: 'DELETE',
+      headers: { 'x-admin-email-confirmation': code },
+    })
     const result = response.status === 204 ? null : await response.json() as { error?: string }
     if (!response.ok) throw new Error(result?.error || 'Unable to delete router monitoring.')
     const remainingRouters = routers.filter((item) => item.id !== router.id)
@@ -1535,6 +1635,32 @@ function RouterManagement() {
       await removeRouterMonitor(router)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to delete router monitoring.')
+    }
+  }
+
+  const renameRouterMonitor = async (router: RouterMonitorRecord) => {
+    const name = window.prompt(`Rename router "${router.routerName}"`, router.routerName)?.trim()
+    if (!name || name === router.routerName) return
+    if (!/^[a-zA-Z0-9 _-]{1,48}$/.test(name)) {
+      setError('Enter a valid router name using 1-48 letters, numbers, spaces, hyphen, or underscore.')
+      return
+    }
+    setError('')
+    try {
+      const code = await requestOwnerConfirmation('rename_router', router.id, { name })
+      if (code === null) return
+      if (!code) throw new Error('Enter the six-digit owner confirmation code.')
+      const response = await fetch(`/api/routers/${encodeURIComponent(router.id)}/monitoring`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', 'x-admin-email-confirmation': code },
+        body: JSON.stringify({ name }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to rename router.')
+      await load()
+      window.dispatchEvent(new Event('workspace-data-changed'))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to rename router.')
     }
   }
 
@@ -1671,6 +1797,7 @@ function RouterManagement() {
           : <button type="button" role="menuitem" disabled>Open web console · {routerMenu.router.status === 'offline' ? 'router offline' : routerMenu.router.webEnabled === false ? 'disabled' : 'VPN details not reported'}</button>}
         <button type="button" role="menuitem" disabled={scriptBusy} onClick={() => { closeRouterMenu(); void generateMonitorScript(routerMenu.router) }}>{routerMenu.router.monitored ? 'Regenerate monitor script' : 'Set up monitoring'}</button>
         <button type="button" role="menuitem" onClick={() => { closeRouterMenu(); beginReprovision(routerMenu.router) }}>Reprovision router</button>
+        <button type="button" role="menuitem" onClick={() => { closeRouterMenu(); void renameRouterMonitor(routerMenu.router) }}>Rename router…</button>
         <button type="button" role="menuitem" className="router-menu-delete" onClick={() => { closeRouterMenu(); void confirmRemoveRouter(routerMenu.router) }}>Delete router…</button>
       </div>,
       document.body,
@@ -2134,6 +2261,13 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
   const [subscriberPlanId, setSubscriberPlanId] = useState('')
   const [installationPaymentAmount, setInstallationPaymentAmount] = useState('')
   const [installationPaymentMethod, setInstallationPaymentMethod] = useState<'M-Pesa' | 'Cash'>('M-Pesa')
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState('M-Pesa')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentPaidAt, setPaymentPaidAt] = useState(() => {
+    const now = new Date()
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+  })
   const [radiusUsername, setRadiusUsername] = useState('')
   const [radiusPassword, setRadiusPassword] = useState('')
   const [confirmRadiusPassword, setConfirmRadiusPassword] = useState('')
@@ -2144,6 +2278,9 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
   const [messageIsError, setMessageIsError] = useState(false)
   const [editingExpiryId, setEditingExpiryId] = useState('')
   const [expiryInput, setExpiryInput] = useState('')
+  const [editingSiteId, setEditingSiteId] = useState('')
+  const [editingSiteName, setEditingSiteName] = useState('')
+  const [editingSiteLocation, setEditingSiteLocation] = useState('')
   const [detailsLoadingId, setDetailsLoadingId] = useState('')
   const [expandedDetailsId, setExpandedDetailsId] = useState('')
   const [subscriberDetails, setSubscriberDetails] = useState<SubscriberProfileData | null>(null)
@@ -2159,7 +2296,7 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
   const [sendingSmsId, setSendingSmsId] = useState('')
   const [showSubscriberPassword, setShowSubscriberPassword] = useState(false)
   const [copiedCredential, setCopiedCredential] = useState('')
-  const labels = { sites: 'Routers', customers: 'Subscribers', packages: 'Plans', payments: 'Payments' }
+  const labels = { sites: 'Sites', customers: 'Subscribers', packages: 'Plans', payments: 'Payments' }
   const toggleSubscriberForm = () => {
     if (subscriberFormOpen) {
       setRadiusPassword('')
@@ -2605,7 +2742,13 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
     }
   }
   const create = async () => {
-    if (!name.trim()) { setMessageIsError(true); return setMessage('Enter the subscriber name.') }
+    if (entity !== 'customers' && entity !== 'payments' && !name.trim()) { setMessageIsError(true); return setMessage(`Enter the ${labels[entity].toLowerCase()} name.`) }
+    if (entity === 'payments') {
+      const amount = Number(paymentAmount)
+      if (!Number.isInteger(amount) || amount <= 0) { setMessageIsError(true); return setMessage('Payment amount must be a positive whole number.') }
+      if (!paymentMethod.trim()) { setMessageIsError(true); return setMessage('Choose a payment method.') }
+      if (!paymentPaidAt || !Number.isFinite(new Date(paymentPaidAt).getTime())) { setMessageIsError(true); return setMessage('Choose the date and time the payment was paid.') }
+    }
     if (entity === 'customers' && (!radiusUsername.trim() || !radiusPassword)) { setMessageIsError(true); return setMessage('Enter a RADIUS username and password.') }
     if (entity === 'customers' && !subscriberPlanId) { setMessageIsError(true); return setMessage('Choose a service plan.') }
     if (entity === 'customers' && installationPaymentAmount.trim()) {
@@ -2637,7 +2780,13 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
         }
         : entity === 'packages'
           ? { name, downloadMbps: 20, uploadMbps: 10, monthlyPrice: 1800 }
-          : { amount: 1800, method: detail || 'Mobile Money', reference: `PAY-${Date.now()}` }
+            : {
+              amount: Number(paymentAmount),
+              method: paymentMethod,
+              reference: paymentReference.trim() || `PAY-${Date.now()}`,
+              status: 'paid',
+              paidAt: new Date(paymentPaidAt).toISOString(),
+            }
     try {
       const response = await fetch(`/api/${entity}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
       if (!response.ok) {
@@ -2649,6 +2798,13 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
         ? await response.json() as { accountNumber?: number | string }
         : null
       setName(''); setDetail(''); setSubscriberPhone(''); setSubscriberLocation(''); setSubscriberSiteId(''); setSubscriberPlanId(''); setInstallationPaymentAmount(''); setInstallationPaymentMethod('M-Pesa'); setRadiusUsername(''); setRadiusPassword(''); setConfirmRadiusPassword('')
+      if (entity === 'payments') {
+        setPaymentAmount('')
+        setPaymentMethod('M-Pesa')
+        setPaymentReference('')
+        const now = new Date()
+        setPaymentPaidAt(new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 16))
+      }
       setShowRadiusPassword(false)
       if (entity === 'customers') setSubscriberFormOpen(false)
       setMessage(entity === 'customers'
@@ -2673,7 +2829,16 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
     setMessageIsError(false)
     setSubscriberDeleteError('')
     try {
-      const response = await fetch(`/api/${entity}?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      let code: string | null = null
+      if (entity === 'sites') {
+        code = await requestOwnerConfirmation('delete_site', id, {})
+        if (code === null) return false
+        if (!code) throw new Error('Enter the six-digit owner confirmation code.')
+      }
+      const response = await fetch(`/api/${entity}?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        ...(entity === 'sites' ? { headers: { 'x-admin-email-confirmation': code || '' } } : {}),
+      })
       const result = await response.json() as { error?: string }
       if (!response.ok) throw new Error(result.error || 'Unable to delete record.')
       await load()
@@ -2731,6 +2896,62 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
       setSaving(false)
     }
   }
+  const startRenamingSite = (row: Record<string, unknown>) => {
+    setEditingSiteId(String(row.id))
+    setEditingSiteName(String(row.name || row.location || ''))
+    setEditingSiteLocation(String(row.location || ''))
+    setMessage('')
+    setMessageIsError(false)
+  }
+  const cancelRenamingSite = () => {
+    setEditingSiteId('')
+    setEditingSiteName('')
+    setEditingSiteLocation('')
+  }
+  const saveRenamedSite = async () => {
+    if (!editingSiteName.trim()) {
+      setMessageIsError(true)
+      setMessage('Enter a site name.')
+      return
+    }
+    if (!editingSiteLocation.trim()) {
+      setMessageIsError(true)
+      setMessage('Enter a site location.')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    setMessageIsError(false)
+    try {
+      const name = editingSiteName.trim()
+      const location = editingSiteLocation.trim()
+      const code = await requestOwnerConfirmation('rename_site', editingSiteId, { name, location })
+      if (code === null) return
+      if (!code) throw new Error('Enter the six-digit owner confirmation code.')
+      const response = await fetch(`/api/sites?id=${encodeURIComponent(editingSiteId)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', 'x-admin-email-confirmation': code },
+        body: JSON.stringify({ name, location }),
+      })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error || 'Unable to rename site.')
+      await fetch('/api/tenants/current', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: editingSiteName.trim() }),
+      }).catch(() => undefined)
+      cancelRenamingSite()
+      setMessage('Site name and location updated.')
+      window.dispatchEvent(new Event('workspace-data-changed'))
+      await load()
+      window.location.reload()
+    } catch (reason) {
+      setMessageIsError(true)
+      setMessage(reason instanceof Error ? reason.message : 'Unable to rename site.')
+    } finally {
+      setSaving(false)
+    }
+  }
   const selectedSubscriberPlan = subscriberPlans.find((plan) => plan.id === subscriberPlanId)
   return <section className={`crud-workspace${entity === 'customers' ? ' subscriber-workspace' : ''}`}><div className="page-heading"><div><div className="live-label"><StatusDot /> LIVE DATA</div><h1>{labels[entity]}</h1><p>{entity === 'customers' ? 'Manage customer contact details, PPPoE and Wi-Fi logins, service plans, and account access.' : 'Manage records persisted in Supabase.'}</p></div>{entity === 'customers' ? <div className="subscriber-data-actions">
     <input ref={subscriberImportInput} type="file" accept=".csv,text/csv" aria-label="Choose subscriber CSV file" className="subscriber-import-input" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importSubscribers(file) }} />
@@ -2738,7 +2959,7 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
     <button className="outline-button" type="button" onClick={() => void exportSubscribers()} disabled={saving}><Download size={14} /> {saving ? 'Exporting…' : 'Export subscribers'}</button>
     <button className="outline-button" type="button" onClick={() => subscriberImportInput.current?.click()} disabled={saving || subscriberPlans.length === 0} title={subscriberPlansError || undefined}><Upload size={14} /> {saving ? 'Importing…' : 'Import CSV'}</button>
     <button className="primary-button" type="button" onClick={toggleSubscriberForm} disabled={saving}>{subscriberFormOpen ? 'Close form' : 'Add subscriber'}</button>
-  </div> : <button className="primary-button" type="button" onClick={() => void create()} disabled={saving}>{saving ? 'Saving...' : 'Add record'}</button>}</div>
+  </div> : <button className="primary-button" type="button" onClick={() => entity === 'payments' ? document.getElementById('payment-create-form')?.querySelector<HTMLInputElement>('input')?.focus() : void create()} disabled={saving}>{saving ? 'Saving...' : entity === 'payments' ? 'Add payment' : 'Add record'}</button>}</div>
     {entity === 'customers' && <div className="subscriber-info-card"><span className="subscriber-info-icon" aria-hidden="true">i</span><p><strong>Account access</strong> New subscribers start suspended for safety. Set an expiry date and choose <strong>Confirm activation</strong> before they can connect. You can suspend or renew accounts at any time.</p></div>}
     {entity === 'customers' && <p className="subscriber-import-help">Import a CSV with Name, Email, Plan or Plan ID, RADIUS Username, and RADIUS Password columns. Location and Network Site are optional; site values can be a site name or ID. Account numbers are generated automatically. Exported CSVs leave passwords blank for your security; add a 12–128 character password to each row before importing. Imports are limited to 200 records at a time, and new accounts stay suspended.</p>}
     {entity === 'customers' && subscriberImportResult && subscriberImportResult.failedCount > 0 && <div className="subscriber-import-report" role="status"><strong>Import row results</strong><ul>{subscriberImportResult.failures.map((failure) => <li key={`${failure.row}-${failure.reason}`}>Row {failure.row}: {failure.reason}</li>)}</ul>{subscriberImportResult.failedCount > subscriberImportResult.failures.length && <small>Showing the first {subscriberImportResult.failures.length} of {subscriberImportResult.failedCount} failed rows.</small>}</div>}
@@ -2760,7 +2981,14 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
       </div>
       {message && <p className={`subscriber-form-message ${messageIsError ? 'is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}
       <div className="subscriber-form-footer"><span><strong aria-hidden="true">*</strong> Fields marked * are required</span><button className="primary-button" type="submit" disabled={saving || subscriberPlans.length === 0}>{saving ? 'Creating subscriber…' : 'Create subscriber account'}</button></div>
-    </form> : null) : <div className="crud-form"><input value={name} onChange={(event) => setName(event.target.value)} placeholder={entity === 'payments' ? 'Amount or payment label' : `${labels[entity]} name`} aria-label="Record name" /><input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder={entity === 'sites' ? 'Location' : 'Method or detail'} aria-label="Record detail" /><button className="outline-button" onClick={() => void create()} disabled={saving}>Create</button>{message && <span className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</span>}</div>}
+    </form> : null) : entity === 'payments' ? <form id="payment-create-form" className="crud-form" onSubmit={(event) => { event.preventDefault(); void create() }}>
+      <label><span className="subscriber-field-label">Amount (KSh)</span><input required type="number" min="1" step="1" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="e.g. 1800" aria-label="Payment amount" /></label>
+      <label><span className="subscriber-field-label">Payment method</span><select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)} aria-label="Payment method"><option value="M-Pesa">M-Pesa</option><option value="Cash">Cash</option><option value="Bank transfer">Bank transfer</option><option value="Mobile Money">Mobile Money</option></select></label>
+      <label><span className="subscriber-field-label">Reference</span><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} placeholder="Receipt or transaction ID" aria-label="Payment reference" /></label>
+      <label><span className="subscriber-field-label">Paid date and time</span><input required type="datetime-local" value={paymentPaidAt} max={new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 16)} onChange={(event) => setPaymentPaidAt(event.target.value)} aria-label="Payment paid date and time" /></label>
+      <button className="outline-button" type="submit" disabled={saving}>{saving ? 'Saving...' : 'Create payment'}</button>
+      {message && <span className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</span>}
+    </form> : <div className="crud-form"><input value={name} onChange={(event) => setName(event.target.value)} placeholder={`${labels[entity]} name`} aria-label="Record name" /><input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder={entity === 'sites' ? 'Location' : 'Method or detail'} aria-label="Record detail" /><button className="outline-button" onClick={() => void create()} disabled={saving}>Create</button>{message && <span className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</span>}</div>}
     {entity === 'customers' && !subscriberFormOpen && message && <p className={`subscriber-flash-message ${messageIsError ? 'is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}
     {entity === 'customers' && <div className="subscriber-location-segment panel"><label htmlFor="subscriber-location-filter">Segment subscribers by location</label><select id="subscriber-location-filter" value={subscriberLocationFilter} onChange={(event) => setSubscriberLocationFilter(event.target.value)}><option value="">All locations</option>{subscriberLocationOptions.map((location) => <option key={location} value={location}>{location}</option>)}<option value="__unassigned__">Location not set</option></select></div>}
     <div className="panel crud-table"><div className="panel-heading"><div><h3>{entity === 'customers' ? 'Subscriber accounts' : 'Records'}</h3><span>{recordFilter || subscriberTypeFilter !== 'All' || subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberLocationFilter || subscriberCreatedFrom || subscriberCreatedTo ? `${filteredRows.length} matching · ${rows.length} total` : `${rows.length} loaded from Supabase`}</span></div><div className="crud-table-tools">{entity === 'customers' && <div className="subscriber-type-filters" role="group" aria-label="Filter subscribers by connection type">{(['All', 'Hotspot', 'PPPoE', 'Bindings'] as const).map((filter) => <button key={filter} type="button" aria-pressed={subscriberTypeFilter === filter} className={subscriberTypeFilter === filter ? 'active' : ''} onClick={() => setSubscriberTypeFilter(filter)}>{filter}<span>{subscriberTypeCounts[filter]}</span></button>)}</div>}{entity === 'customers' && <div className="subscriber-filter-control"><button className={`outline-button subscriber-filter-trigger${subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberCreatedFrom || subscriberCreatedTo ? ' has-filters' : ''}`} type="button" aria-haspopup="dialog" aria-expanded={subscriberFilterMenuOpen} onClick={() => { setSubscriberSortMenuOpen(false); setSubscriberFilterMenuOpen((open) => !open) }}><SlidersHorizontal size={15} />Filters{Boolean(subscriberAdvancedFilters.length || subscriberRouterFilter || subscriberCreatedFrom || subscriberCreatedTo) && <span>{subscriberAdvancedFilters.length + Number(Boolean(subscriberRouterFilter)) + Number(Boolean(subscriberCreatedFrom || subscriberCreatedTo))}</span>}</button>{subscriberFilterMenuOpen && <section className="subscriber-filter-menu" role="dialog" aria-label="Subscriber filters"><div className="subscriber-filter-menu-heading"><h4>Filters</h4><button type="button" onClick={() => { setSubscriberAdvancedFilters([]); setSubscriberRouterFilter(''); setSubscriberCreatedFrom(''); setSubscriberCreatedTo('') }}>Reset</button></div><p>Select one or more — all chosen filters must match.</p><div className="subscriber-filter-chips">{subscriberAdvancedFilterOptions.map((option) => <button key={option.value} type="button" aria-pressed={subscriberAdvancedFilters.includes(option.value)} className={subscriberAdvancedFilters.includes(option.value) ? 'selected' : ''} onClick={() => setSubscriberAdvancedFilters((current) => current.includes(option.value) ? current.filter((filter) => filter !== option.value) : [...current, option.value])}>{option.label}</button>)}</div><label className="subscriber-filter-field">MikroTik / Router<select value={subscriberRouterFilter} onChange={(event) => setSubscriberRouterFilter(event.target.value)}><option value="">All routers</option>{subscriberRouterOptions.map((router) => <option key={router} value={router}>{router}</option>)}</select></label><fieldset className="subscriber-filter-date-range"><legend>Created between</legend><label><span>From</span><input type="date" aria-label="Created from date" value={subscriberCreatedFrom} max={subscriberCreatedTo || undefined} onChange={(event) => setSubscriberCreatedFrom(event.target.value)} /></label><label><span>To</span><input type="date" aria-label="Created to date" value={subscriberCreatedTo} min={subscriberCreatedFrom || undefined} onChange={(event) => setSubscriberCreatedTo(event.target.value)} /></label></fieldset></section>}</div>}{entity === 'customers' && <div className="subscriber-sort-control"><button className="outline-button subscriber-sort-trigger" type="button" aria-haspopup="menu" aria-expanded={subscriberSortMenuOpen} onClick={() => { setSubscriberFilterMenuOpen(false); setSubscriberSortMenuOpen((open) => !open) }}><ArrowUpDown size={15} /> Sort: {subscriberSortOptions.find((option) => option.value === subscriberSort)?.label}</button>{subscriberSortMenuOpen && <div className="subscriber-sort-menu" role="menu" aria-label="Sort subscribers">{subscriberSortOptions.map((option) => <button key={option.value} type="button" role="menuitemradio" aria-checked={subscriberSort === option.value} className={subscriberSort === option.value ? 'selected' : ''} onClick={() => { setSubscriberSort(option.value); setSubscriberSortMenuOpen(false) }}>{subscriberSort === option.value && <Check size={14} />}{option.label}</button>)}</div>}</div>}<input className="record-filter" value={recordFilter} onChange={(event) => setRecordFilter(event.target.value)} placeholder={`Filter ${labels[entity].toLowerCase()}...`} aria-label={`Filter ${labels[entity].toLowerCase()}`} /><button className="text-button" onClick={() => { void load().catch((reason) => setMessage(reason instanceof Error ? reason.message : 'Unable to refresh records.')) }}>Refresh</button></div></div>{message && entity !== 'customers' && <p className={`form-message${messageIsError ? ' is-error' : ''}`} role={messageIsError ? 'alert' : 'status'}>{message}</p>}<div className="table-scroll"><table><thead><tr>{entity === 'customers' ? <><th>Subscriber</th><th>PPPoE / Wi-Fi login</th><th>Plan</th><th>Account status</th><th>Expires</th><th>Actions</th></> : <><th>Name / ID</th><th>Status</th><th>Details</th><th /></>}</tr></thead><tbody>{filteredRows.map((row) => {
@@ -2775,7 +3003,10 @@ function CrudPanel({ entity, initialFilter = '', initialExpandedId = '', onIniti
       <td data-label="Expires">{expiry && Number.isFinite(expiry.getTime()) ? <><strong className="subscriber-expiry-value">{expiry.toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}</strong><span>{expiry.toLocaleTimeString('en-KE', { hour: 'numeric', minute: '2-digit' })}</span></> : <span className="subscriber-no-expiry">No expiry set</span>}</td>
       <td data-label="Actions"><div className="subscriber-actions">{row.radiusUsername ? <><button className="subscriber-details-toggle" type="button" aria-haspopup="dialog" aria-expanded={expandedDetailsId === String(row.id)} disabled={detailsLoadingId === String(row.id)} onClick={(event) => { subscriberDetailsTriggerRef.current = event.currentTarget; void toggleSubscriberDetails(String(row.id)) }}>{detailsLoadingId === String(row.id) ? 'Loading…' : 'View details'}</button>{status === 'active' ? <button className="text-button danger-text" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'suspended')}>Suspend</button> : editingExpiryId === String(row.id) ? <div className="subscriber-reactivation"><label>New expiry date and time<input type="datetime-local" aria-label={`New expiry for ${String(row.name || 'subscriber')}`} value={expiryInput} onChange={(event) => setExpiryInput(event.target.value)} /></label><button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{saving ? 'Saving...' : 'Confirm activation'}</button><button className="text-button danger-text" disabled={saving} onClick={() => setEditingExpiryId('')}>Cancel</button></div> : <button className="text-button" disabled={saving} onClick={() => void changeSubscriberStatus(row, 'active')}>{status === 'expired' ? 'Renew account' : 'Activate account'}</button>}<button className="text-button danger-text" disabled={saving} onClick={(event) => { subscriberDeleteTriggerRef.current = event.currentTarget; setSubscriberDeleteError(''); setSubscriberToDelete({ id: String(row.id), name: String(row.name || 'this subscriber') }) }}>Delete</button></> : <span>Login unavailable</span>}<button className="text-button subscriber-vip-action" type="button" aria-pressed={row.isVip === true} disabled={saving} onClick={() => void changeSubscriberVip(String(row.id), row.isVip !== true)}>{row.isVip === true ? 'Remove VIP' : 'Mark VIP'}</button><button className="text-button" type="button" disabled={!row.phone || sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(smsSubscriberId === String(row.id) ? '' : String(row.id)); setSmsDraft(''); setMessage(''); setMessageIsError(false) }}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send SMS'}</button></div>{smsSubscriberId === String(row.id) && <div className="subscriber-sms-compose"><label htmlFor={`subscriber-sms-${String(row.id)}`}>Message to {String(row.name || 'subscriber')}</label><textarea id={`subscriber-sms-${String(row.id)}`} value={smsDraft} onChange={(event) => setSmsDraft(event.target.value)} maxLength={500} rows={3} placeholder="Type your message..." /><span>{smsDraft.length}/500 characters</span><div><button className="text-button" type="button" disabled={!smsDraft.trim() || sendingSmsId === String(row.id)} onClick={() => void sendSubscriberSms(String(row.id))}>{sendingSmsId === String(row.id) ? 'Sending…' : 'Send message'}</button><button className="text-button" type="button" disabled={sendingSmsId === String(row.id)} onClick={() => { setSmsSubscriberId(''); setSmsDraft('') }}>Cancel</button></div></div>}</td>
     </tr></Fragment>
-    return <tr key={String(row.id)}><td><strong>{String(row.name || row.reference || row.id).slice(0, 34)}</strong></td><td><span className="table-status">{status}</span></td><td className="mono">{String(row.radiusUsername || row.location || row.email || row.monthlyPrice || row.amount || '')}</td><td><button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></td></tr>
+    if (entity === 'sites' && editingSiteId === String(row.id)) {
+      return <tr key={String(row.id)} className="site-edit-row"><td><input className="site-edit-name" value={editingSiteName} maxLength={120} onChange={(event) => setEditingSiteName(event.target.value)} aria-label="Site name" /></td><td><span className="table-status">{status}</span></td><td className="mono"><input className="site-edit-location" value={editingSiteLocation} maxLength={160} onChange={(event) => setEditingSiteLocation(event.target.value)} aria-label="Site location" /></td><td><div className="site-edit-actions"><button className="text-button" type="button" disabled={saving} onClick={() => void saveRenamedSite()}>{saving ? 'Saving…' : 'Save'}</button><button className="text-button danger-text" type="button" disabled={saving} onClick={cancelRenamingSite}>Cancel</button></div></td></tr>
+    }
+    return <tr key={String(row.id)}><td><strong>{String(row.name || row.reference || row.id).slice(0, 34)}</strong></td><td><span className="table-status">{status}</span></td><td className="mono">{entity === 'payments' ? <><strong>KSh {Number(row.amount || 0).toLocaleString('en-KE')}</strong><br /><span>{String(row.method || 'Payment')}</span>{typeof row.paidAt === 'string' && <><br /><time dateTime={row.paidAt}>{new Date(row.paidAt).toLocaleString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</time></>}</> : String(row.radiusUsername || row.location || row.email || row.monthlyPrice || '')}</td><td>{entity === 'sites' && <button className="text-button" type="button" disabled={saving} onClick={() => startRenamingSite(row)}>Rename</button>}<button className="text-button danger-text" disabled={saving} onClick={() => void remove(String(row.id))}>Delete</button></td></tr>
   })}{filteredRows.length === 0 && <tr className={entity === 'customers' ? 'subscriber-empty-row' : undefined}><td colSpan={4}>{rows.length === 0 && entity === 'customers' ? 'No subscribers yet. Add your first subscriber to this workspace.' : 'No matching records.'}</td></tr>}</tbody></table></div></div>
     {entity === 'customers' && subscriberToDelete && <div className="subscriber-delete-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) { setSubscriberToDelete(null); setSubscriberDeleteError(''); subscriberDeleteTriggerRef.current?.focus() } }}>
       <section className="subscriber-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="subscriber-delete-title" aria-describedby="subscriber-delete-description">
